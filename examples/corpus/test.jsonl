@@ -1,0 +1,1 @@
+{"schema_version":1,"conversation_id":"hello.test.001","source":"hello-slm-synthetic","license":"MIT","created_at":"2026-07-22T00:00:00Z","messages":[{"role":"user","content":"How do I answer a simple greeting?"},{"role":"assistant","content":"Reply with a warm hello and offer one useful next step."}]}

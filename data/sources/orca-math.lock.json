@@ -1,0 +1,31 @@
+{
+  "format_version": 1,
+  "source": {
+    "repo": "microsoft/orca-math-word-problems-200k",
+    "revision": "29255d1770cc4eac66e5e7fa378cba542c026350",
+    "url": "https://huggingface.co/datasets/microsoft/orca-math-word-problems-200k/resolve/29255d1770cc4eac66e5e7fa378cba542c026350/data/train-00000-of-00001.parquet",
+    "bytes": 84248748,
+    "sha256": "38513af71b04e2f710c6cd98f750bf72a87b7a4da1804caaa76f898585c1cfaf",
+    "rows": 200035,
+    "license": "MIT",
+    "rights_holder": "Microsoft",
+    "card_labels": {
+      "license": "MIT",
+      "answers": "synthetic via Azure GPT-4 Turbo"
+    }
+  },
+  "preparation_policy": {
+    "created_at": "2026-07-22T00:00:00Z",
+    "max_records": 50000,
+    "split_seed": 2101,
+    "split_ratios": {
+      "train": 0.98,
+      "validation": 0.01,
+      "test": 0.01
+    },
+    "max_question_chars": 600,
+    "max_answer_chars": 1200,
+    "max_combined_chars": 800,
+    "near_duplicate_mode": "exact_only"
+  }
+}

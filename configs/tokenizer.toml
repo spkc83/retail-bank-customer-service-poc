@@ -1,0 +1,40 @@
+format_version = 1
+name = "hello-slm-smoke-tokenizer"
+corpus_config_path = "configs/corpus.toml"
+output_path = "artifacts/smoke/tokenizer/tokenizer.json"
+algorithm = "restricted-bpe"
+vocab_size = 256
+min_pair_frequency = 1
+train_split = "train"
+seed = 1729
+interactive_unknown_policy = "reject"
+
+[special_tokens]
+pad = { token = "<|pad|>", id = 0 }
+unk = { token = "<|unk|>", id = 1 }
+bos = { token = "<|bos|>", id = 2 }
+eos = { token = "<|eos|>", id = 3 }
+system = { token = "<|system|>", id = 4 }
+user = { token = "<|user|>", id = 5 }
+assistant = { token = "<|assistant|>", id = 6 }
+end = { token = "<|end|>", id = 7 }
+
+[normalization]
+source = "configs/corpus.toml"
+additional_lossy_normalization_allowed = false
+
+[pre_tokenizer]
+preserve_special_tokens = true
+split = "allowed-word-runs-space-newline-single-punctuation"
+merge_across_special_tokens = false
+merge_across_message_boundaries = false
+
+[determinism]
+sort_conversations_by = "conversation_id"
+tie_break = ["frequency_desc", "left_token_lexicographic", "right_token_lexicographic"]
+fingerprint_algorithm = "sha256-canonical-json"
+
+[acceptance]
+require_byte_identical_retrain = true
+max_unknown_tokens_on_corpus = 0
+require_roundtrip_on_smoke_corpus = true

@@ -1,0 +1,100 @@
+format_version = 1
+
+[run]
+id = "arithmetic-30m"
+artifact_dir = "artifacts/arithmetic-30m"
+description = "Grade-school arithmetic tutor trained from scratch on prepared Orca Math conversations."
+allow_network = false
+
+[corpus]
+manifest_path = "data/arithmetic/manifest.json"
+restricted_to_manifest = true
+enforce_manifest_split_only = false
+near_duplicate_mode = "exact_only"
+
+[corpus.split]
+method = "conversation_id_sha256_mod"
+train = 0.98
+validation = 0.01
+test = 0.01
+
+[tokenizer]
+type = "restricted_bpe"
+vocab_size = 4096
+min_frequency = 2
+character_policy = "reject"
+normalization = "nfc"
+allowed_characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~\n"
+special_tokens = ["<|pad|>", "<|unk|>", "<|bos|>", "<|eos|>", "<|system|>", "<|user|>", "<|assistant|>", "<|end|>"]
+
+[dataset]
+max_seq_len = 640
+packing = "fixed_block"
+loss_mask = "assistant_only"
+drop_remainder = true
+
+[model]
+architecture = "decoder_only_causal_transformer"
+vocab_size = 4096
+max_seq_len = 640
+n_layers = 8
+d_model = 512
+n_heads = 8
+n_kv_heads = 8
+d_ff = 1536
+norm = "rmsnorm"
+mlp = "swiglu"
+rope_base = 10000.0
+dropout = 0.0
+tie_embeddings = true
+init_std = 0.02
+residual_init_scale = "deepnorm-lite"
+parameter_cap = 500000000
+
+[training]
+device = "cuda"
+precision = "bfloat16"
+allow_precision_fallback = false
+total_steps = 2000
+micro_batch_size = 8
+gradient_accumulation_steps = 8
+drop_last = true
+max_grad_norm = 1.0
+
+[training.optimizer]
+name = "adamw"
+learning_rate = 0.0003
+betas = [0.9, 0.95]
+eps = 0.00000001
+weight_decay = 0.1
+
+[training.scheduler]
+name = "warmup_cosine"
+warmup_steps = 100
+min_learning_rate = 0.00003
+
+[checkpointing]
+interval_steps = 100
+keep_last = 3
+atomic = true
+strict_resume = true
+
+[evaluation]
+interval_steps = 100
+eval_at_step_zero = true
+metrics = ["loss", "perplexity", "assistant_token_accuracy"]
+
+[generation]
+max_new_tokens = 128
+temperature = 0.2
+top_k = 20
+top_p = 0.9
+repetition_penalty = 1.05
+
+[seeds]
+corpus_split = 2101
+tokenizer = 2102
+dataset = 2103
+model = 2104
+dataloader = 2105
+generation = 2106

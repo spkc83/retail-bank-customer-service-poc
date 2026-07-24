@@ -1,0 +1,50 @@
+format_version = 1
+name = "hello-slm-synthetic-corpus"
+manifest_path = "examples/corpus/manifest.json"
+conversation_schema_path = "schemas/conversation.schema.json"
+manifest_schema_path = "schemas/corpus-manifest.schema.json"
+split_seed = 101
+enforce_manifest_split_only = true
+
+[license_policy]
+allowed_licenses = ["MIT"]
+require_training_consent = true
+reject_personal_data = true
+
+[normalization]
+unicode_form = "NFC"
+line_endings = "lf"
+replace_tabs_with_space = true
+strip_trailing_space = true
+max_blank_lines = 2
+
+[characters]
+policy = "explicit-ascii-allowlist"
+allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,!?'\":;-()/\n"
+reject_controls_except_lf = true
+reject_zero_width = true
+reject_private_use = true
+
+[deduplication]
+reject_exact_conversation_duplicates = true
+reject_exact_assistant_target_duplicates = true
+near_duplicate_threshold = 0.92
+allow_near_duplicates = false
+
+[contamination]
+reject_train_to_validation_exact = true
+reject_train_to_test_exact = true
+reject_cross_split_near_duplicates = true
+ngram_sizes = [5, 7, 9, 13]
+max_ngram_overlap_ratio = 0.05
+
+[split_ratios]
+train = 0.8
+validation = 0.1
+test = 0.1
+
+[acceptance]
+min_train_conversations = 3
+min_validation_conversations = 1
+min_test_conversations = 1
+max_unknown_tokens = 0

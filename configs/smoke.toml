@@ -1,0 +1,100 @@
+format_version = 1
+
+[run]
+id = "smoke"
+artifact_dir = "artifacts/smoke"
+description = "CPU hello-world pipeline check; proves validate, train, resume, eval, and chat plumbing."
+allow_network = false
+
+[corpus]
+manifest_path = "examples/corpus/manifest.json"
+restricted_to_manifest = true
+enforce_manifest_split_only = true
+near_duplicate_mode = "exhaustive"
+
+[corpus.split]
+method = "conversation_id_sha256_mod"
+train = 0.8
+validation = 0.1
+test = 0.1
+
+[tokenizer]
+type = "restricted_bpe"
+vocab_size = 256
+min_frequency = 1
+character_policy = "reject"
+normalization = "nfc"
+allowed_characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,!?'\":;-()/\\n"
+special_tokens = ["<|pad|>", "<|unk|>", "<|bos|>", "<|eos|>", "<|system|>", "<|user|>", "<|assistant|>", "<|end|>"]
+
+[dataset]
+max_seq_len = 128
+packing = "fixed_block"
+loss_mask = "assistant_only"
+drop_remainder = false
+
+[model]
+architecture = "decoder_only_causal_transformer"
+vocab_size = 256
+max_seq_len = 128
+n_layers = 2
+d_model = 64
+n_heads = 4
+n_kv_heads = 4
+d_ff = 192
+norm = "rmsnorm"
+mlp = "swiglu"
+rope_base = 10000.0
+dropout = 0.0
+tie_embeddings = true
+init_std = 0.02
+residual_init_scale = "deepnorm-lite"
+parameter_cap = 500000000
+
+[training]
+device = "cpu"
+precision = "float32"
+allow_precision_fallback = false
+total_steps = 8
+micro_batch_size = 2
+gradient_accumulation_steps = 2
+drop_last = false
+max_grad_norm = 1.0
+
+[training.optimizer]
+name = "adamw"
+learning_rate = 0.001
+betas = [0.9, 0.95]
+eps = 0.00000001
+weight_decay = 0.01
+
+[training.scheduler]
+name = "warmup_cosine"
+warmup_steps = 2
+min_learning_rate = 0.0001
+
+[checkpointing]
+interval_steps = 2
+keep_last = 3
+atomic = true
+strict_resume = true
+
+[evaluation]
+interval_steps = 2
+eval_at_step_zero = true
+metrics = ["loss", "perplexity", "assistant_token_accuracy"]
+
+[generation]
+max_new_tokens = 16
+temperature = 0.8
+top_k = 20
+top_p = 0.9
+repetition_penalty = 1.05
+
+[seeds]
+corpus_split = 101
+tokenizer = 102
+dataset = 103
+model = 104
+dataloader = 105
+generation = 106

@@ -1,0 +1,26 @@
+{
+  "format_version": 1,
+  "license": "MIT",
+  "name": "hello-slm-arithmetic-curriculum",
+  "provenance": "Self-authored deterministic synthetic arithmetic curriculum.",
+  "rights_holder": "Self-authored synthetic",
+  "source_type": "synthetic-generator",
+  "generator": {
+    "module": "hello_slm.prepare_arithmetic_curriculum",
+    "created_at": "2026-07-22T00:00:00Z",
+    "split_seed": 3101,
+    "split_ratios": {
+      "train": 0.98,
+      "validation": 0.01,
+      "test": 0.01
+    },
+    "fact_counts": {
+      "add": 10000,
+      "subtract": 10000,
+      "multiply": 2500,
+      "divide": 2500
+    },
+    "variants_per_fact": 2,
+    "conversation_count": 50000
+  }
+}
