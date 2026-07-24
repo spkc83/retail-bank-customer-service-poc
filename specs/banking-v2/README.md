@@ -90,6 +90,7 @@ I can only help with retail banking and financial-services questions. Please ask
 
 - [Model conversion and training](02-model-training.md)
 - [Evaluation and serving](03-evaluation-serving.md)
+- [Dense-to-MoE conversion and routing](04-dense-to-moe-routing.md)
 
 `data/banking-v2/` and downloaded source snapshots are generated local data and
 are ignored by Git. The source lock file remains tracked.
