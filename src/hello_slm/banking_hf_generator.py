@@ -118,6 +118,7 @@ class HuggingFaceBankingGenerator:
             torch_dtype=torch.bfloat16 if device.type == "cuda" else torch.float32,
             trust_remote_code=True,
         )
+        model.config.output_router_logits = False
         model.to(device)
         model.eval()
         self._tokenizer = tokenizer

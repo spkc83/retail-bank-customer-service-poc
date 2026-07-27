@@ -95,6 +95,8 @@ def test_generator_uses_apply_chat_template_and_lazy_load(
             return "You can open an account online or at a branch."
 
     class FakeModel:
+        config = SimpleNamespace(output_router_logits=True)
+
         def to(self, device: torch.device) -> FakeModel:
             return self
 
@@ -149,3 +151,5 @@ def test_generator_uses_apply_chat_template_and_lazy_load(
     assert calls["model"] == 1
     assert calls["template"] == 2
     assert calls["generate"] == 2
+    assert generator._model is not None
+    assert generator._model.config.output_router_logits is False
