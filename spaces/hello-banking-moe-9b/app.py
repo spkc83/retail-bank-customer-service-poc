@@ -19,6 +19,10 @@ import spaces
 
 MODEL_ID = "spkc83/hello-banking-moe-9b"
 MODEL_REVISION = "b2466ca4b157f420432a5e20a14573e83954deae"
+GPU_PENDING_RESPONSE = (
+    "The public interface is online, but GPU inference is not assigned yet. "
+    "The Space owner must enable ZeroGPU before this banking prompt can run."
+)
 SYSTEM_PROMPT = (
     "You are a retail banking support assistant. Help only with accounts, cards, transfers, "
     "payments, loans, fees, branches, ATMs, and related financial-services support. You "
@@ -27,16 +31,29 @@ SYSTEM_PROMPT = (
     "bank's official app, website, or verified phone number for account-specific help."
 )
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_ID,
-    revision=MODEL_REVISION,
-    dtype=torch.bfloat16,
-    device_map={"": 0},
-    low_cpu_mem_usage=True,
-)
-model.config.output_router_logits = False
-model.eval()
+tokenizer = None
+model = None
+if torch.cuda.is_available():
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID,
+        revision=MODEL_REVISION,
+        dtype=torch.bfloat16,
+        device_map={"": 0},
+        low_cpu_mem_usage=True,
+    )
+    model.config.output_router_logits = False
+    model.eval()
+
+
+def _gpu(**_kwargs: Any) -> Any:
+    def decorator(function: Any) -> Any:
+        return function
+
+    return decorator
+
+
+gpu = getattr(spaces, "GPU", _gpu)
 
 
 def bounded_messages(
@@ -57,8 +74,10 @@ def bounded_messages(
     ]
 
 
-@spaces.GPU(size="large", duration=120)
+@gpu(size="large", duration=120)
 def generate_banking(message: str, history: list[dict[str, Any]]) -> str:
+    if tokenizer is None or model is None:
+        return GPU_PENDING_RESPONSE
     messages = bounded_messages(message, history)
     rendered = tokenizer.apply_chat_template(
         messages,

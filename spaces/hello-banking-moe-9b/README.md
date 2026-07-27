@@ -9,7 +9,7 @@ app_file: app.py
 pinned: false
 models:
   - spkc83/hello-banking-moe-9b
-short_description: Guarded public chat demo for an experimental banking-focused MoE.
+short_description: Guarded chat demo for an experimental banking MoE.
 ---
 
 # Hello Banking MoE 9B demo
