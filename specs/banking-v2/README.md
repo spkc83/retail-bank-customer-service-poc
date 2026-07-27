@@ -12,7 +12,7 @@ does not claim that 24k SFT examples are sufficient for 9B pretraining.
   - Revision: `3e3621092fc6baaf7f53ceb6f091c60ae99acb67`.
 - `PolyAI/banking77`
   - License: `CC-BY-4.0`.
-  - Role: intent-router and evaluation only.
+  - Role: classifier-only intent-router training and evaluation.
   - Revision: `90d4e2ee5521c04fc1488f065b8b083658768c57`.
   - MUST NOT enter generative SFT files.
 - Talkmap
@@ -80,6 +80,8 @@ I can only help with retail banking and financial-services questions. Please ask
 - Zero Banking77 rows in generative SFT.
 - Zero trainable quarantined rows.
 - Banking77 router/eval rows are marked `trainable = false`.
+- Banking77 classifier rows may be trainable only under the separate governed
+  dual-head router manifest; they remain prohibited from generative SFT.
 - OOD canned-response duplicates occur only under `task = "ood_gate"`.
 - Every train, validation, and test split includes OOD examples and all four
   required multi-turn patterns.
@@ -91,6 +93,7 @@ I can only help with retail banking and financial-services questions. Please ask
 - [Model conversion and training](02-model-training.md)
 - [Evaluation and serving](03-evaluation-serving.md)
 - [Dense-to-MoE conversion and routing](04-dense-to-moe-routing.md)
+- [Dual-head domain and intent router](05-dual-head-router.md)
 
 `data/banking-v2/` and downloaded source snapshots are generated local data and
 are ignored by Git. The source lock file remains tracked.
