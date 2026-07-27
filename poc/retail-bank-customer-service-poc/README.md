@@ -2,7 +2,7 @@
 title: Retail Bank Customer Service POC
 emoji: 🏦
 colorFrom: blue
-colorTo: amber
+colorTo: yellow
 sdk: gradio
 sdk_version: 5.49.1
 app_file: app.py
@@ -13,7 +13,7 @@ models:
   - spkc83/hello-banking-dual-head-router
 datasets:
   - spkc83/hello-banking-dual-head-data
-short_description: Authenticated 9B model-driven banking service demo with synthetic data.
+short_description: Authenticated 9B retail-banking demo with synthetic data.
 ---
 
 # Retail Bank Customer Service POC
