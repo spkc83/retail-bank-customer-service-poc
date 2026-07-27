@@ -52,6 +52,17 @@ contains:
 PyTorch pickle is prohibited. Serving verifies the artifact manifest before
 loading tensors and does not require `trust_remote_code`.
 
+Classifier training defaults to the local NVIDIA GPU:
+
+```bash
+uv run scripts/banking_v2/train_dual_head_router.py
+```
+
+The script selects CUDA when available and uses the authenticated Hub only to
+read the governed public dataset and publish the final artifact. Paid Hugging
+Face Jobs are reserved for models that do not fit the local GPU and MUST NOT be
+used for classifier retraining without explicit authorization.
+
 ## Release gates
 
 The deployment threshold is selected on validation data with in-domain recall

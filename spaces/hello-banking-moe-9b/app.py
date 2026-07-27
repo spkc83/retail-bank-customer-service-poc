@@ -10,9 +10,9 @@ from policy import (
     OOD_RESPONSE,
     SENSITIVE_RESPONSE,
     generated_response_is_unsafe,
-    is_in_domain,
     is_sensitive,
 )
+from router import ROUTER_REVISION, LearnedBankingRouter, messages_for_route
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import spaces
@@ -33,6 +33,13 @@ SYSTEM_PROMPT = (
 
 tokenizer = None
 model = None
+router = None
+router_load_error = None
+try:
+    router = LearnedBankingRouter.from_hub()
+except Exception as error:
+    router_load_error = f"{type(error).__name__}: {error}"
+
 if torch.cuda.is_available():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
     model = AutoModelForCausalLM.from_pretrained(
@@ -104,9 +111,46 @@ def generate_banking(message: str, history: list[dict[str, Any]]) -> str:
 def respond(message: str, history: list[dict[str, Any]]) -> str:
     if is_sensitive(message):
         return SENSITIVE_RESPONSE
-    if not is_in_domain(message, history):
+    route = route_query(message, history)
+    if route["route"] != "in_domain":
         return OOD_RESPONSE
     return generate_banking(message, history)
+
+
+def route_query(
+    message: str,
+    history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Classify a request with the learned banking domain and intent router."""
+    if router is None:
+        return fail_closed_route(f"router unavailable: {router_load_error}")
+    try:
+        result = router.classify(messages_for_route(message, history))
+    except Exception as error:
+        return fail_closed_route(f"invalid request or router failure: {type(error).__name__}")
+    return {
+        "route": result.route,
+        "banking_probability": result.banking_probability,
+        "intent": result.intent,
+        "intent_confidence": result.intent_confidence,
+        "confidence": result.confidence,
+        "threshold": router.domain_threshold,
+        "router_revision": ROUTER_REVISION,
+        "reason": result.reason,
+    }
+
+
+def fail_closed_route(reason: str) -> dict[str, Any]:
+    return {
+        "route": "out_of_domain",
+        "banking_probability": None,
+        "intent": None,
+        "intent_confidence": None,
+        "confidence": 1.0,
+        "threshold": router.domain_threshold if router is not None else None,
+        "router_revision": ROUTER_REVISION,
+        "reason": f"failed closed: {reason}",
+    }
 
 
 EXAMPLES = [
@@ -117,22 +161,39 @@ EXAMPLES = [
     "Please tell me my account balance and PIN.",
 ]
 
-demo = gr.ChatInterface(
-    fn=respond,
-    type="messages",
-    title="Hello Banking MoE 9B",
-    description=(
-        "Experimental public demo of a banking-focused 8.94B-parameter MoE checkpoint. "
-        "The demo uses deterministic domain and secret-handling guards before model generation. "
-        "It cannot access real accounts or perform transactions. Do not enter sensitive data."
-    ),
-    examples=EXAMPLES,
-    chatbot=gr.Chatbot(height=520, layout="bubble"),
-    textbox=gr.Textbox(
-        placeholder="Ask about cards, accounts, transfers, payments, or loans…",
-        max_length=1_000,
-    ),
-)
+with gr.Blocks() as demo:
+    gr.ChatInterface(
+        fn=respond,
+        type="messages",
+        title="Hello Banking MoE 9B",
+        description=(
+            "Experimental public demo of a banking-focused 8.94B-parameter MoE checkpoint. "
+            "A learned dual-head classifier routes the banking domain and 77 intents before "
+            "generation. It cannot access real accounts or perform transactions. "
+            "Do not enter sensitive data."
+        ),
+        examples=EXAMPLES,
+        chatbot=gr.Chatbot(height=520, layout="bubble", type="messages"),
+        textbox=gr.Textbox(
+            placeholder="Ask about cards, accounts, transfers, payments, or loans…",
+            max_length=1_000,
+        ),
+    )
+    route_message = gr.Textbox(visible=False)
+    route_history = gr.JSON(visible=False)
+    route_output = gr.JSON(visible=False)
+    route_button = gr.Button(visible=False)
+    route_button.click(
+        route_query,
+        inputs=[route_message, route_history],
+        outputs=route_output,
+        api_name="route",
+        api_description=(
+            "Return the learned banking-domain probability and Banking77 intent. "
+            "History is an optional list of role/content objects."
+        ),
+        queue=False,
+    )
 
 if __name__ == "__main__":
     demo.queue(default_concurrency_limit=1).launch()

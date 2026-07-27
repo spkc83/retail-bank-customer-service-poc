@@ -10,6 +10,7 @@ pinned: false
 suggested_hardware: zero-a10g
 models:
   - spkc83/hello-banking-moe-9b
+  - spkc83/hello-banking-dual-head-router
 short_description: Guarded chat demo for an experimental banking MoE.
 ---
 
@@ -19,11 +20,17 @@ This public ZeroGPU Space runs the
 [`spkc83/hello-banking-moe-9b`](https://huggingface.co/spkc83/hello-banking-moe-9b)
 checkpoint for banking-support experiments.
 
-Deployment status: the public CPU frontend is live. ZeroGPU assignment is
-pending because the current Hugging Face OAuth credential cannot change Space
-hardware; in-domain generation reports that status until ZeroGPU is enabled.
+The CPU frontend uses the release-gated
+[`spkc83/hello-banking-dual-head-router`](https://huggingface.co/spkc83/hello-banking-dual-head-router)
+for calibrated domain routing and Banking77 intent prediction. The artifact is
+pinned by revision, hash-verified before loading, and fails closed if unavailable.
+The public `route` API returns its banking probability and predicted intent.
 
-The raw model is not production-safe. This demo applies deterministic
-out-of-domain and sensitive-data guards before generation and blocks generated
-requests for banking credentials. It cannot access accounts or perform
-transactions.
+ZeroGPU assignment remains pending because the current Hugging Face OAuth
+credential cannot change Space hardware; accepted banking prompts report that
+status until ZeroGPU is enabled.
+
+The raw generative model is not production-safe. This demo applies learned
+out-of-domain routing plus deterministic sensitive-data guards before
+generation, and blocks generated requests for banking credentials. It cannot
+access accounts or perform transactions.

@@ -24,7 +24,9 @@ data = [
 scale = [
   "accelerate>=1.12,<2",
   "datasets>=4.4,<5",
+  "huggingface-hub>=1.4,<2",
   "peft>=0.18,<0.19",
+  "safetensors>=0.6,<1",
   "transformers>=5.13,<5.14",
   "trl>=0.26,<0.27",
 ]

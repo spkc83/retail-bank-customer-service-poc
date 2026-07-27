@@ -25,6 +25,8 @@ class DomainRouteResult:
     confidence: float
     intent: str | None
     reason: str
+    banking_probability: float | None = None
+    intent_confidence: float | None = None
 
 
 class BankingDomainClassifier(Protocol):

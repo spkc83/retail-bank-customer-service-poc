@@ -14,19 +14,6 @@ def load_policy() -> ModuleType:
     return module
 
 
-def test_domain_route_handles_banking_ood_and_contextual_follow_up() -> None:
-    policy = load_policy()
-    history = [
-        {"role": "user", "content": "My card was declined."},
-        {"role": "assistant", "content": "Contact your bank."},
-    ]
-
-    assert policy.is_in_domain("How do I replace a debit card?", []) is True
-    assert policy.is_in_domain("What should I do next?", history) is True
-    assert policy.is_in_domain("What is the weather?", history) is False
-    assert policy.is_in_domain("Write Python code.", []) is False
-
-
 def test_sensitive_input_and_unsafe_generated_requests_are_blocked() -> None:
     policy = load_policy()
 
