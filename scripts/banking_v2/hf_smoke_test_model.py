@@ -94,6 +94,7 @@ def main() -> int:
         dtype=torch.bfloat16,
         device_map={"": 0},
     )
+    model.config.output_router_logits = False
     model.eval()
 
     results: list[dict[str, Any]] = []
