@@ -50,6 +50,7 @@ from hello_slm.banking_moe import (
 REMOTE_CONFIRMATION_ENV = "HELLO_SLM_ALLOW_REMOTE_TRAINING"
 REMOTE_CONFIRMATION_VALUE = "banking-v2"
 EXPERT_HEALTH_WINDOW_STEPS = 250
+PER_LAYER_ROUTER_AUX_LOSS_COEF = 0.1
 
 
 @dataclass(frozen=True)
@@ -383,6 +384,35 @@ def collect_router_assignments(router_logits: Sequence[Tensor], top_k: int) -> d
     return assignments
 
 
+def per_layer_router_aux_loss(
+    router_logits: Sequence[Tensor],
+    *,
+    num_experts: int,
+    top_k: int,
+    attention_mask: Tensor | None,
+) -> Tensor:
+    """Apply the pinned Qwen2-MoE load-balancing loss independently per layer."""
+
+    if not router_logits:
+        raise ValueError("router_logits must contain at least one layer")
+    from transformers.models.qwen2_moe.modeling_qwen2_moe import (
+        load_balancing_loss_func,
+    )
+
+    layer_losses: list[Tensor] = []
+    for layer_logits in router_logits:
+        layer_loss = load_balancing_loss_func(
+            (layer_logits,),
+            num_experts=num_experts,
+            top_k=top_k,
+            attention_mask=attention_mask,
+        )
+        if not isinstance(layer_loss, Tensor):
+            raise RuntimeError("Qwen2-MoE per-layer auxiliary loss did not return a tensor")
+        layer_losses.append(layer_loss)
+    return torch.stack(layer_losses).mean()
+
+
 def finite_scalar(value: Tensor | float | None) -> bool:
     if value is None:
         return False
@@ -615,6 +645,8 @@ def run_training_loop(
 
     model.train()
     last_loss = None
+    last_global_aux_loss = None
+    last_per_layer_aux_loss = None
     last_health: list[dict[str, Any]] = []
     health_window: ExpertHealthWindow | None = None
     step = 0
@@ -648,6 +680,23 @@ def run_training_loop(
             loss = outputs.loss
             if loss is None:
                 raise RuntimeError("model did not return a loss")
+            router_logits = outputs.router_logits or ()
+            model_config = (
+                accelerator.unwrap_model(model).config
+                if accelerator is not None
+                else model.config
+            )
+            per_layer_aux_loss = None
+            if router_logits:
+                per_layer_aux_loss = per_layer_router_aux_loss(
+                    router_logits,
+                    num_experts=int(model_config.num_experts),
+                    top_k=int(model_config.num_experts_per_tok),
+                    attention_mask=batch.get("attention_mask"),
+                )
+                loss = loss + (
+                    PER_LAYER_ROUTER_AUX_LOSS_COEF * per_layer_aux_loss.to(loss.device)
+                )
             if accelerator is not None:
                 accelerator.backward(loss)
             else:
@@ -667,14 +716,18 @@ def run_training_loop(
             scheduler.step()
             optimizer.zero_grad(set_to_none=True)
             last_loss = float(loss.detach().cpu().item())
+            last_global_aux_loss = (
+                float(outputs.aux_loss.detach().cpu().item())
+                if isinstance(outputs.aux_loss, Tensor)
+                else None
+            )
+            last_per_layer_aux_loss = (
+                float(per_layer_aux_loss.detach().cpu().item())
+                if per_layer_aux_loss is not None
+                else None
+            )
 
-            router_logits = outputs.router_logits or ()
             if router_logits:
-                model_config = (
-                    accelerator.unwrap_model(model).config
-                    if accelerator is not None
-                    else model.config
-                )
                 num_experts = int(model_config.num_experts)
                 if health_window is None or health_window.num_experts != num_experts:
                     health_window = ExpertHealthWindow.empty(num_experts=num_experts)
@@ -683,7 +736,11 @@ def run_training_loop(
                 )
                 health_window.add(
                     assignments,
-                    aux_loss=outputs.aux_loss,
+                    aux_loss=(
+                        last_per_layer_aux_loss
+                        if finite_scalar(outputs.aux_loss)
+                        else float("nan")
+                    ),
                     routed_down_grad_nonzero=grad_flags,
                 )
                 if health_window.ready:
@@ -694,6 +751,9 @@ def run_training_loop(
                         "optimizer_step": step,
                         "window_steps": health_window.steps,
                         "passed": expert_health_passed(health),
+                        "global_aux_loss": last_global_aux_loss,
+                        "per_layer_aux_loss": last_per_layer_aux_loss,
+                        "per_layer_aux_loss_coef": PER_LAYER_ROUTER_AUX_LOSS_COEF,
                         "layer_health": last_health,
                     }
                     if accelerator is None or accelerator.is_main_process:
@@ -762,6 +822,9 @@ def run_training_loop(
     return {
         "steps": step,
         "last_loss": last_loss,
+        "last_global_aux_loss": last_global_aux_loss,
+        "last_per_layer_aux_loss": last_per_layer_aux_loss,
+        "per_layer_aux_loss_coef": PER_LAYER_ROUTER_AUX_LOSS_COEF,
         "validation_loss": (
             validation_loss_sum / validation_batches if validation_batches else None
         ),

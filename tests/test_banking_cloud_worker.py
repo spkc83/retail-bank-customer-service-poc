@@ -34,6 +34,7 @@ remote_execution_allowed = worker.remote_execution_allowed
 tokenize_chat_records = worker.tokenize_chat_records
 ExpertHealthWindow = worker.ExpertHealthWindow
 expert_health_failure_message = worker.expert_health_failure_message
+per_layer_router_aux_loss = worker.per_layer_router_aux_loss
 
 
 def _worker_config(
@@ -211,6 +212,34 @@ def test_expert_health_windows_evaluate_and_reset_independently() -> None:
 
     assert second.ready
     assert not worker.expert_health_passed(second.health())
+
+
+def test_per_layer_router_aux_loss_penalizes_collapse_and_backpropagates() -> None:
+    balanced = worker.torch.zeros((8, 4), dtype=worker.torch.float32)
+    balanced[worker.torch.arange(8), worker.torch.arange(8) % 4] = 2.0
+    collapsed = worker.torch.zeros((8, 4), dtype=worker.torch.float32)
+    collapsed[:, 0] = 2.0
+    collapsed.requires_grad_()
+    attention_mask = worker.torch.ones((1, 8), dtype=worker.torch.long)
+
+    balanced_loss = per_layer_router_aux_loss(
+        (balanced,),
+        num_experts=4,
+        top_k=1,
+        attention_mask=attention_mask,
+    )
+    collapsed_loss = per_layer_router_aux_loss(
+        (collapsed,),
+        num_experts=4,
+        top_k=1,
+        attention_mask=attention_mask,
+    )
+    collapsed_loss.backward()
+
+    assert collapsed_loss > balanced_loss
+    assert collapsed.grad is not None
+    assert worker.torch.isfinite(collapsed.grad).all()
+    assert collapsed.grad.abs().sum().item() > 0
 
 
 def test_tiny_smoke_cli_trains_and_writes_checkpoint(tmp_path: Path) -> None:
