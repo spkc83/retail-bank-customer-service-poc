@@ -1,0 +1,32 @@
+[project]
+name = "retail-bank-customer-service-poc"
+version = "0.1.0"
+description = "Authenticated model-driven retail-bank customer-service POC with synthetic data"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+  "accelerate>=1.12,<2",
+  "gradio==5.49.1",
+  "huggingface-hub>=1.4,<2",
+  "safetensors>=0.6,<1",
+  "torch==2.9.1",
+  "transformers>=5.13,<5.14",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "ruff>=0.9",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

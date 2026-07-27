@@ -31,6 +31,7 @@ scale = [
   "trl>=0.26,<0.27",
 ]
 dev = [
+  "gradio==5.49.1",
   "mypy>=1.10",
   "pyarrow>=16",
   "pytest>=8",
@@ -49,7 +50,8 @@ hello_slm = ["arithmetic_chat.css"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
-testpaths = ["tests"]
+testpaths = ["tests", "poc/retail-bank-customer-service-poc/tests"]
+pythonpath = ["src", "poc/retail-bank-customer-service-poc"]
 
 [tool.mypy]
 files = ["src", "tests"]
