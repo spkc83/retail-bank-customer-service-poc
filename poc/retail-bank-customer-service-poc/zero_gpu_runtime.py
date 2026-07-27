@@ -3,8 +3,6 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import torch
-
 from model_service import ModelDrivenBankingService
 from policy import generated_response_is_unsafe
 from state import BANK
@@ -24,10 +22,13 @@ if SKIP_MODEL_LOAD:
             return decorator
 
     spaces: Any = _Spaces()
+    import torch
+
     tokenizer = None
     model = None
 else:
     import spaces
+    import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
