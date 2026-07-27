@@ -56,8 +56,8 @@ train_router = true
 train_routed_down_residuals = true
 freeze_routed_gate_up = true
 precision = "bf16"
-fsdp = "full_shard"
-hardware = "A100x4"
+fsdp = "single_process_disabled"
+hardware = "rtx-pro-6000"
 activation_checkpointing = true
 checkpoint_every_steps = 250
 resume_validation = true
@@ -67,11 +67,14 @@ resume_hash_checks = [
   "converted_state_manifest_sha256",
   "optimizer_scheduler_rng_state",
 ]
-max_wallclock_hours = 10
-max_budget_usd = 100
+max_wallclock_hours = 5
+max_budget_usd = 13.75
 
 [expert_health]
 warmup_steps = 250
+gate_interval_steps = 250
+observation_window_steps = 50
+exclude_padded_tokens = true
 min_assignment_fraction = 0.005
 max_assignment_fraction = 0.20
 min_normalized_entropy = 0.75

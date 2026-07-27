@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 import os
+import random
 import sys
 import time
 from collections.abc import Mapping, Sequence
@@ -49,8 +50,10 @@ from hello_slm.banking_moe import (
 
 REMOTE_CONFIRMATION_ENV = "HELLO_SLM_ALLOW_REMOTE_TRAINING"
 REMOTE_CONFIRMATION_VALUE = "banking-v2"
-EXPERT_HEALTH_WINDOW_STEPS = 250
-PER_LAYER_ROUTER_AUX_LOSS_COEF = 0.4
+TRAINING_SEED = 7101
+EXPERT_HEALTH_GATE_INTERVAL_STEPS = 250
+EXPERT_HEALTH_WINDOW_STEPS = 50
+PER_LAYER_ROUTER_AUX_LOSS_COEF = 0.3
 
 
 @dataclass(frozen=True)
@@ -376,12 +379,54 @@ def collate_batch(batch: Sequence[dict[str, Tensor]]) -> dict[str, Tensor]:
     }
 
 
-def collect_router_assignments(router_logits: Sequence[Tensor], top_k: int) -> dict[int, Tensor]:
+def collect_router_assignments(
+    router_logits: Sequence[Tensor],
+    top_k: int,
+    *,
+    attention_mask: Tensor | None = None,
+) -> dict[int, Tensor]:
+    active_tokens = (
+        attention_mask.detach().reshape(-1).bool() if attention_mask is not None else None
+    )
     assignments: dict[int, Tensor] = {}
     for layer, logits in enumerate(router_logits):
         expert_ids, _ = topk_assignments(logits.detach(), top_k=top_k, normalize=True)
+        if active_tokens is not None:
+            if active_tokens.numel() != expert_ids.shape[0]:
+                raise ValueError(
+                    "attention mask token count does not match flattened router logits"
+                )
+            expert_ids = expert_ids[active_tokens.to(device=expert_ids.device)]
         assignments[layer] = expert_ids.cpu()
     return assignments
+
+
+def expert_health_observation_step(
+    step: int,
+    *,
+    gate_interval_steps: int = EXPERT_HEALTH_GATE_INTERVAL_STEPS,
+    window_steps: int = EXPERT_HEALTH_WINDOW_STEPS,
+) -> bool:
+    """Return whether a step belongs to the end-of-interval health snapshot."""
+
+    if step <= 0:
+        raise ValueError("step must be positive")
+    if gate_interval_steps <= 0 or window_steps <= 0:
+        raise ValueError("health interval and window must be positive")
+    if window_steps > gate_interval_steps:
+        raise ValueError("health window cannot exceed gate interval")
+    interval_position = ((step - 1) % gate_interval_steps) + 1
+    return interval_position > gate_interval_steps - window_steps
+
+
+def seed_training(seed: int = TRAINING_SEED) -> torch.Generator:
+    """Seed training randomness and return a dedicated shuffle generator."""
+
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    return torch.Generator(device="cpu").manual_seed(seed)
 
 
 def per_layer_router_aux_loss(
@@ -568,6 +613,7 @@ def save_checkpoint_metadata(
         "generative_dataset": str(config.manifest),
         "dataset_identity": dataset_identity(config.manifest),
         "conversion_manifest_sha256": conversion_manifest_sha256,
+        "training_seed": TRAINING_SEED,
         "ood_stock_response": BANKING_V2_OOD_STOCK_RESPONSE,
         "trainable_counts": trainable_counts,
         "expert_health": expert_health,
@@ -597,6 +643,7 @@ def run_training_loop(
     use_accelerate: bool,
     conversion_manifest_sha256: str | None = None,
 ) -> dict[str, Any]:
+    shuffle_generator = seed_training()
     trainable_counts = apply_banking_v2_trainable_policy(model)
     optimizer = torch.optim.AdamW(
         [parameter for parameter in model.parameters() if parameter.requires_grad],
@@ -609,6 +656,7 @@ def run_training_loop(
         TokenizedChatDataset(train_examples),
         batch_size=config.batch_size,
         shuffle=True,
+        generator=shuffle_generator,
         collate_fn=collate_batch,
     )
     validation_loader = DataLoader(
@@ -639,6 +687,11 @@ def run_training_loop(
             model.gradient_checkpointing_enable()
         model.config.use_cache = False
         accelerator = Accelerator(mixed_precision="bf16", fsdp_plugin=fsdp_plugin)
+        if accelerator.num_processes != 1:
+            raise RuntimeError(
+                "expert-health aggregation is single-process only; "
+                "distributed execution requires cross-rank health reduction"
+            )
         model, optimizer, scheduler, loader, validation_loader = accelerator.prepare(
             model, optimizer, scheduler, loader, validation_loader
         )
@@ -661,6 +714,8 @@ def run_training_loop(
             raise ValueError("resume dataset identity does not match")
         if metadata.get("conversion_manifest_sha256") != conversion_manifest_sha256:
             raise ValueError("resume converted-state manifest does not match")
+        if metadata.get("training_seed") != TRAINING_SEED:
+            raise ValueError("resume training seed does not match")
         state_path = config.resume_from / "state"
         required_state_groups = ("optimizer", "scheduler", "random_states")
         state_names = [path.name for path in state_path.iterdir()]
@@ -727,12 +782,14 @@ def run_training_loop(
                 else None
             )
 
-            if router_logits:
+            if router_logits and expert_health_observation_step(step):
                 num_experts = int(model_config.num_experts)
                 if health_window is None or health_window.num_experts != num_experts:
                     health_window = ExpertHealthWindow.empty(num_experts=num_experts)
                 assignments = collect_router_assignments(
-                    router_logits, top_k=int(model_config.num_experts_per_tok)
+                    router_logits,
+                    top_k=int(model_config.num_experts_per_tok),
+                    attention_mask=batch.get("attention_mask"),
                 )
                 health_window.add(
                     assignments,
@@ -825,6 +882,7 @@ def run_training_loop(
         "last_global_aux_loss": last_global_aux_loss,
         "last_per_layer_aux_loss": last_per_layer_aux_loss,
         "per_layer_aux_loss_coef": PER_LAYER_ROUTER_AUX_LOSS_COEF,
+        "training_seed": TRAINING_SEED,
         "validation_loss": (
             validation_loss_sum / validation_batches if validation_batches else None
         ),

@@ -50,15 +50,19 @@ equivalence at absolute tolerance `1e-5` before any optimizer update.
 
 ## Optimization
 
-Use BF16, activation checkpointing, and full-shard FSDP on four 80GB A100 GPUs.
+Use BF16 and activation checkpointing. The authorized example run uses one RTX
+PRO 6000 and a single process; the worker rejects multi-process execution until
+expert-health counts and decisions are reduced across ranks.
 Freeze copied attention, normalization, embedding, shared-expert, and routed
 gate/up weights. Train router weights and routed residual down projections.
 Checkpoint every 250 optimizer steps. A resume must verify the base revision,
 dataset fingerprint, converted-state manifest hash, optimizer, scheduler, and
 random-number-generator state.
 
-After the 250-step routing warm-up, stop a run that violates any expert-health
-gate:
+At the end of the 250-step routing warm-up, evaluate a masked routing snapshot
+over steps 201 through 250. Repeat the gate every 250 steps using the final 50
+steps of that interval. Exclude padded token positions from assignment counts,
+and stop a run that violates any expert-health gate:
 
 - every expert assignment fraction is at least 0.5%
 - no expert assignment fraction exceeds 20%
@@ -68,8 +72,8 @@ gate:
 
 ## Compute and authorization
 
-The proposed Hugging Face Jobs flavor is `a100x4` (four A100 GPUs, 320GB total).
-The operator cap is 10 hours and USD 100. The intended destination is the
-private Hub repository `spkc83/hello-banking-moe-9b`. Creating that repository
-or starting paid compute requires explicit operator approval; local dry runs
-must never imply that training occurred.
+The authorized Hugging Face Jobs flavor is `rtx-pro-6000`. The operator cap is
+5 hours. The intended destination is the private Hub repository
+`spkc83/hello-banking-moe-9b`. Creating that repository or starting paid compute
+requires explicit operator approval; local dry runs must never imply that
+training occurred.

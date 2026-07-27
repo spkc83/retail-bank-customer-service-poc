@@ -51,8 +51,10 @@ def publish_status(
         "stage": stage,
         "source_commit": source_commit,
         "hardware": "rtx-pro-6000",
+        "world_size": 1,
         "timeout_seconds": 18_000,
         "max_steps": 1_000,
+        "training_seed": 7_101,
         "per_layer_router_aux_loss_coef": per_layer_aux_coef,
         **extra,
     }

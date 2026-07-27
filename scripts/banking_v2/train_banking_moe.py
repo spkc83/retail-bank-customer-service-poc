@@ -69,9 +69,9 @@ def build_job_plan(config_path: str | Path, hub_dest: str) -> dict[str, Any]:
         "private_hub_repo": True,
         "job": {
             "provider": "hugging-face-jobs",
-            "flavor": "a100x4",
-            "timeout": "10h",
-            "maximum_budget_usd": 100,
+            "flavor": "rtx-pro-6000",
+            "timeout": "5h",
+            "maximum_budget_usd": 13.75,
         },
         "pins": pins.__dict__,
         "model": {
@@ -126,7 +126,7 @@ def build_job_plan(config_path: str | Path, hub_dest: str) -> dict[str, Any]:
         "approval_gated_next_actions": [
             "package and upload the local source plus prepared corpus for the ephemeral job",
             "create the private destination model repository",
-            "submit the paid A100x4 job with a 10-hour timeout",
+            "submit the paid single-process RTX PRO 6000 job with a 5-hour timeout",
         ],
     }
 

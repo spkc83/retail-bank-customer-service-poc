@@ -161,6 +161,51 @@ def test_expert_health_window_accumulates_assignments_across_steps() -> None:
     assert worker.expert_health_passed(health)
 
 
+def test_router_assignment_health_excludes_padded_tokens() -> None:
+    logits = worker.torch.full((18, 28), -10.0)
+    for token in range(14):
+        logits[token, token * 2 : token * 2 + 2] = 10.0
+    logits[14:, :2] = 10.0
+    attention_mask = worker.torch.tensor([[1] * 14 + [0] * 4])
+
+    assignments = worker.collect_router_assignments(
+        (logits,),
+        top_k=2,
+        attention_mask=attention_mask,
+    )
+    window = ExpertHealthWindow.empty(num_experts=28, target_steps=1)
+    window.add(
+        assignments,
+        aux_loss=worker.torch.tensor(0.01),
+        routed_down_grad_nonzero={0: True},
+    )
+
+    assert assignments[0].shape == (14, 2)
+    health = window.health()
+    assert health[0].min_assignment_fraction == pytest.approx(1 / 28)
+    assert health[0].max_assignment_fraction == pytest.approx(1 / 28)
+    assert worker.expert_health_passed(health)
+
+
+def test_expert_health_observes_final_fifty_steps_of_each_interval() -> None:
+    observed = {step for step in range(1, 501) if worker.expert_health_observation_step(step)}
+
+    assert observed == set(range(201, 251)) | set(range(451, 501))
+
+
+def test_training_seed_reproduces_torch_and_shuffle_randomness() -> None:
+    first_generator = worker.seed_training()
+    first_global = worker.torch.rand(4)
+    first_shuffle = worker.torch.randperm(16, generator=first_generator)
+
+    second_generator = worker.seed_training()
+    second_global = worker.torch.rand(4)
+    second_shuffle = worker.torch.randperm(16, generator=second_generator)
+
+    assert worker.torch.equal(first_global, second_global)
+    assert worker.torch.equal(first_shuffle, second_shuffle)
+
+
 def test_expert_health_failure_message_includes_layer_health_json() -> None:
     window = ExpertHealthWindow.empty(num_experts=28, target_steps=1)
     window.add(
@@ -270,6 +315,7 @@ def test_tiny_smoke_cli_trains_and_writes_checkpoint(tmp_path: Path) -> None:
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert metadata["ood_stock_response"] == BANKING_V2_OOD_STOCK_RESPONSE
     assert metadata["base_revision"] == "989aa7980e4cf806f80c7fef2b1adb7bc71aa306"
+    assert metadata["training_seed"] == worker.TRAINING_SEED
 
 
 def test_worker_cli_default_is_dry_run() -> None:

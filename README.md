@@ -155,8 +155,8 @@ not from-scratch 9B pretraining: the available corpus is far too small to
 pretrain a capable 9B general language model from random initialization.
 
 The local code/specification and tiny MoE backward smoke tests do not mean the
-9B checkpoint has been trained. The proposed paid run uses four 80GB A100 GPUs,
-has a 10-hour/USD 100 cap, and targets the private Hub repository
+9B checkpoint has been trained. The authorized paid run uses one RTX PRO 6000,
+has a 5-hour/USD 13.75 cap, and targets the private Hub repository
 `spkc83/hello-banking-moe-9b`. Paid compute and external repository creation are
 approval-gated.
 
