@@ -73,7 +73,7 @@ and stop a run that violates any expert-health gate:
 ## Compute and authorization
 
 The authorized Hugging Face Jobs flavor is `rtx-pro-6000`. The operator cap is
-5 hours. The intended destination is the private Hub repository
-`spkc83/hello-banking-moe-9b`. Creating that repository or starting paid compute
-requires explicit operator approval; local dry runs must never imply that
-training occurred.
+5 hours. The released destination is the public Hub repository
+`spkc83/hello-banking-moe-9b`. Creating that repository, changing its
+visibility, or starting paid compute requires explicit operator approval; local
+dry runs must never imply that training occurred.
