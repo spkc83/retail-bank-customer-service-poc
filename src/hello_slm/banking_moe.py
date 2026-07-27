@@ -397,8 +397,11 @@ def routed_down_grad_flags(model: Any) -> dict[int, bool]:
             layer = int(parts[parts.index("layers") + 1])
         except (IndexError, ValueError):
             continue
+        grad = parameter.grad.detach() if parameter.grad is not None else None
         flags[layer] = bool(
-            parameter.grad is not None and parameter.grad.detach().abs().sum().item() > 0
+            grad is not None
+            and torch.isfinite(grad).all().item()
+            and grad.abs().sum().item() > 0
         )
     return flags
 

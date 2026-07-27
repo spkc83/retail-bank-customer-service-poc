@@ -32,6 +32,8 @@ build_dry_run_plan = worker.build_dry_run_plan
 load_manifest_records = worker.load_manifest_records
 remote_execution_allowed = worker.remote_execution_allowed
 tokenize_chat_records = worker.tokenize_chat_records
+ExpertHealthWindow = worker.ExpertHealthWindow
+expert_health_failure_message = worker.expert_health_failure_message
 
 
 def _worker_config(
@@ -137,6 +139,78 @@ def test_manifest_loader_supports_banking_v2_contract(tmp_path: Path) -> None:
     )
 
     assert load_manifest_records(manifest_path, "train") == [record]
+
+
+def test_expert_health_window_accumulates_assignments_across_steps() -> None:
+    window = ExpertHealthWindow.empty(num_experts=28, target_steps=28)
+    for expert_id in range(28):
+        window.add(
+            {0: worker.torch.full((16, 2), expert_id, dtype=worker.torch.long)},
+            aux_loss=worker.torch.tensor(0.01),
+            routed_down_grad_nonzero={0: expert_id == 4},
+        )
+
+    health = window.health()
+
+    assert window.steps == 28
+    assert window.ready is True
+    assert health[0].min_assignment_fraction == pytest.approx(1 / 28)
+    assert health[0].max_assignment_fraction == pytest.approx(1 / 28)
+    assert health[0].routed_down_grad_nonzero is True
+    assert worker.expert_health_passed(health)
+
+
+def test_expert_health_failure_message_includes_layer_health_json() -> None:
+    window = ExpertHealthWindow.empty(num_experts=28, target_steps=1)
+    window.add(
+        {0: worker.torch.zeros((16, 2), dtype=worker.torch.long)},
+        aux_loss=worker.torch.tensor(float("nan")),
+        routed_down_grad_nonzero={0: False},
+    )
+    health = [worker.asdict(item) for item in window.health()]
+
+    message = expert_health_failure_message(
+        step=250,
+        health_window=window,
+        last_health=health,
+    )
+
+    assert "expert-health gate failed at optimizer step 250" in message
+    assert "window_steps=1" in message
+    assert "layer_health=" in message
+    assert '"aux_loss_finite": false' in message
+    assert '"max_assignment_fraction": 1.0' in message
+
+
+def test_expert_health_windows_evaluate_and_reset_independently() -> None:
+    balanced = worker.torch.arange(28, dtype=worker.torch.long).reshape(14, 2)
+    first = ExpertHealthWindow.empty(num_experts=28, target_steps=2)
+    for _ in range(2):
+        first.add(
+            {0: balanced},
+            aux_loss=worker.torch.tensor(0.01),
+            routed_down_grad_nonzero={0: True},
+        )
+
+    assert first.ready
+    assert worker.expert_health_passed(first.health())
+    with pytest.raises(RuntimeError, match="must be evaluated"):
+        first.add(
+            {0: balanced},
+            aux_loss=worker.torch.tensor(0.01),
+            routed_down_grad_nonzero={0: True},
+        )
+
+    second = ExpertHealthWindow.empty(num_experts=28, target_steps=2)
+    for _ in range(2):
+        second.add(
+            {0: worker.torch.zeros((14, 2), dtype=worker.torch.long)},
+            aux_loss=worker.torch.tensor(0.01),
+            routed_down_grad_nonzero={0: True},
+        )
+
+    assert second.ready
+    assert not worker.expert_health_passed(second.health())
 
 
 def test_tiny_smoke_cli_trains_and_writes_checkpoint(tmp_path: Path) -> None:

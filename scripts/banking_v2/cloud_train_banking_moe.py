@@ -13,9 +13,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
+import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -32,12 +34,13 @@ from hello_slm.banking_moe import (
     BANKING_V2_OOD_STOCK_RESPONSE,
     BANKING_V2_TOTAL_PARAMETERS,
     BankingV2Pins,
+    ExpertHealthThresholds,
+    LayerExpertHealth,
     apply_banking_v2_trainable_policy,
     banking_v2_qwen2_moe_config,
     banking_v2_training_summary,
     convert_dense_qwen_to_banking_moe_state,
     effective_parameter_count,
-    expert_assignment_health,
     expert_health_passed,
     routed_down_grad_flags,
     tiny_qwen2_moe_config,
@@ -46,6 +49,7 @@ from hello_slm.banking_moe import (
 
 REMOTE_CONFIRMATION_ENV = "HELLO_SLM_ALLOW_REMOTE_TRAINING"
 REMOTE_CONFIRMATION_VALUE = "banking-v2"
+EXPERT_HEALTH_WINDOW_STEPS = 250
 
 
 @dataclass(frozen=True)
@@ -379,6 +383,138 @@ def collect_router_assignments(router_logits: Sequence[Tensor], top_k: int) -> d
     return assignments
 
 
+def finite_scalar(value: Tensor | float | None) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, Tensor):
+        return bool(torch.isfinite(value.detach()).all().item())
+    return math.isfinite(float(value))
+
+
+def expert_assignment_health_from_counts(
+    counts_by_layer: Mapping[int, Tensor],
+    *,
+    num_experts: int,
+    aux_loss_finite: bool,
+    routed_down_grad_nonzero: Mapping[int, bool],
+    thresholds: ExpertHealthThresholds | None = None,
+) -> list[LayerExpertHealth]:
+    """Evaluate expert health from a window of accumulated assignment counts."""
+
+    thresholds = thresholds or ExpertHealthThresholds()
+    results: list[LayerExpertHealth] = []
+    for layer, counts in sorted(counts_by_layer.items()):
+        counts = counts.detach().cpu().float()
+        fractions = counts / counts.sum().clamp_min(1.0)
+        nonzero = fractions[fractions > 0]
+        entropy = (
+            -(nonzero * nonzero.log()).sum() / math.log(num_experts)
+            if len(nonzero)
+            else torch.tensor(0.0)
+        )
+        min_fraction = float(fractions.min().item())
+        max_fraction = float(fractions.max().item())
+        entropy_value = float(entropy.item())
+        grad_ok = bool(routed_down_grad_nonzero.get(layer, False))
+        passed = (
+            min_fraction >= thresholds.min_assignment_fraction
+            and max_fraction <= thresholds.max_assignment_fraction
+            and entropy_value >= thresholds.min_normalized_entropy
+            and aux_loss_finite
+            and grad_ok
+        )
+        results.append(
+            LayerExpertHealth(
+                layer=layer,
+                min_assignment_fraction=min_fraction,
+                max_assignment_fraction=max_fraction,
+                normalized_entropy=entropy_value,
+                aux_loss_finite=aux_loss_finite,
+                routed_down_grad_nonzero=grad_ok,
+                passed=passed,
+            )
+        )
+    return results
+
+
+@dataclass
+class ExpertHealthWindow:
+    """Accumulate router health over a non-overlapping post-warmup window."""
+
+    num_experts: int
+    counts_by_layer: dict[int, Tensor]
+    routed_down_grad_seen: dict[int, bool]
+    target_steps: int = EXPERT_HEALTH_WINDOW_STEPS
+    aux_losses_finite: bool = True
+    steps: int = 0
+
+    @classmethod
+    def empty(
+        cls,
+        num_experts: int,
+        *,
+        target_steps: int = EXPERT_HEALTH_WINDOW_STEPS,
+    ) -> ExpertHealthWindow:
+        if target_steps <= 0:
+            raise ValueError("target_steps must be positive")
+        return cls(
+            num_experts=num_experts,
+            counts_by_layer={},
+            routed_down_grad_seen={},
+            target_steps=target_steps,
+        )
+
+    @property
+    def ready(self) -> bool:
+        return self.steps == self.target_steps
+
+    def add(
+        self,
+        assignments_by_layer: Mapping[int, Tensor],
+        *,
+        aux_loss: Tensor | float | None,
+        routed_down_grad_nonzero: Mapping[int, bool],
+    ) -> None:
+        if self.ready:
+            raise RuntimeError("expert-health window must be evaluated before adding another step")
+        self.steps += 1
+        self.aux_losses_finite = self.aux_losses_finite and finite_scalar(aux_loss)
+        for layer, assignments in assignments_by_layer.items():
+            flat = assignments.detach().reshape(-1).to(dtype=torch.long, device="cpu")
+            counts = torch.bincount(flat, minlength=self.num_experts).float()
+            existing = self.counts_by_layer.get(layer)
+            self.counts_by_layer[layer] = counts if existing is None else existing + counts
+            self.routed_down_grad_seen[layer] = bool(
+                self.routed_down_grad_seen.get(layer, False)
+                or routed_down_grad_nonzero.get(layer, False)
+            )
+
+    def health(self) -> list[LayerExpertHealth]:
+        if not self.ready:
+            raise RuntimeError(
+                f"expert-health window has {self.steps} steps; requires {self.target_steps}"
+            )
+        return expert_assignment_health_from_counts(
+            self.counts_by_layer,
+            num_experts=self.num_experts,
+            aux_loss_finite=self.aux_losses_finite,
+            routed_down_grad_nonzero=self.routed_down_grad_seen,
+        )
+
+
+def expert_health_failure_message(
+    *,
+    step: int,
+    health_window: ExpertHealthWindow,
+    last_health: list[dict[str, Any]],
+) -> str:
+    return (
+        f"expert-health gate failed at optimizer step {step}; "
+        f"window_steps={health_window.steps}; "
+        f"layer_health={json.dumps(last_health, sort_keys=True)}"
+    )
+
+
 def save_checkpoint_metadata(
     output_dir: Path,
     *,
@@ -480,6 +616,7 @@ def run_training_loop(
     model.train()
     last_loss = None
     last_health: list[dict[str, Any]] = []
+    health_window: ExpertHealthWindow | None = None
     step = 0
     if config.resume_from is not None:
         if accelerator is None:
@@ -538,20 +675,42 @@ def run_training_loop(
                     if accelerator is not None
                     else model.config
                 )
+                num_experts = int(model_config.num_experts)
+                if health_window is None or health_window.num_experts != num_experts:
+                    health_window = ExpertHealthWindow.empty(num_experts=num_experts)
                 assignments = collect_router_assignments(
                     router_logits, top_k=int(model_config.num_experts_per_tok)
                 )
-                health = expert_assignment_health(
+                health_window.add(
                     assignments,
-                    num_experts=int(model_config.num_experts),
                     aux_loss=outputs.aux_loss,
                     routed_down_grad_nonzero=grad_flags,
                 )
-                last_health = [asdict(item) for item in health]
-                if step >= 250 and not expert_health_passed(health):
-                    raise RuntimeError(
-                        f"expert-health gate failed at optimizer step {step}; stopping run"
-                    )
+                if health_window.ready:
+                    health = health_window.health()
+                    last_health = [asdict(item) for item in health]
+                    telemetry = {
+                        "event": "expert_health",
+                        "optimizer_step": step,
+                        "window_steps": health_window.steps,
+                        "passed": expert_health_passed(health),
+                        "layer_health": last_health,
+                    }
+                    if accelerator is None or accelerator.is_main_process:
+                        print(
+                            json.dumps(telemetry, sort_keys=True),
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    if not expert_health_passed(health):
+                        raise RuntimeError(
+                            expert_health_failure_message(
+                                step=step,
+                                health_window=health_window,
+                                last_health=last_health,
+                            )
+                        )
+                    health_window = ExpertHealthWindow.empty(num_experts=num_experts)
 
             if step % config.checkpoint_every == 0 or step == config.max_steps:
                 save_checkpoint_metadata(

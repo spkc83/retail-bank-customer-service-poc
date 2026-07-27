@@ -177,6 +177,12 @@ def test_tiny_moe_forward_backward_exercises_routing_and_gradients() -> None:
     assert all(flags.values())
     assert math.isfinite(float(outputs.aux_loss.detach()))
 
+    for name, parameter in model.named_parameters():
+        if ".layers.0.mlp.experts.down_proj" in name and parameter.grad is not None:
+            parameter.grad.reshape(-1)[0] = float("nan")
+            break
+    assert routed_down_grad_flags(model)[0] is False
+
 
 def test_dense_logit_equivalence_report_carries_dense_details() -> None:
     dense_logits = torch.tensor([[[1.0, 2.0]]])
