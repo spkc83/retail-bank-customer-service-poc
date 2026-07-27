@@ -53,7 +53,7 @@ def _worker_config(
         run_tiny_smoke=False,
         allow_remote_execution=allow_remote,
         push_to_hub=False,
-        hub_dest="spkc83/hello-banking-moe-9b",
+        hub_dest="spkc83/retail-bank-servicing-moe-9b",
     )
 
 

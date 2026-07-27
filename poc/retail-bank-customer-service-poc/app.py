@@ -243,12 +243,13 @@ with gr.Blocks(
                 type="messages",
                 placeholder="Ask the model to inspect or update the synthetic bank profile.",
             )
-            gr.ChatInterface(
+            chat_interface = gr.ChatInterface(
                 fn=respond,
                 type="messages",
                 chatbot=chatbot,
                 additional_outputs=[snapshot_panel, activity_panel],
                 examples=PRESETS,
+                cache_examples=False,
                 example_labels=[
                     "Balances",
                     "Transactions",

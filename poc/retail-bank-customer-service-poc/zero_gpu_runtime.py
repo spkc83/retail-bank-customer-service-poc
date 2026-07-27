@@ -9,7 +9,7 @@ from model_service import ModelDrivenBankingService
 from policy import generated_response_is_unsafe
 from state import BANK
 
-MODEL_ID = "spkc83/hello-banking-moe-9b"
+MODEL_ID = "spkc83/retail-bank-servicing-moe-9b"
 MODEL_REVISION = "b2466ca4b157f420432a5e20a14573e83954deae"
 SKIP_MODEL_LOAD = os.environ.get("POC_SKIP_MODEL_LOAD") == "1"
 

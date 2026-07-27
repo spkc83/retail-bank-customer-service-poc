@@ -255,7 +255,7 @@ def test_banking_v2_job_script_is_dry_run_guarded() -> None:
         capture_output=True,
     )
 
-    assert '"hub_dest": "spkc83/hello-banking-moe-9b"' in result.stdout
+    assert '"hub_dest": "spkc83/retail-bank-servicing-moe-9b"' in result.stdout
     assert '"base_revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306"' in result.stdout
     assert '"total_parameters": 8943713792' in result.stdout
     assert '"estimated_trainable_parameters"' in result.stdout

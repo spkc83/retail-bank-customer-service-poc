@@ -24,7 +24,7 @@ from typing import Any
 
 from huggingface_hub import HfApi
 
-HUB_DEST = "spkc83/hello-banking-moe-9b"
+HUB_DEST = "spkc83/retail-bank-servicing-moe-9b"
 ROOT = Path("/tmp/hello-slm-banking-v2")
 
 

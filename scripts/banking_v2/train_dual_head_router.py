@@ -27,9 +27,9 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModel, AutoTokenizer, get_linear_schedule_with_warmup
 
-DATASET_ID = "spkc83/hello-banking-dual-head-data"
+DATASET_ID = "spkc83/retail-bank-router-training-data"
 DATASET_REVISION = "96383306134a9f3331dd47cd936e65a70c585d99"
-DESTINATION_ID = "spkc83/hello-banking-dual-head-router"
+DESTINATION_ID = "spkc83/retail-bank-domain-intent-router"
 BASE_MODEL_ID = "distilbert/distilbert-base-uncased"
 BASE_MODEL_REVISION = "12040accade4e8a0f71eabdb258fecc2e7e948be"
 SEED = 7101
@@ -262,7 +262,7 @@ def main() -> int:
     history = []
     best_score = -math.inf
 
-    with tempfile.TemporaryDirectory(prefix="hello-banking-router-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="retail-bank-router-") as temp_dir:
         best_path = Path(temp_dir) / "best.safetensors"
         for epoch in range(1, EPOCHS + 1):
             training_loss = train_epoch(
@@ -521,7 +521,7 @@ def publish_artifact(
     metrics: dict[str, Any],
     token: str,
 ) -> None:
-    with tempfile.TemporaryDirectory(prefix="hello-banking-router-release-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="retail-bank-router-release-") as temp_dir:
         output = Path(temp_dir)
         model.encoder.save_pretrained(output, safe_serialization=True)
         tokenizer.save_pretrained(output)
@@ -621,7 +621,7 @@ tags:
   - out-of-domain-detection
 ---
 
-# Hello Banking dual-head router
+# Retail Bank domain-intent router
 
 DistilBERT shared encoder with a binary supported-banking/OOD head and a
 77-way Banking77 intent head. The intent loss is masked for CLINC rows.

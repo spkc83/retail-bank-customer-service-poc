@@ -15,7 +15,7 @@ from safetensors.torch import load_file
 from torch import nn
 from transformers import AutoModel, AutoTokenizer
 
-ROUTER_REPO_ID = "spkc83/hello-banking-dual-head-router"
+ROUTER_REPO_ID = "spkc83/retail-bank-domain-intent-router"
 ROUTER_REVISION = "e7d928e5cf8c8be0883625f276c4e6c85c35eaf1"
 
 

@@ -9,9 +9,9 @@ tags:
   - qwen2-moe
 ---
 
-# Hello Banking MoE 9B
+# Retail Bank Servicing MoE 9B
 
-Hello Banking MoE 9B is an experimental retail-banking support model. It expands
+Retail Bank Servicing MoE 9B is an experimental retail-banking support model. It expands
 the language representations of `Qwen/Qwen2.5-1.5B-Instruct` into a
 Qwen2-MoE checkpoint and adapts the routed residual experts and routers on a
 restricted banking-support corpus.
@@ -80,7 +80,7 @@ external domain and sensitive-data controls.
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-model_id = "spkc83/hello-banking-moe-9b"
+model_id = "spkc83/retail-bank-servicing-moe-9b"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = AutoModelForCausalLM.from_pretrained(
     model_id,

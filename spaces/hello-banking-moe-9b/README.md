@@ -9,19 +9,19 @@ app_file: app.py
 pinned: false
 suggested_hardware: zero-a10g
 models:
-  - spkc83/hello-banking-moe-9b
-  - spkc83/hello-banking-dual-head-router
+  - spkc83/retail-bank-servicing-moe-9b
+  - spkc83/retail-bank-domain-intent-router
 short_description: Guarded chat demo for an experimental banking MoE.
 ---
 
 # Hello Banking MoE 9B demo
 
 This public ZeroGPU Space runs the
-[`spkc83/hello-banking-moe-9b`](https://huggingface.co/spkc83/hello-banking-moe-9b)
+[`spkc83/retail-bank-servicing-moe-9b`](https://huggingface.co/spkc83/retail-bank-servicing-moe-9b)
 checkpoint for banking-support experiments.
 
 The CPU frontend uses the release-gated
-[`spkc83/hello-banking-dual-head-router`](https://huggingface.co/spkc83/hello-banking-dual-head-router)
+[`spkc83/retail-bank-domain-intent-router`](https://huggingface.co/spkc83/retail-bank-domain-intent-router)
 for calibrated domain routing and Banking77 intent prediction. The artifact is
 pinned by revision, hash-verified before loading, and fails closed if unavailable.
 The public `route` API returns its banking probability and predicted intent.

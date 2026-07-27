@@ -21,7 +21,7 @@ import torch
 from huggingface_hub import HfApi
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-MODEL_ID = "spkc83/hello-banking-moe-9b"
+MODEL_ID = "spkc83/retail-bank-servicing-moe-9b"
 MODEL_REVISION = "b2466ca4b157f420432a5e20a14573e83954deae"
 SYSTEM_PROMPT = (
     "You are a retail banking support assistant. Help with accounts, cards, transfers, "

@@ -17,7 +17,7 @@ from torch import Tensor
 
 BANKING_V2_BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 BANKING_V2_BASE_REVISION = "989aa7980e4cf806f80c7fef2b1adb7bc71aa306"
-BANKING_V2_HUB_DEST = "spkc83/hello-banking-moe-9b"
+BANKING_V2_HUB_DEST = "spkc83/retail-bank-servicing-moe-9b"
 BANKING_V2_TOTAL_PARAMETERS = 8_943_713_792
 BANKING_V2_ACTIVE_PARAMETERS = 2_073_443_840
 BANKING_V2_GENERATIVE_DATASET = "data/banking-v2/manifest.json"

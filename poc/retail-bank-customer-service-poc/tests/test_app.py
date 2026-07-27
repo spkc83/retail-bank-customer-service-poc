@@ -35,6 +35,7 @@ def test_app_constructs_expected_authenticated_api_surface(app_module) -> None:
         "alex.demo",
         "maya.demo",
     }
+    assert app_module.chat_interface.cache_examples is False
 
 
 def test_cpu_guards_bypass_zero_gpu_model_call(app_module, monkeypatch) -> None:

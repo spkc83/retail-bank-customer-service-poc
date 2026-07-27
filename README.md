@@ -157,7 +157,7 @@ pretrain a capable 9B general language model from random initialization.
 The local code/specification and tiny MoE backward smoke tests do not mean the
 9B checkpoint has been trained. The authorized paid run uses one RTX PRO 6000,
 has a 5-hour/USD 13.75 cap, and targets the private Hub repository
-`spkc83/hello-banking-moe-9b`. Paid compute and external repository creation are
+`spkc83/retail-bank-servicing-moe-9b`. Paid compute and external repository creation are
 approval-gated.
 
 Inspect the guarded job plan and run the offline tiny training loop:

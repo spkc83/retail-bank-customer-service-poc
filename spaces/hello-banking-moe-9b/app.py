@@ -17,7 +17,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import spaces
 
-MODEL_ID = "spkc83/hello-banking-moe-9b"
+MODEL_ID = "spkc83/retail-bank-servicing-moe-9b"
 MODEL_REVISION = "b2466ca4b157f420432a5e20a14573e83954deae"
 GPU_PENDING_RESPONSE = (
     "The public interface is online, but GPU inference is not assigned yet. "
