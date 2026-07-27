@@ -75,7 +75,7 @@ class TransformersGenerator:
         return str(tokenizer.decode(new_ids, skip_special_tokens=True)).strip()
 
 
-@spaces.GPU(size="large", duration=90)
+@spaces.GPU(size="xlarge", duration=90)
 def run_model_service(
     username: str,
     session_hash: str,
