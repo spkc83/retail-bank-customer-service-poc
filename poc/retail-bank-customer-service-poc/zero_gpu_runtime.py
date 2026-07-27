@@ -36,9 +36,9 @@ else:
         MODEL_ID,
         revision=MODEL_REVISION,
         dtype=torch.bfloat16,
-        device_map={"": 0},
         low_cpu_mem_usage=True,
     )
+    model.to("cuda")
     model.config.output_router_logits = False
     model.eval()
 
