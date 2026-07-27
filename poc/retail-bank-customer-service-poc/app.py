@@ -6,6 +6,9 @@ import html
 import os
 from typing import Any
 
+if os.environ.get("POC_SKIP_MODEL_LOAD") != "1":
+    import spaces  # noqa: F401
+
 import gradio as gr
 
 from auth import load_demo_auth
