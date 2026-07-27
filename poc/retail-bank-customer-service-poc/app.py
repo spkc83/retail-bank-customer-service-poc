@@ -306,5 +306,6 @@ if __name__ == "__main__":
         auth_message=(
             "<strong>Synthetic demo only.</strong> Use one of the two provided test accounts."
         ),
+        ssr_mode=False,
         show_error=False,
     )
