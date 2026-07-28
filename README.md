@@ -185,6 +185,8 @@ The deployable Gradio source is in
 - authorization checks for synthetic writes;
 - CPU session-isolated synthetic SQLite state;
 - stateless ZeroGPU 9B response finalization over sanitized tool results;
+- labeled deterministic repair when a model draft is incomplete or contradicts
+  verified workflow results;
 - preset read, write, multi-turn, sensitive-data, and OOD cases.
 
 The public Space is operational on ZeroGPU. Authenticated end-to-end checks

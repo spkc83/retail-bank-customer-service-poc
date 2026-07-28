@@ -87,7 +87,9 @@ storage, allowing successive ZeroGPU workers to share the same session state.
 Read-only requests can execute multiple backend reads in one response, such as
 transfers plus recent transactions. The mailing-address history preset is
 backed by the limited synthetic service-case records, not a full profile-change
-audit table.
+audit table. Server validation uses a labeled deterministic grounded repair for
+multi-read answers and for model drafts that omit required balance labels,
+the limited-history qualifier, or verified workflow values.
 
 Write workflows require explicit customer language such as “freeze,”
 “replace,” “dispute,” or “cancel.” The planner permits only one write per user
@@ -97,7 +99,9 @@ last four digits, transfer recipient or amount, or latest purchase, to exactly
 one synthetic backend record. Unknown, completed, or ambiguous targets fail
 safely. Write actions commit only after the ZeroGPU model's final answer passes
 credential, unsafe-output, and internal-identifier validation; unavailable or
-unsafe finalization rolls back the synthetic action.
+unsafe finalization rolls back the synthetic action. A contradictory or
+incomplete write acknowledgement is replaced with a response rendered only
+from the verified action result before commit.
 
 ## Authentication
 

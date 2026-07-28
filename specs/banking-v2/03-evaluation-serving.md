@@ -51,7 +51,9 @@ The 9B model is a grounded response finalizer. It receives only sanitized,
 verified workflow results and must not invent balances, dates, identifiers,
 statuses, or actions. Server-side validation rejects empty, unsafe, or
 internal-identifier-bearing final responses. For writes, finalizer failure
-rolls back the synthetic backend transaction.
+rolls back the synthetic backend transaction. Multi-read responses and
+incomplete or contradictory factual drafts use a labeled deterministic
+rendering of the verified workflow results.
 
 ## Multi-turn behavior
 

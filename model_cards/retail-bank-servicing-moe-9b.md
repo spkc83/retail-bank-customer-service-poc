@@ -155,8 +155,9 @@ this checkpoint is a stateless grounded finalizer:
 5. The ZeroGPU model receives sanitized verified workflow results and writes
    the customer-facing answer.
 6. Server-side validation rejects empty, unsafe, or internal-identifier-bearing
-   final responses. Write actions roll back if finalization is unavailable or
-   unsafe.
+   final responses. Multi-read and incomplete or contradictory factual drafts
+   use a labeled deterministic rendering of verified results. Write actions
+   roll back if finalization is unavailable or unsafe.
 
 Read-only workflows can bundle multiple supported reads, such as transfers plus
 recent transactions. Account-changing workflows are limited to one explicit
