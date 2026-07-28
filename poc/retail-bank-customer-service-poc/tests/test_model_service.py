@@ -152,7 +152,16 @@ def test_cancel_transfer_repairs_malformed_model_selection_from_learned_intent()
         username="alex.demo",
         session_hash="session",
         message="I want to cancel the transfer of $450 to River Consulting.",
-        history=[],
+        history=[
+            {
+                "role": "user",
+                "content": "Hello, what a nice day today. How are you doing?",
+            },
+            {
+                "role": "assistant",
+                "content": "I can only help with this synthetic retail-banking demo.",
+            },
+        ],
         intent_hint="cancel_transfer",
     )
 
@@ -217,6 +226,28 @@ def test_grounding_payload_formats_money_without_leaving_raw_cents() -> None:
                 "current_balance": "USD 12,500.00",
             }
         ]
+    }
+
+
+def test_grounding_payload_omits_internal_record_identifiers() -> None:
+    grounded = _grounding_payload(
+        {
+            "transfer": {
+                "transfer_id": "tr_alex_river",
+                "from_account_id": "acct_alex_checking",
+                "recipient": "River Consulting",
+                "amount_cents": 45_000,
+                "currency": "USD",
+            }
+        }
+    )
+
+    assert grounded == {
+        "transfer": {
+            "recipient": "River Consulting",
+            "amount": "USD 450.00",
+            "currency": "USD",
+        }
     }
 
 

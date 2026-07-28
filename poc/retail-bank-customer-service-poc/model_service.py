@@ -109,8 +109,9 @@ Every customer and banking record is synthetic. For every banking request, call 
 provided tool before answering. Never invent balances, identifiers, status, or actions. Never
 request a PIN, CVV, password, one-time code, or complete card/account number. Tool actions are
 simulations only. Tool results contain display-ready monetary strings; copy those strings
-exactly and never recalculate them. After receiving the tool result, answer clearly and mention
-that any action was performed only in the synthetic demo."""
+exactly and never recalculate them. Never describe an internal record identifier as an account
+number. After receiving the tool result, answer clearly and mention that any action was
+performed only in the synthetic demo."""
 
 INTENT_TOOL_HINTS = {
     "cancel_transfer": "cancel_transfer",
@@ -440,6 +441,8 @@ def _grounding_payload(value: Any) -> Any:
     currency = str(value.get("currency", "USD"))
     grounded: dict[str, Any] = {}
     for key, item in value.items():
+        if isinstance(key, str) and (key.endswith("_id") or key == "login"):
+            continue
         if (
             isinstance(key, str)
             and key.endswith("_cents")
