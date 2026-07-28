@@ -80,6 +80,12 @@ isolated, TTL-limited database cloned from the immutable synthetic seed. The
 database files live only in the Space's temporary runtime storage, allowing
 successive ZeroGPU workers to share the same session state.
 
+If ZeroGPU allocation fails, read-only workflows return a clearly labeled,
+verified CPU rendering of the same sanitized synthetic backend results. This
+keeps customer inspection usable without presenting the fallback as model
+output. Writes never use that fallback and remain uncommitted unless model
+finalization succeeds.
+
 ## Supported workflows
 
 - list accounts, balances, cards, transactions, transfers, and service cases;

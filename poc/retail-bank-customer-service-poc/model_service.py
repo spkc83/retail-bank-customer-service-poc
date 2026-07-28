@@ -155,6 +155,15 @@ class GroundedBankingService:
         )
 
 
+def verified_read_response(raw_results: dict[str, Any]) -> str:
+    if not raw_results or any(
+        not isinstance(tool, str) or not tool.startswith("list_")
+        for tool in raw_results
+    ):
+        raise ValueError("verified fallback accepts read-only workflow results")
+    return _deterministic_grounded_response(_grounding_payload(raw_results))
+
+
 def _bounded_messages(
     message: str,
     history: list[dict[str, Any]],

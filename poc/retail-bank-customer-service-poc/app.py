@@ -24,7 +24,11 @@ else:
 import gradio as gr
 
 from auth import load_demo_auth
-from model_service import GroundedBankingService, ModelResponseError
+from model_service import (
+    GroundedBankingService,
+    ModelResponseError,
+    verified_read_response,
+)
 from orchestration import plan_workflow
 from policy import (
     MODEL_FAILURE_RESPONSE,
@@ -255,11 +259,22 @@ def fail_pending_turn(
         completed = canonical_history
         activity = "↺ The failed model turn was discarded after the demo session reset."
     else:
-        completed = _with_assistant_turn(history, message, MODEL_FAILURE_RESPONSE)
-        activity = (
-            "⚠️ ZeroGPU could not allocate or complete the model turn. "
-            "No synthetic write was committed."
+        fallback = _read_failure_fallback(
+            username,
+            session_hash,
+            message,
+            history,
+            request,
         )
+        if fallback is None:
+            response = MODEL_FAILURE_RESPONSE
+            activity = (
+                "⚠️ ZeroGPU could not allocate or complete the model turn. "
+                "No synthetic write was committed."
+            )
+        else:
+            response, activity = fallback
+        completed = _with_assistant_turn(history, message, response)
     return (
         completed,
         completed,
@@ -493,6 +508,49 @@ def _pending_turn(
     if not isinstance(epoch, int) or isinstance(epoch, bool):
         raise ValueError("pending model turn has an invalid epoch")
     return message.strip(), _canonical_history(history), epoch
+
+
+def _read_failure_fallback(
+    username: str,
+    session_hash: str,
+    message: str,
+    history: list[dict[str, str]],
+    request: gr.Request,
+) -> tuple[str, str] | None:
+    try:
+        _, _, plan, direct = _prepare_request(message, history, request)
+        if (
+            direct is not None
+            or plan is None
+            or plan.category not in {"single_read", "multi_read"}
+        ):
+            return None
+        calls = tuple(
+            (
+                tool,
+                {"limit": 5} if tool == "list_transactions" else {},
+            )
+            for tool in plan.read_tools
+        )
+        raw_results = BANK.execute_read_bundle(
+            username,
+            session_hash,
+            calls,
+        )
+        workflow_label = " + ".join(plan.read_tools)
+        response = (
+            f"{verified_read_response(raw_results)}\n\n"
+            f"---\n_Model workflow: "
+            f"`{workflow_label.replace(' + ', '` + `')}` · "
+            "verified CPU read fallback · ZeroGPU unavailable_"
+        )
+        activity = (
+            "⚠️ ZeroGPU was unavailable, so the server returned a verified "
+            "read-only rendering of the synthetic backend results. No write ran."
+        )
+        return response, activity
+    except (RuntimeError, TypeError, ValueError):
+        return None
 
 
 with gr.Blocks(
