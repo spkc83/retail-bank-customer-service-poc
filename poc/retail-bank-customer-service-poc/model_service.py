@@ -144,7 +144,10 @@ class GroundedBankingService:
             raise ModelResponseError("model returned an unsafe final response")
         if _contains_internal_identifier(response, raw_results):
             raise ModelResponseError("model exposed an internal identifier")
-        if _contains_ungrounded_money(response, grounded_results):
+        if _contains_ungrounded_money(
+            response,
+            grounded_results,
+        ) or _violates_account_balance_contract(response, grounded_results):
             return FinalizedAnswer(
                 response=_deterministic_grounded_response(grounded_results),
                 selection_source="grounded_repair",
@@ -358,6 +361,31 @@ def _contains_ungrounded_money(
         return False
     allowed = set(_DISPLAY_MONEY.findall(str(grounded_results)))
     return not displayed <= allowed
+
+
+def _violates_account_balance_contract(
+    response: str,
+    grounded_results: dict[str, Any],
+) -> bool:
+    payload = grounded_results.get("list_accounts")
+    if not isinstance(payload, dict):
+        return False
+    accounts = payload.get("accounts")
+    if not isinstance(accounts, list):
+        return False
+    required_values = {
+        str(item[key])
+        for item in accounts
+        if isinstance(item, dict)
+        for key in ("available_balance", "current_balance")
+        if isinstance(item.get(key), str)
+    }
+    normalized = response.lower()
+    return (
+        "available" not in normalized
+        or "current" not in normalized
+        or not required_values <= set(_DISPLAY_MONEY.findall(response))
+    )
 
 
 def _deterministic_grounded_response(grounded_results: dict[str, Any]) -> str:

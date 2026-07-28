@@ -290,3 +290,23 @@ def test_ungrounded_model_money_is_replaced_with_verified_backend_values() -> No
     assert "USD 3,300.12 current" in reply.response
     assert "USD 9,999.99" not in reply.response
     assert "All data and actions shown here are synthetic." in reply.response
+
+
+def test_incomplete_account_balance_answer_is_replaced_with_labeled_values() -> None:
+    finalizer = RecordingFinalizer(
+        ["Your checking account balance is USD 3,300.12."]
+    )
+    service = GroundedBankingService(bank=bank(), finalizer=finalizer)
+    message = "What is my checking account balance?"
+
+    reply = service.execute(
+        username="alex.demo",
+        session_hash="session",
+        message=message,
+        history=[],
+        plan=plan_workflow(message, [], route(intent="cash_withdrawal")),
+    )
+
+    assert reply.selection_source == "grounded_repair"
+    assert "USD 3,245.67 available" in reply.response
+    assert "USD 3,300.12 current" in reply.response
