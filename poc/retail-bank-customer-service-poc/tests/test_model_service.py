@@ -287,5 +287,6 @@ def test_ungrounded_model_money_is_replaced_with_verified_backend_values() -> No
 
     assert reply.selection_source == "grounded_repair"
     assert "USD 3,245.67" in reply.response
+    assert "USD 3,300.12 current" in reply.response
     assert "USD 9,999.99" not in reply.response
     assert "All data and actions shown here are synthetic." in reply.response

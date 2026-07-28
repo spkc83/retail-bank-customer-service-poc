@@ -368,7 +368,8 @@ def _deterministic_grounded_response(grounded_results: dict[str, Any]) -> str:
         if tool == "list_accounts":
             lines.extend(
                 f"- {item['name']} ending {item['last4']}: "
-                f"{item['available_balance']} available ({item['status']})."
+                f"{item['available_balance']} available; "
+                f"{item['current_balance']} current ({item['status']})."
                 for item in payload.get("accounts", [])
             )
         elif tool == "list_cards":
