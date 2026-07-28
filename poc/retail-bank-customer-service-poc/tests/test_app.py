@@ -83,12 +83,135 @@ def test_direct_paths_bypass_model_finalizer(
     assert "No backend tool" in activity
 
 
-def test_registered_chat_handler_is_the_zero_gpu_boundary(app_module) -> None:
-    assert app_module.respond._zero_gpu_config == {
+def test_only_registered_model_turn_is_the_zero_gpu_boundary(app_module) -> None:
+    assert not hasattr(app_module.respond, "_zero_gpu_config")
+    assert not hasattr(app_module.dispatch_turn, "_zero_gpu_config")
+    assert app_module.finalize_turn._zero_gpu_config == {
         "size": "large",
         "duration": 90,
     }
     assert not hasattr(app_module.generate_final_answer, "_zero_gpu_config")
+
+
+def test_cpu_dispatch_completes_casual_greeting_without_pending_gpu_turn(
+    app_module,
+) -> None:
+    result = app_module.dispatch_turn("yo, sup ?", [], 0, request())
+
+    visible_history = result[1]
+    canonical_history = result[2]
+    pending_turn = result[5]
+    assert visible_history == canonical_history
+    assert visible_history[-1]["role"] == "assistant"
+    assert "customer-service assistant" in visible_history[-1]["content"]
+    assert pending_turn == pytest.importorskip("gradio").skip()
+
+
+def test_cpu_dispatch_schedules_supported_read_without_running_finalizer(
+    app_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def should_not_run(*_args, **_kwargs):
+        raise AssertionError("CPU dispatch must not run the ZeroGPU finalizer")
+
+    monkeypatch.setattr(app_module, "generate_final_answer", should_not_run)
+
+    result = app_module.dispatch_turn(
+        "ok ok, what transfers are there on my account ?",
+        [],
+        4,
+        request(),
+    )
+
+    visible_history = result[1]
+    canonical_history = result[2]
+    pending_turn = result[5]
+    assert canonical_history == []
+    assert visible_history[-1]["role"] == "assistant"
+    assert "9B model" in visible_history[-1]["content"]
+    assert pending_turn["message"] == (
+        "ok ok, what transfers are there on my account ?"
+    )
+    assert pending_turn["history"] == []
+    assert pending_turn["epoch"] == 4
+    assert pending_turn["turn_id"]
+    assert "username" not in pending_turn
+    assert "session_hash" not in pending_turn
+
+
+def test_registered_gpu_turn_replaces_pending_answer_with_grounded_response(
+    app_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        app_module,
+        "generate_final_answer",
+        lambda *_args: (
+            "Your synthetic transfers are USD 450.00 to River Consulting, pending, "
+            "and USD 125.00 to Jamie Lee, completed."
+        ),
+    )
+    pending = {
+        "turn_id": "turn-1",
+        "message": "What transfers are there on my account?",
+        "history": [],
+        "epoch": 2,
+    }
+
+    result = app_module.finalize_turn(pending, 2, [], request())
+
+    visible_history = result[0]
+    canonical_history = result[1]
+    assert visible_history == canonical_history
+    assert "River Consulting" in visible_history[-1]["content"]
+    assert "Jamie Lee" in visible_history[-1]["content"]
+    assert "Model workflow: `list_transfers`" in visible_history[-1]["content"]
+
+
+def test_stale_gpu_turn_after_reset_executes_nothing(
+    app_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def should_not_run(*_args, **_kwargs):
+        raise AssertionError("stale turn must not route, execute, or finalize")
+
+    monkeypatch.setattr(app_module, "respond", should_not_run)
+    current_history = [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Fresh reset session"},
+    ]
+    pending = {
+        "turn_id": "old-turn",
+        "message": "Cancel my pending transfer.",
+        "history": [],
+        "epoch": 3,
+    }
+
+    result = app_module.finalize_turn(pending, 4, current_history, request())
+
+    assert result[0] == current_history
+    assert result[1] == current_history
+    assert "expired" in result[3].lower()
+
+
+def test_gpu_allocation_failure_replaces_pending_turn_without_mutation(
+    app_module,
+) -> None:
+    pending = {
+        "turn_id": "failed-write",
+        "message": "Cancel my pending transfer.",
+        "history": [],
+        "epoch": 5,
+    }
+
+    result = app_module.fail_pending_turn(pending, 5, [], request())
+
+    visible_history = result[0]
+    canonical_history = result[1]
+    assert visible_history == canonical_history
+    assert "could not produce" in visible_history[-1]["content"]
+    assert "No synthetic write was committed" in result[3]
+    assert "`pending`" in result[2]
 
 
 def test_sensitive_guard_bypasses_router_and_zero_gpu(

@@ -31,9 +31,9 @@ bank, cannot access real accounts, and cannot perform real transactions.
 ## Current deployment status
 
 Static authentication, the learned domain/intent router, OOD refusal, and the
-synthetic dashboard are live. The public ChatInterface is designed for a
-deterministic workflow path with stateless ZeroGPU finalization on an RTX PRO
-6000 Blackwell ZeroGPU partition, including read bundles and one-write-at-a-time
+synthetic dashboard are live. The public Gradio Blocks application uses a CPU
+dispatch event and a separately registered ZeroGPU model event on an RTX PRO
+6000 Blackwell partition. It supports read bundles and one-write-at-a-time
 synthetic actions for both authenticated demo users.
 
 ## Live artifacts
@@ -57,8 +57,9 @@ clean public documentation.
 
 ```text
 Static login
-  → ZeroGPU-managed /chat event
-  → CPU dual-head domain/intent router and deterministic capability planner
+  → CPU /chat dispatch, credential guard, dual-head router, and capability planner
+  → direct conversational/policy response, or a unique pending model turn
+  → registered ZeroGPU model event for backend-executing workflows only
   → server validates workflow, arguments, identity scope, and write authorization
   → per-session ephemeral SQLite executes against synthetic records
   → 9B finalizer receives sanitized grounded results when a model answer is needed
@@ -69,13 +70,15 @@ Credential-bearing requests are rejected before model inference. The
 capability planner handles greetings and acknowledgements directly, returns a
 stock response for explicit non-banking subjects, and returns an honest
 unsupported-banking response when the request is financial-services related but
-outside the POC backend. The registered `/chat` event is the ZeroGPU boundary
-required by the hosted runtime; direct policy responses still skip neural
-generation after allocation. Customer identity is derived only from Gradio
-authentication. Tool arguments cannot select a customer. Each browser page
-session receives an isolated, TTL-limited database cloned from the immutable
-synthetic seed. The database files live only in the Space's temporary runtime
-storage, allowing successive ZeroGPU workers to share the same session state.
+outside the POC backend. Those direct paths never allocate ZeroGPU. Only a
+model-backed pending turn changes the hidden session state that triggers the
+registered GPU event. The input and reset controls remain disabled until model
+success or failure, and a reset epoch invalidates stale queued turns. Customer
+identity is derived only from Gradio authentication, never from pending state.
+Tool arguments cannot select a customer. Each browser page session receives an
+isolated, TTL-limited database cloned from the immutable synthetic seed. The
+database files live only in the Space's temporary runtime storage, allowing
+successive ZeroGPU workers to share the same session state.
 
 ## Supported workflows
 
