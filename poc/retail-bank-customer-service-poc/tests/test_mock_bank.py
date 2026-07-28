@@ -117,3 +117,37 @@ def test_tool_scope_rejects_unknown_users_sessions_and_cross_customer_arguments(
             "list_accounts",
             {"customer_id": "cust_maya"},
         )
+
+
+def test_customer_facing_write_selectors_match_synthetic_records() -> None:
+    bank = registry()
+
+    cancelled = bank.execute(
+        "alex.demo",
+        "friendly-selectors",
+        "cancel_transfer",
+        {"recipient": "river consulting"},
+    )
+    disputed = bank.execute(
+        "alex.demo",
+        "friendly-selectors",
+        "dispute_transaction",
+        {"description": "north harbor market"},
+    )
+
+    assert cancelled["transfer"]["recipient"] == "River Consulting"
+    assert cancelled["transfer"]["status"] == "cancelled"
+    assert disputed["transaction"]["description"] == "North Harbor Market"
+    assert disputed["transaction"]["disputed"] is True
+
+
+def test_customer_facing_write_selector_reports_no_match() -> None:
+    bank = registry()
+
+    with pytest.raises(ValueError, match="matching"):
+        bank.execute(
+            "alex.demo",
+            "friendly-selectors",
+            "cancel_transfer",
+            {"recipient": "Nobody"},
+        )

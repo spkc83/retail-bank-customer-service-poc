@@ -124,11 +124,12 @@ print(tokenizer.decode(output[0, inputs.shape[-1] :], skip_special_tokens=True))
 
 ## Domain boundary
 
-The public application uses a separate calibrated domain/intent router plus a
-deterministic capability planner. The router records supported-banking and
-Banking77-intent evidence, but the router does not repair write requests and
-the 9B model does not select tools in the deployed POC. Explicit non-banking
-requests bypass neural generation and return:
+The public application uses a separate calibrated domain/intent router.
+High-confidence OOD requests bypass neural generation. Allowed and uncertain
+turns reach this model with the intent head's top-three predictions as advisory
+context. The 9B model, rather than a capability planner, owns conversation,
+tool selection, tool arguments, and final wording. Explicit high-confidence
+non-banking requests return:
 
 > I can only help with retail banking and financial-services questions. Please
 > ask about accounts, cards, transfers, payments, loans, or related banking
@@ -137,34 +138,26 @@ requests bypass neural generation and return:
 Prompting or fine-tuning alone does not guarantee that exact response. The
 released DistilBERT router has a binary supported-banking/OOD head and a 77-way
 Banking77 intent head. Its held-out intent macro F1 is `0.951208`, with OOD
-false-accept rate `0.007733` at threshold `0.98`. It still requires deterministic
-credential and unsafe-output guards and is not production-qualified.
+false-accept rate `0.007733` at threshold `0.98`. The public POC is an
+experimental synthetic environment, not a production-qualified banking agent.
 
 ## Public POC serving role
 
 In the public
 [Retail Bank Servicing POC](https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc),
-this checkpoint is a stateless grounded finalizer:
+this checkpoint is the conversational and tool-calling agent:
 
 1. Static Gradio authentication identifies one of two synthetic demo users.
-2. A CPU dual-head router classifies the request for advisory diagnostics.
-3. A deterministic capability planner selects direct response, read bundle,
-   single write, clarification, unsupported banking, or OOD handling.
-4. A CPU session-isolated SQLite backend executes supported synthetic reads or
-   one explicit synthetic write.
-5. The ZeroGPU model receives sanitized verified workflow results and writes
-   the customer-facing answer.
-6. Server-side validation rejects empty, unsafe, or internal-identifier-bearing
-   final responses. Multi-read and incomplete or contradictory factual drafts
-   use a labeled deterministic rendering of verified results. Write actions
-   roll back if finalization is unavailable or unsafe.
+2. A CPU dual-head router gates only high-confidence OOD and supplies ranked
+   intent guidance.
+3. The ZeroGPU 9B model responds directly or emits one or more Qwen tool calls.
+4. A session-isolated SQLite backend executes generated calls against synthetic
+   records.
+5. Tool results return to the model for a second customer-facing generation.
 
-Read-only workflows can bundle multiple supported reads, such as transfers plus
-recent transactions. Account-changing workflows are limited to one explicit
-write per turn; mixed read/write and multi-write requests return clarification
-and do not mutate synthetic data. The mailing-address history path uses the
-limited synthetic service-case records, not a complete customer-profile audit
-log.
+The application retains complete session history and selects newest complete
+conversation/tool interactions within an 8,192-token input budget. It does not
+replace model responses with deterministic grounded templates.
 
 ## Limitations
 
@@ -179,14 +172,12 @@ log.
 
 The public
 [Retail Bank Servicing POC](https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc)
-authenticates two static demo users, runs the learned CPU router and
-deterministic capability planner, and executes this checkpoint on ZeroGPU for
-grounded response generation only. Synthetic backend reads and writes remain
-behind deterministic identity, argument, authorization, rollback, and
-unsafe-output checks.
+authenticates two static demo users, runs the learned CPU dual-head router, and
+executes this checkpoint on ZeroGPU for conversation, tool calling, and final
+response generation. Generated calls operate only on isolated synthetic state.
 
 The deployment uses eager expert execution for compatibility with the current
-RTX PRO 6000 Blackwell partition. The raw checkpoint remains unsafe to expose
-without the application's external controls.
+ZeroGPU partition. If ZeroGPU is unavailable, the POC reports model
+unavailability and does not substitute a CPU-generated banking response.
 
 Use the model only for experimentation with human review.

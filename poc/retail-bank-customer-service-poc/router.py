@@ -127,15 +127,40 @@ class LearnedBankingRouter:
             )
         banking_probability = float(torch.softmax(domain_logits, dim=-1)[0, 1])
         intent_probabilities = torch.softmax(intent_logits, dim=-1)[0]
-        intent_confidence, intent_index = intent_probabilities.max(dim=-1)
-        accepted = banking_probability >= self.threshold
+        candidate_count = min(3, len(self.intent_labels))
+        candidate_probabilities, candidate_indices = torch.topk(
+            intent_probabilities,
+            k=candidate_count,
+        )
+        candidates = [
+            {
+                "intent": self.intent_labels[int(index)],
+                "probability": float(probability),
+            }
+            for probability, index in zip(
+                candidate_probabilities,
+                candidate_indices,
+                strict=True,
+            )
+        ]
+        ood_probability = 1.0 - banking_probability
+        ood_threshold = 1.0 - self.threshold
+        if banking_probability >= self.threshold:
+            route = "in_domain"
+        elif banking_probability <= ood_threshold:
+            route = "out_of_domain"
+        else:
+            route = "uncertain"
         return {
-            "route": "in_domain" if accepted else "out_of_domain",
+            "route": route,
             "banking_probability": banking_probability,
-            "confidence": banking_probability if accepted else 1 - banking_probability,
-            "intent": self.intent_labels[int(intent_index)] if accepted else None,
-            "intent_confidence": float(intent_confidence),
+            "ood_probability": ood_probability,
+            "confidence": max(banking_probability, ood_probability),
+            "intent": candidates[0]["intent"],
+            "intent_confidence": candidates[0]["probability"],
+            "intent_candidates": candidates,
             "threshold": self.threshold,
+            "ood_threshold": ood_threshold,
             "router_revision": ROUTER_REVISION,
         }
 
