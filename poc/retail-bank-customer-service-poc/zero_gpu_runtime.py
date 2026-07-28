@@ -39,7 +39,7 @@ else:
     model.eval()
 
 
-@spaces_runtime.GPU(size="xlarge", duration=120)
+@spaces_runtime.GPU(size="large", duration=90)
 def generate_final_answer(
     messages: list[dict[str, str]],
     grounded_results: dict[str, Any],
