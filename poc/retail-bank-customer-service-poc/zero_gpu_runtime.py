@@ -26,8 +26,17 @@ else:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    tokenizer = None
-    model = None
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_ID,
+        revision=MODEL_REVISION,
+        dtype=torch.bfloat16,
+        experts_implementation="eager",
+        low_cpu_mem_usage=True,
+    )
+    model.to("cuda")
+    model.config.output_router_logits = False
+    model.eval()
 
 
 @spaces_runtime.GPU(size="xlarge", duration=120)
@@ -38,7 +47,6 @@ def generate_final_answer(
 ) -> str:
     """Run only stateless grounded response generation on ZeroGPU."""
 
-    _ensure_model_loaded()
     if tokenizer is None or model is None:
         raise RuntimeError("ZeroGPU model is unavailable")
     if not messages or messages[0].get("role") != "system":
@@ -70,20 +78,3 @@ def generate_final_answer(
         )
     new_ids = output_ids[0, inputs["input_ids"].shape[-1] :]
     return str(tokenizer.decode(new_ids, skip_special_tokens=True)).strip()
-
-
-def _ensure_model_loaded() -> None:
-    global model, tokenizer
-    if SKIP_MODEL_LOAD or (model is not None and tokenizer is not None):
-        return
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID,
-        revision=MODEL_REVISION,
-        dtype=torch.bfloat16,
-        experts_implementation="eager",
-        low_cpu_mem_usage=True,
-    )
-    model.to("cuda")
-    model.config.output_router_logits = False
-    model.eval()

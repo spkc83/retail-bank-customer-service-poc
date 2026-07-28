@@ -1,10 +1,15 @@
 """Authenticated, model-driven synthetic retail-bank customer-service POC."""
 
+# ZeroGPU must patch PyTorch before the CPU router imports it.
+# ruff: noqa: I001
+
 from __future__ import annotations
 
 import html
 import os
 from typing import Any
+
+from zero_gpu_runtime import MODEL_REVISION, generate_final_answer
 
 import gradio as gr
 
@@ -18,7 +23,6 @@ from policy import (
 )
 from router import ROUTER_REVISION, LearnedBankingRouter
 from state import BANK
-from zero_gpu_runtime import MODEL_REVISION, generate_final_answer
 
 AUTH_CREDENTIALS = load_demo_auth()
 SKIP_ROUTER_LOAD = os.environ.get("POC_SKIP_ROUTER_LOAD") == "1"
