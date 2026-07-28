@@ -85,7 +85,11 @@ _READ_PATTERNS: tuple[tuple[str, tuple[re.Pattern[str], ...]], ...] = (
     (
         "list_transfers",
         (
-            re.compile(r"\b(?:show|list|recent|latest|last|pending|status)\b.{0,32}\btransfers?\b"),
+            re.compile(
+                r"\b(?:show|list|recent|latest|last|pending|status)\b"
+                r".{0,32}\btransfers?\b"
+            ),
+            re.compile(r"\b(?:what|which)\b.{0,32}\btransfers\b"),
             re.compile(r"\btransfers?\b.{0,32}\b(?:show|list|recent|latest|last|pending|status)\b"),
         ),
     ),
@@ -235,6 +239,11 @@ def _conversational_response(normalized: str, terms: set[str]) -> str | None:
     if re.fullmatch(
         r"(?:hello|hi|hey|good morning|good afternoon|good evening)"
         r"(?: how are you| there| everyone)?",
+        normalized,
+    ):
+        return GREETING_RESPONSE
+    if re.fullmatch(
+        r"(?:yo(?: sup| what s up)?|sup|what s up|how s it going)",
         normalized,
     ):
         return GREETING_RESPONSE

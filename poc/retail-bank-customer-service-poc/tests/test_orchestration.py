@@ -93,6 +93,48 @@ def test_planner_returns_conversational_response_without_tools(
     assert plan.direct_response.strip()
 
 
+@pytest.mark.parametrize("message", ["yo, sup ?", "Yo", "what's up?"])
+def test_planner_accepts_narrow_casual_greetings(
+    orchestration_module,
+    message: str,
+) -> None:
+    plan = plan_for(orchestration_module, message)
+
+    assert plan.category == "conversational"
+    assert_no_tools(plan)
+    assert isinstance(plan.direct_response, str)
+    assert "customer-service assistant" in plan.direct_response
+
+
+def test_planner_handles_natural_transfer_inventory_question(
+    orchestration_module,
+) -> None:
+    plan = plan_for(
+        orchestration_module,
+        "ok ok, what transfers are there on my account ?",
+        router=router_result(
+            route="in_domain",
+            intent="pending_transfer",
+            banking_probability=0.99,
+            intent_confidence=0.81,
+        ),
+    )
+
+    assert plan.category == "single_read"
+    assert plan.read_tools == ("list_transfers",)
+    assert plan.write_tool is None
+    assert plan.direct_response is None
+
+
+def test_transfer_inventory_pattern_does_not_match_singular_non_inventory_phrase(
+    orchestration_module,
+) -> None:
+    plan = plan_for(orchestration_module, "What is a transfer function?")
+
+    assert plan.category != "single_read"
+    assert_no_tools(plan)
+
+
 def test_planner_returns_out_of_domain_for_weather_even_when_router_accepts_it(
     orchestration_module,
 ) -> None:
