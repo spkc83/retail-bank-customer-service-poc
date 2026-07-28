@@ -1,0 +1,41 @@
+[run]
+name = "banking-v2-dense-adapter-baseline"
+description = "Dense Qwen2.5-1.5B SFT/domain-adaptation baseline for the prepared banking-v2 generative corpus before MoE conversion."
+format = "banking_v2_cloud_job_config_not_v1_experiment_schema"
+
+[model]
+base_model = "Qwen/Qwen2.5-1.5B-Instruct"
+base_revision = "989aa7980e4cf806f80c7fef2b1adb7bc71aa306"
+architecture = "qwen2_dense_adapter"
+vocab_size = 151936
+hidden_size = 1536
+num_hidden_layers = 28
+num_attention_heads = 12
+num_key_value_heads = 2
+intermediate_size = 8960
+rope_theta = 1000000.0
+use_sliding_window = false
+tie_word_embeddings = true
+qkv_bias = true
+
+[dataset]
+name = "data/banking-v2/manifest.json"
+source = "prepared_banking_v2_bitext_composition"
+router_eval_name = "PolyAI/banking77"
+router_eval_revision = "90d4e2ee5521c04fc1488f065b8b083658768c57"
+task = "banking_services_multiturn_sft"
+out_of_domain_stock_response = "I can only help with retail banking and financial-services questions. Please ask about accounts, cards, transfers, payments, loans, or related banking support."
+
+[training]
+scope = "sft_domain_adaptation"
+freeze_base = true
+train_lora_attention = true
+train_lora_mlp = true
+max_wallclock_hours = 10
+max_budget_usd = 100
+
+[lora]
+r = 16
+alpha = 32
+dropout = 0.05
+target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]

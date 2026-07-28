@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+.omx/
+build/
+dist/
+artifacts/
+data/raw/
+data/banking-v2/
+data/banking-router-v1/
+data/sources/banking-v2-bitext-source.csv
+data/sources/banking-v2-bitext-source.jsonl
+data/sources/banking-v2-polyai-banking77-eval-source.jsonl
+*.egg-info/

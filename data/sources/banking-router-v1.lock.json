@@ -1,0 +1,35 @@
+{
+  "contract": "banking-dual-head-router-source-lock",
+  "created_at": "2026-07-27T13:42:06.525254+00:00",
+  "format_version": 1,
+  "prepared_manifest_sha256": "135408ccda3be4b76ac1ebc93bc2643607609581692b884fdff3a1205e3d1cc3",
+  "prepared_split_sha256": {
+    "test": "560821a04e65de602a74c75fac1b4bfd5bcb60aaea238035f273d35115356b06",
+    "train": "4b141aa22fc411f7b300a8832527e855f8a77c88d1ffafdc5a24931b3d4bc94e",
+    "validation": "7df4a9aea33f9cc442859a0cff96e8abc2e6b33108c56b03c0e374b0cc5ece1d"
+  },
+  "sources": {
+    "PolyAI/banking77": {
+      "allowed_use": [
+        "dual-head-router-training",
+        "evaluation"
+      ],
+      "generative_sft": false,
+      "license": "CC-BY-4.0",
+      "revision": "90d4e2ee5521c04fc1488f065b8b083658768c57",
+      "snapshot_sha256": "22ce056724069f431b477aa8478f1a42ce31286ad595cb7e53a838173052b340"
+    },
+    "UCI/clinc150": {
+      "allowed_use": [
+        "dual-head-domain-training",
+        "evaluation"
+      ],
+      "archive_sha256": "0d8ecc3e1edd7b25cabde0177544ce536ddf773844bc80ef1a75f36e7f030ea2",
+      "doi": "10.24432/C5MP58",
+      "license": "CC-BY-4.0",
+      "member": "clinc150_uci/data_oos_plus.json",
+      "member_sha256": "bfcca9ae515623541dc1983c94c4ed7cae9d26b42ae47d74b972e51bb6f7a21f",
+      "url": "https://archive.ics.uci.edu/static/public/570/clinc150.zip"
+    }
+  }
+}

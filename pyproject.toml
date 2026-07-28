@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "retail-bank-model-development"
+version = "0.1.0"
+description = "Retail banking MoE training, routing, evaluation, and demonstration"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "torch>=2.9,<3",
+]
+
+[project.optional-dependencies]
+app = [
+  "shiny>=1.5,<2",
+]
+scale = [
+  "accelerate>=1.12,<2",
+  "datasets>=4.4,<5",
+  "huggingface-hub>=1.4,<2",
+  "peft>=0.18,<0.19",
+  "safetensors>=0.6,<1",
+  "transformers>=5.13,<5.14",
+  "trl>=0.26,<0.27",
+]
+dev = [
+  "gradio==5.49.1",
+  "huggingface-hub>=1.4,<2",
+  "mypy>=1.10",
+  "pytest>=8",
+  "ruff>=0.5",
+  "safetensors>=0.6,<1",
+  "shiny>=1.5,<2",
+  "transformers>=5.13,<5.14",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests", "poc/retail-bank-customer-service-poc/tests"]
+pythonpath = ["src", "poc/retail-bank-customer-service-poc"]
+
+[tool.mypy]
+files = ["src", "scripts", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["shiny", "shiny.*"]
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = [
+  "accelerate",
+  "accelerate.*",
+  "datasets",
+  "datasets.*",
+  "peft",
+  "peft.*",
+  "transformers",
+  "transformers.*",
+  "trl",
+  "trl.*",
+]
+follow_imports = "skip"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
