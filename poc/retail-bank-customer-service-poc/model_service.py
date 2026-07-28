@@ -14,14 +14,16 @@ permitted workflow. Answer the customer's current request using only the supplie
 verified workflow results. Do not invent balances, dates, identifiers, status, or
 actions. Never request a PIN, CVV, password, one-time code, or complete card/account
 number. Monetary strings are display-ready and must be copied exactly. Do not expose
-internal identifiers. If service cases are supplied, describe them as the limited
-history available in this POC. Keep the answer clear, concise, conversational, and
-state that data and actions are synthetic."""
+internal identifiers. For account-balance requests, state both available_balance and
+current_balance with explicit labels. If service cases are supplied, describe them as
+the limited history available in this POC. Keep the answer clear, concise,
+conversational, and state that data and actions are synthetic."""
 
 _INTERNAL_IDENTIFIER = re.compile(
     r"\b(?:acct|card|case|cust|trf|txn)_[A-Za-z0-9_]+\b",
     re.IGNORECASE,
 )
+_DISPLAY_MONEY = re.compile(r"\b[A-Z]{3}\s+-?[0-9][0-9,]*\.[0-9]{2}\b")
 
 
 class FinalAnswerGenerator(Protocol):
@@ -45,6 +47,12 @@ class ServiceReply:
     tool_result: dict[str, Any]
     snapshot: dict[str, Any]
     selection_source: str = "deterministic_workflow"
+
+
+@dataclass(frozen=True)
+class FinalizedAnswer:
+    response: str
+    selection_source: str
 
 
 class GroundedBankingService:
@@ -80,12 +88,13 @@ class GroundedBankingService:
                 session_hash,
                 calls,
             )
-            response = self._finalize(messages, raw_results)
+            finalized = self._finalize(messages, raw_results)
             return ServiceReply(
-                response=response,
+                response=finalized.response,
                 workflow_tools=plan.read_tools,
                 tool_result=raw_results,
                 snapshot=self.bank.snapshot(username, session_hash),
+                selection_source=finalized.selection_source,
             )
 
         if plan.category == "single_write" and plan.write_tool is not None:
@@ -98,10 +107,10 @@ class GroundedBankingService:
                     self.bank.snapshot(username, session_hash),
                 )
 
-                def finalize(result: dict[str, Any]) -> str:
+                def finalize(result: dict[str, Any]) -> FinalizedAnswer:
                     return self._finalize(messages, {plan.write_tool: result})
 
-                result, response = self.bank.execute_atomic(
+                result, finalized = self.bank.execute_atomic(
                     username,
                     session_hash,
                     plan.write_tool,
@@ -113,10 +122,11 @@ class GroundedBankingService:
             except ValueError as error:
                 raise ModelResponseError(str(error)) from error
             return ServiceReply(
-                response=response,
+                response=finalized.response,
                 workflow_tools=(plan.write_tool,),
                 tool_result={plan.write_tool: result},
                 snapshot=self.bank.snapshot(username, session_hash),
+                selection_source=finalized.selection_source,
             )
 
         raise ValueError(f"workflow category {plan.category} does not execute tools")
@@ -125,7 +135,7 @@ class GroundedBankingService:
         self,
         messages: list[dict[str, str]],
         raw_results: dict[str, Any],
-    ) -> str:
+    ) -> FinalizedAnswer:
         grounded_results = _grounding_payload(raw_results)
         response = self.finalizer(messages, grounded_results, 256).strip()
         if not response:
@@ -134,7 +144,15 @@ class GroundedBankingService:
             raise ModelResponseError("model returned an unsafe final response")
         if _contains_internal_identifier(response, raw_results):
             raise ModelResponseError("model exposed an internal identifier")
-        return response
+        if _contains_ungrounded_money(response, grounded_results):
+            return FinalizedAnswer(
+                response=_deterministic_grounded_response(grounded_results),
+                selection_source="grounded_repair",
+            )
+        return FinalizedAnswer(
+            response=response,
+            selection_source="model_finalizer",
+        )
 
 
 def _bounded_messages(
@@ -329,6 +347,71 @@ def _contains_internal_identifier(response: str, raw_results: dict[str, Any]) ->
         for value in _internal_values(raw_results)
         if len(value) >= 6
     )
+
+
+def _contains_ungrounded_money(
+    response: str,
+    grounded_results: dict[str, Any],
+) -> bool:
+    displayed = set(_DISPLAY_MONEY.findall(response))
+    if not displayed:
+        return False
+    allowed = set(_DISPLAY_MONEY.findall(str(grounded_results)))
+    return not displayed <= allowed
+
+
+def _deterministic_grounded_response(grounded_results: dict[str, Any]) -> str:
+    lines = ["Here are the verified results from this synthetic banking demo:"]
+    for tool, payload in grounded_results.items():
+        if not isinstance(payload, dict):
+            continue
+        if tool == "list_accounts":
+            lines.extend(
+                f"- {item['name']} ending {item['last4']}: "
+                f"{item['available_balance']} available ({item['status']})."
+                for item in payload.get("accounts", [])
+            )
+        elif tool == "list_cards":
+            lines.extend(
+                f"- {item['name']} ending {item['last4']}: {item['status']}."
+                for item in payload.get("cards", [])
+            )
+        elif tool == "list_transactions":
+            lines.extend(
+                f"- {item['posted_at'][:10]} — {item['description']}: "
+                f"{item['amount']} ({item['status']})."
+                for item in payload.get("transactions", [])
+            )
+        elif tool == "list_transfers":
+            lines.extend(
+                f"- {item['recipient']}: {item['amount']} ({item['status']})."
+                for item in payload.get("transfers", [])
+            )
+        elif tool == "list_service_cases":
+            lines.append("- Limited service-case history available in this POC:")
+            lines.extend(
+                f"  - {item['created_at'][:10]} — {item['subject']} ({item['status']})."
+                for item in payload.get("service_cases", [])
+            )
+        elif tool in {"freeze_card", "replace_card"}:
+            item = payload.get("card", {})
+            lines.append(
+                f"- Card ending {item['last4']} is now {item['status']}."
+            )
+        elif tool == "dispute_transaction":
+            item = payload.get("transaction", {})
+            lines.append(
+                f"- The {item['description']} transaction for {item['amount']} "
+                "is now marked as disputed."
+            )
+        elif tool == "cancel_transfer":
+            item = payload.get("transfer", {})
+            lines.append(
+                f"- The {item['amount']} transfer to {item['recipient']} is "
+                f"{item['status']}."
+            )
+    lines.append("All data and actions shown here are synthetic.")
+    return "\n".join(lines)
 
 
 def _internal_values(value: Any) -> list[str]:

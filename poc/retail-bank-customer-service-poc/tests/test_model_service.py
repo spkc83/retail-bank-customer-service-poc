@@ -68,7 +68,7 @@ def test_multi_read_executes_exact_workflow_and_model_finalizes_grounded_bundle(
     )
 
     assert reply.workflow_tools == ("list_transfers", "list_transactions")
-    assert reply.selection_source == "deterministic_workflow"
+    assert reply.selection_source == "model_finalizer"
     assert len(finalizer.calls) == 1
     grounded = finalizer.calls[0]["grounded_results"]
     assert tuple(grounded) == ("list_transfers", "list_transactions")
@@ -264,3 +264,28 @@ def test_grounding_payload_removes_internal_fields_and_formats_money() -> None:
         "amount": "USD 450.00",
         "currency": "USD",
     }
+
+
+def test_ungrounded_model_money_is_replaced_with_verified_backend_values() -> None:
+    finalizer = RecordingFinalizer(
+        ["Your checking account balance is USD 9,999.99."]
+    )
+    service = GroundedBankingService(bank=bank(), finalizer=finalizer)
+    message = "What is my checking account balance?"
+
+    reply = service.execute(
+        username="alex.demo",
+        session_hash="session",
+        message=message,
+        history=[],
+        plan=plan_workflow(
+            message,
+            [],
+            route(intent="balance_not_updated_after_cheque_or_cash_deposit"),
+        ),
+    )
+
+    assert reply.selection_source == "grounded_repair"
+    assert "USD 3,245.67" in reply.response
+    assert "USD 9,999.99" not in reply.response
+    assert "All data and actions shown here are synthetic." in reply.response

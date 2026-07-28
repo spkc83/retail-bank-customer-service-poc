@@ -115,21 +115,31 @@ def respond(
             "⚠️ The model service was unavailable; no synthetic action was committed.",
         )
     workflow_label = " + ".join(result.workflow_tools)
+    response_path = (
+        "9B model finalizer"
+        if result.selection_source == "model_finalizer"
+        else "verified grounded repair after 9B validation"
+    )
     response = (
         f"{result.response}\n\n"
         f"---\n_Model workflow: `{workflow_label.replace(' + ', '` + `')}` · "
-        f"model revision `{MODEL_REVISION[:8]}…`_"
+        f"{response_path} · model revision `{MODEL_REVISION[:8]}…`_"
+    )
+    finalization_activity = (
+        "the 9B model wrote the grounded final answer"
+        if result.selection_source == "model_finalizer"
+        else "server validation replaced an ungrounded model draft with verified results"
     )
     if plan.category == "single_write":
         activity = (
             f"✅ The deterministic workflow executed one explicit write "
-            f"(`{workflow_label}`) inside the session transaction; the 9B model "
-            "wrote the grounded final answer before commit."
+            f"(`{workflow_label}`) inside the session transaction; "
+            f"{finalization_activity} before commit."
         )
     else:
         activity = (
             f"✅ The deterministic workflow executed `{workflow_label}` against the "
-            "authenticated synthetic session, then the 9B model wrote the grounded answer."
+            f"authenticated synthetic session, then {finalization_activity}."
         )
     return (
         response,
@@ -205,7 +215,8 @@ def render_snapshot(snapshot: dict[str, Any]) -> str:
     accounts = "\n".join(
         (
             f"- **{account['name']} ····{account['last4']}** — "
-            f"{_money(account['available_balance_cents'], account['currency'])} available"
+            f"{_money(account['available_balance_cents'], account['currency'])} available; "
+            f"{_money(account['current_balance_cents'], account['currency'])} current"
         )
         for account in snapshot["accounts"]
     )
