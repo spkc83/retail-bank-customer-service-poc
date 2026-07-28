@@ -91,6 +91,13 @@ def test_only_registered_model_turn_is_the_zero_gpu_boundary(app_module) -> None
         "duration": 90,
     }
     assert not hasattr(app_module.generate_final_answer, "_zero_gpu_config")
+    failure_dependencies = [
+        dependency
+        for dependency in app_module.demo.config["dependencies"]
+        if dependency.get("trigger_only_on_failure") is True
+    ]
+    assert len(failure_dependencies) == 1
+    assert "ZeroGPU worker error" in failure_dependencies[0]["js"]
 
 
 def test_cpu_dispatch_completes_casual_greeting_without_pending_gpu_turn(
