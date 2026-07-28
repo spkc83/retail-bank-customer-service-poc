@@ -214,6 +214,25 @@ def test_gpu_allocation_failure_replaces_pending_turn_without_mutation(
     assert "`pending`" in result[2]
 
 
+def test_gpu_allocation_failure_uses_verified_read_only_fallback(
+    app_module,
+) -> None:
+    pending = {
+        "turn_id": "failed-read",
+        "message": "What transfers are there on my account?",
+        "history": [],
+        "epoch": 5,
+    }
+
+    result = app_module.fail_pending_turn(pending, 5, [], request())
+
+    response = result[0][-1]["content"]
+    assert "River Consulting" in response
+    assert "Jamie Lee" in response
+    assert "verified CPU read fallback" in response
+    assert "ZeroGPU was unavailable" in result[3]
+
+
 def test_sensitive_guard_bypasses_router_and_zero_gpu(
     app_module,
     monkeypatch: pytest.MonkeyPatch,

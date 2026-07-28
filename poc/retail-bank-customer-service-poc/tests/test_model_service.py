@@ -12,6 +12,7 @@ from model_service import (
     ModelResponseError,
     _bounded_messages,
     _grounding_payload,
+    verified_read_response,
 )
 from orchestration import plan_workflow
 
@@ -49,6 +50,21 @@ class RecordingFinalizer:
             }
         )
         return self.outputs.pop(0)
+
+
+def test_verified_read_response_rejects_write_results() -> None:
+    with pytest.raises(ValueError, match="read-only"):
+        verified_read_response(
+            {
+                "cancel_transfer": {
+                    "transfer": {
+                        "recipient": "River Consulting",
+                        "amount_cents": 45000,
+                        "status": "cancelled",
+                    }
+                }
+            }
+        )
 
 
 def test_multi_read_executes_exact_workflow_and_model_finalizes_grounded_bundle() -> None:

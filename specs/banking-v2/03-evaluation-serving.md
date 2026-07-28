@@ -73,6 +73,10 @@ unique pending model turn triggers the separately registered ZeroGPU event.
 The UI prevents another submit or reset while that event is pending, and a
 session epoch causes stale queued turns to execute nothing.
 
+ZeroGPU failure may fall back only for read workflows, using a labeled
+deterministic rendering of sanitized verified backend results. Writes do not
+use this fallback and remain uncommitted when model finalization is unavailable.
+
 Any future multi-candidate path must prove at least a two-point improvement on
 the held-out composite score over the one-generation baseline. OOD false
 accepts and in-domain false refusals may each regress by no more than 0.5

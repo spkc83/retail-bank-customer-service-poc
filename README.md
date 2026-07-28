@@ -202,6 +202,8 @@ directly in the Gradio event graph. The CPU chat dispatcher handles greetings,
 policy responses, and credential guards without a GPU; model-backed workflows
 alone change a pending-turn state and enter the GPU event. Qwen2-MoE expert
 execution uses the eager implementation on the current Blackwell partition.
+If GPU allocation fails, reads use a labeled verified rendering of sanitized
+backend results; writes remain blocked and uncommitted.
 
 ## Verification
 
