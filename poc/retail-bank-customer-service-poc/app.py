@@ -10,7 +10,16 @@ import os
 import uuid
 from typing import Any
 
-from zero_gpu_runtime import MODEL_REVISION, generate_final_answer, spaces_runtime
+if os.environ.get("POC_SKIP_MODEL_LOAD") == "1":
+    from zero_gpu_runtime import (
+        MODEL_REVISION,
+        generate_final_answer,
+        spaces_runtime as spaces,
+    )
+else:
+    import spaces
+
+    from zero_gpu_runtime import MODEL_REVISION, generate_final_answer
 
 import gradio as gr
 
@@ -195,7 +204,7 @@ def dispatch_turn(
     )
 
 
-@spaces_runtime.GPU(size="large", duration=90)
+@spaces.GPU(size="large", duration=90)
 def finalize_turn(
     pending: dict[str, Any],
     session_epoch: int,
