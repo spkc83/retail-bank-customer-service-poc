@@ -7,6 +7,10 @@ tags:
   - conversational
   - mixture-of-experts
   - qwen2-moe
+widget:
+  - text: "Show my account balances."
+  - text: "My debit card was stolen. What should I do?"
+  - text: "Why was my card payment declined?"
 ---
 
 # Retail Bank Servicing MoE 9B

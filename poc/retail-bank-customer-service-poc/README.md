@@ -77,10 +77,11 @@ Write tools require explicit customer language such as “freeze,” “replace,
 
 ## Authentication
 
-The two demo usernames are `alex.demo` and `maya.demo`. Passwords are not
-committed. The Space reads them from the write-only `DEMO_AUTH_JSON` secret.
-Gradio’s static authentication is appropriate only for a limited POC; it is not
-a production identity system.
+The two demo usernames are `alex.demo` and `maya.demo`. Deployment passwords
+are not committed; CI uses non-secret test-only values. The Space reads the
+live credentials from the write-only `DEMO_AUTH_JSON` secret. Gradio’s static
+authentication is appropriate only for a limited POC; it is not a production
+identity system.
 
 ## Local verification
 
