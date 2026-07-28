@@ -197,9 +197,11 @@ credential guard for both demo users. The current synthetic data has limited
 address-history coverage through service-case records; it is not a full
 customer-profile audit log.
 
-ZeroGPU compatibility requires the decorated event function to live directly
-in `app.py` and Qwen2-MoE expert execution to use the eager implementation on
-the current Blackwell partition.
+ZeroGPU compatibility requires the decorated model event to be registered
+directly in the Gradio event graph. The CPU chat dispatcher handles greetings,
+policy responses, and credential guards without a GPU; model-backed workflows
+alone change a pending-turn state and enter the GPU event. Qwen2-MoE expert
+execution uses the eager implementation on the current Blackwell partition.
 
 ## Verification
 

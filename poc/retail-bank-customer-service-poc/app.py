@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import html
 import os
+import uuid
 from typing import Any
 
 from zero_gpu_runtime import MODEL_REVISION, generate_final_answer, spaces_runtime
@@ -62,31 +63,20 @@ PRESETS = [
     "What is the weather tomorrow?",
 ]
 
+PENDING_RESPONSE = (
+    "The 9B model is preparing a grounded answer from the synthetic banking records…"
+)
 
-@spaces_runtime.GPU(size="large", duration=90)
 def respond(
     message: str,
     history: list[dict[str, Any]],
     request: gr.Request,
 ) -> tuple[str, str, str]:
-    username, session_hash = _identity(request)
-    if contains_sensitive_value(message):
-        return (
-            SENSITIVE_RESPONSE,
-            render_snapshot(BANK.snapshot(username, session_hash)),
-            "🛡️ Credential guard blocked the request before routing or model inference.",
-        )
-    route = route_query(message, history)
-    plan = plan_workflow(message, history, route)
-    if plan.direct_response is not None:
-        return (
-            plan.direct_response,
-            render_snapshot(BANK.snapshot(username, session_hash)),
-            (
-                f"🧭 No backend tool or ZeroGPU inference was needed. "
-                f"Decision: `{plan.category}` ({plan.reason})."
-            ),
-        )
+    username, session_hash, plan, direct = _prepare_request(message, history, request)
+    if direct is not None:
+        return direct
+    if plan is None:
+        raise RuntimeError("model-backed request is missing a workflow plan")
     service = GroundedBankingService(
         bank=BANK,
         finalizer=generate_final_answer,
@@ -145,6 +135,131 @@ def respond(
         response,
         render_snapshot(result.snapshot),
         activity,
+    )
+
+
+def dispatch_turn(
+    message: str,
+    history: list[dict[str, Any]],
+    session_epoch: int,
+    request: gr.Request,
+) -> tuple[Any, list[dict[str, str]], list[dict[str, str]], str, str, Any, Any, Any, Any]:
+    canonical_history = _canonical_history(history)
+    username, session_hash, plan, direct = _prepare_request(
+        message,
+        canonical_history,
+        request,
+    )
+    if direct is not None:
+        response, snapshot, activity = direct
+        completed = _with_assistant_turn(canonical_history, message, response)
+        enabled = gr.update(interactive=True)
+        return (
+            gr.update(value="", interactive=True),
+            completed,
+            completed,
+            snapshot,
+            activity,
+            gr.skip(),
+            enabled,
+            enabled,
+            enabled,
+        )
+    if plan is None:
+        raise RuntimeError("model-backed request is missing a workflow plan")
+    pending = {
+        "turn_id": uuid.uuid4().hex,
+        "message": message.strip(),
+        "history": canonical_history,
+        "epoch": int(session_epoch),
+    }
+    visible = [
+        *canonical_history,
+        {"role": "user", "content": message.strip()},
+        {"role": "assistant", "content": PENDING_RESPONSE},
+    ]
+    disabled = gr.update(interactive=False)
+    return (
+        gr.update(value="", interactive=False),
+        visible,
+        canonical_history,
+        render_snapshot(BANK.snapshot(username, session_hash)),
+        (
+            f"⏳ Workflow `{plan.category}` is waiting for the registered "
+            "ZeroGPU model event."
+        ),
+        pending,
+        disabled,
+        disabled,
+        disabled,
+    )
+
+
+@spaces_runtime.GPU(size="large", duration=90)
+def finalize_turn(
+    pending: dict[str, Any],
+    session_epoch: int,
+    current_history: list[dict[str, Any]],
+    request: gr.Request,
+) -> tuple[list[dict[str, str]], list[dict[str, str]], str, str, Any, Any, Any, Any]:
+    message, history, pending_epoch = _pending_turn(pending)
+    canonical_history = _canonical_history(current_history)
+    if pending_epoch != int(session_epoch):
+        username, session_hash = _identity(request)
+        enabled = gr.update(interactive=True)
+        return (
+            canonical_history,
+            canonical_history,
+            render_snapshot(BANK.snapshot(username, session_hash)),
+            "↺ The pending model turn expired because this demo session was reset.",
+            gr.update(value="", interactive=True),
+            enabled,
+            enabled,
+            enabled,
+        )
+    response, snapshot, activity = respond(message, history, request)
+    completed = _with_assistant_turn(history, message, response)
+    enabled = gr.update(interactive=True)
+    return (
+        completed,
+        completed,
+        snapshot,
+        activity,
+        gr.update(value="", interactive=True),
+        enabled,
+        enabled,
+        enabled,
+    )
+
+
+def fail_pending_turn(
+    pending: dict[str, Any],
+    session_epoch: int,
+    current_history: list[dict[str, Any]],
+    request: gr.Request,
+) -> tuple[list[dict[str, str]], list[dict[str, str]], str, str, Any, Any, Any, Any]:
+    message, history, pending_epoch = _pending_turn(pending)
+    canonical_history = _canonical_history(current_history)
+    username, session_hash = _identity(request)
+    enabled = gr.update(interactive=True)
+    if pending_epoch != int(session_epoch):
+        completed = canonical_history
+        activity = "↺ The failed model turn was discarded after the demo session reset."
+    else:
+        completed = _with_assistant_turn(history, message, MODEL_FAILURE_RESPONSE)
+        activity = (
+            "⚠️ ZeroGPU could not allocate or complete the model turn. "
+            "No synthetic write was committed."
+        )
+    return (
+        completed,
+        completed,
+        render_snapshot(BANK.snapshot(username, session_hash)),
+        activity,
+        gr.update(value="", interactive=True),
+        enabled,
+        enabled,
+        enabled,
     )
 
 
@@ -211,6 +326,25 @@ def reset_demo(
     )
 
 
+def reset_session(
+    session_epoch: int,
+    request: gr.Request,
+) -> tuple[list[dict[str, str]], list[dict[str, str]], str, str, int, Any, Any, Any, Any]:
+    visible, snapshot, activity = reset_demo(request)
+    enabled = gr.update(interactive=True)
+    return (
+        visible,
+        visible,
+        snapshot,
+        activity,
+        int(session_epoch) + 1,
+        gr.update(value="", interactive=True),
+        enabled,
+        enabled,
+        enabled,
+    )
+
+
 def render_snapshot(snapshot: dict[str, Any]) -> str:
     accounts = "\n".join(
         (
@@ -269,6 +403,89 @@ def _workflow_error_response(error: ModelResponseError) -> str:
     return MODEL_FAILURE_RESPONSE
 
 
+def _prepare_request(
+    message: str,
+    history: list[dict[str, Any]],
+    request: gr.Request,
+) -> tuple[str, str, Any, tuple[str, str, str] | None]:
+    if not isinstance(message, str) or not message.strip():
+        raise ValueError("message must be a non-empty string")
+    username, session_hash = _identity(request)
+    if contains_sensitive_value(message):
+        return (
+            username,
+            session_hash,
+            None,
+            (
+                SENSITIVE_RESPONSE,
+                render_snapshot(BANK.snapshot(username, session_hash)),
+                "🛡️ Credential guard blocked the request before routing or model inference.",
+            ),
+        )
+    route = route_query(message, history)
+    plan = plan_workflow(message, history, route)
+    if plan.direct_response is None:
+        return username, session_hash, plan, None
+    return (
+        username,
+        session_hash,
+        plan,
+        (
+            plan.direct_response,
+            render_snapshot(BANK.snapshot(username, session_hash)),
+            (
+                f"🧭 No backend tool or ZeroGPU inference was needed. "
+                f"Decision: `{plan.category}` ({plan.reason})."
+            ),
+        ),
+    )
+
+
+def _canonical_history(history: list[dict[str, Any]]) -> list[dict[str, str]]:
+    if not isinstance(history, list):
+        return []
+    canonical: list[dict[str, str]] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role not in {"user", "assistant"} or not isinstance(content, str):
+            continue
+        canonical.append({"role": str(role), "content": content})
+    return canonical
+
+
+def _with_assistant_turn(
+    history: list[dict[str, str]],
+    message: str,
+    response: str,
+) -> list[dict[str, str]]:
+    return [
+        *history,
+        {"role": "user", "content": message.strip()},
+        {"role": "assistant", "content": response},
+    ]
+
+
+def _pending_turn(
+    pending: dict[str, Any],
+) -> tuple[str, list[dict[str, str]], int]:
+    if not isinstance(pending, dict):
+        raise ValueError("pending model turn must be an object")
+    turn_id = pending.get("turn_id")
+    message = pending.get("message")
+    history = pending.get("history")
+    epoch = pending.get("epoch")
+    if not isinstance(turn_id, str) or not turn_id:
+        raise ValueError("pending model turn is missing a turn ID")
+    if not isinstance(message, str) or not message.strip():
+        raise ValueError("pending model turn is missing a message")
+    if not isinstance(epoch, int) or isinstance(epoch, bool):
+        raise ValueError("pending model turn has an invalid epoch")
+    return message.strip(), _canonical_history(history), epoch
+
+
 with gr.Blocks(
     title="Retail Bank Customer Service POC",
     css=CSS,
@@ -302,37 +519,23 @@ with gr.Blocks(
                 type="messages",
                 placeholder="Ask the model to inspect or update the synthetic bank profile.",
             )
-            chat_interface = gr.ChatInterface(
-                fn=respond,
-                type="messages",
-                chatbot=chatbot,
-                additional_outputs=[snapshot_panel, activity_panel],
-                examples=PRESETS,
-                cache_examples=False,
-                example_labels=[
-                    "Greeting",
-                    "Balances",
-                    "Transactions",
-                    "Transfers + transactions",
-                    "Card status",
-                    "Freeze stolen card",
-                    "Replace card",
-                    "Dispute purchase",
-                    "Transfers",
-                    "Cancel transfer",
-                    "Service cases",
-                    "Address history",
-                    "Unsupported banking",
-                    "OOD check",
-                ],
-                title=None,
-                description=None,
-                api_name="chat",
-                api_description=(
-                    "Authenticated model-driven synthetic retail-bank servicing chat."
-                ),
+            with gr.Row():
+                message_box = gr.Textbox(
+                    placeholder="Ask about the signed-in synthetic bank profile.",
+                    show_label=False,
+                    scale=8,
+                    submit_btn=False,
+                )
+                send_button = gr.Button("Send", variant="primary", scale=1)
+            gr.Examples(
+                examples=[[prompt] for prompt in PRESETS],
+                inputs=message_box,
+                label="Preset test cases",
             )
 
+    chat_history = gr.State([])
+    pending_turn = gr.State(None)
+    session_epoch = gr.State(0)
     route_message = gr.Textbox(visible=False)
     route_history = gr.JSON(visible=False)
     route_output = gr.JSON(visible=False)
@@ -343,6 +546,61 @@ with gr.Blocks(
         outputs=route_output,
         api_name="route",
         queue=False,
+    )
+    dispatch_event = gr.on(
+        triggers=[message_box.submit, send_button.click],
+        fn=dispatch_turn,
+        inputs=[message_box, chat_history, session_epoch],
+        outputs=[
+            message_box,
+            chatbot,
+            chat_history,
+            snapshot_panel,
+            activity_panel,
+            pending_turn,
+            send_button,
+            reset_button,
+            refresh_button,
+        ],
+        api_name="chat",
+        api_description=(
+            "Authenticated CPU dispatch for synthetic retail-bank servicing chat."
+        ),
+        queue=True,
+        trigger_mode="once",
+    )
+    model_event = pending_turn.change(
+        finalize_turn,
+        inputs=[pending_turn, session_epoch, chat_history],
+        outputs=[
+            chatbot,
+            chat_history,
+            snapshot_panel,
+            activity_panel,
+            message_box,
+            send_button,
+            reset_button,
+            refresh_button,
+        ],
+        api_name=False,
+        queue=True,
+        trigger_mode="once",
+    )
+    model_event.failure(
+        fail_pending_turn,
+        inputs=[pending_turn, session_epoch, chat_history],
+        outputs=[
+            chatbot,
+            chat_history,
+            snapshot_panel,
+            activity_panel,
+            message_box,
+            send_button,
+            reset_button,
+            refresh_button,
+        ],
+        api_name=False,
+        queue=True,
     )
     demo.load(
         load_profile,
@@ -356,10 +614,22 @@ with gr.Blocks(
         queue=False,
     )
     reset_button.click(
-        reset_demo,
-        outputs=[chatbot, snapshot_panel, activity_panel],
+        reset_session,
+        inputs=session_epoch,
+        outputs=[
+            chatbot,
+            chat_history,
+            snapshot_panel,
+            activity_panel,
+            session_epoch,
+            message_box,
+            send_button,
+            reset_button,
+            refresh_button,
+        ],
         api_name="reset_demo",
         queue=False,
+        cancels=[dispatch_event, model_event],
     )
 
 
