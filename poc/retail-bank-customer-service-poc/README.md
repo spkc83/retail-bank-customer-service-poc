@@ -14,7 +14,7 @@ models:
   - spkc83/retail-bank-domain-intent-router
 datasets:
   - spkc83/retail-bank-router-training-data
-short_description: Dual-head router plus 9B model-driven synthetic banking chat.
+short_description: Dual-head router and 9B synthetic banking chat.
 ---
 
 # Retail Bank Customer Service POC
