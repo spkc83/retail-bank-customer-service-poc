@@ -66,6 +66,7 @@ module = [
   "trl.*",
 ]
 follow_imports = "skip"
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
