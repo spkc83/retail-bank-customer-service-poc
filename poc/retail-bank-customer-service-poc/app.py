@@ -79,6 +79,22 @@ PRESETS = [
 PENDING_RESPONSE = (
     "The 9B model is preparing a grounded answer from the synthetic banking records…"
 )
+DISMISS_RECOVERED_GPU_ERROR_JS = """
+(...args) => {
+  const dismiss = () => {
+    for (const toast of document.querySelectorAll('[data-testid="toast-body"]')) {
+      const title = toast.querySelector('.toast-title')?.textContent?.trim();
+      if (title === 'ZeroGPU worker error') {
+        toast.querySelector('[data-testid="toast-close"]')?.click();
+      }
+    }
+  };
+  setTimeout(dismiss, 0);
+  setTimeout(dismiss, 250);
+  setTimeout(dismiss, 750);
+  return args;
+}
+"""
 
 def respond(
     message: str,
@@ -668,6 +684,7 @@ with gr.Blocks(
         ],
         api_name=False,
         queue=True,
+        js=DISMISS_RECOVERED_GPU_ERROR_JS,
     )
     demo.load(
         load_profile,
