@@ -1,34 +1,28 @@
-.PHONY: install prepare-arithmetic prepare-curriculum validate validate-arithmetic validate-curriculum test lint smoke clean-artifacts
+.PHONY: install audit-data prepare-data model-plan tiny-smoke test lint typecheck
 
 install:
 	python -m pip install -e '.[dev]'
 
-validate:
-	python -m hello_slm validate --config configs/smoke.toml
-	python -m hello_slm validate --config configs/focused-125m.toml --structural
-	python -m hello_slm validate --config configs/arithmetic-30m.toml --structural
-	python -m hello_slm validate --config configs/arithmetic-curriculum-30m.toml --structural
+audit-data:
+	python -m hello_slm.banking_data audit-sources
 
-prepare-arithmetic:
-	python -m hello_slm.prepare_math
+prepare-data:
+	python -m hello_slm.banking_data prepare
 
-prepare-curriculum:
-	python -m hello_slm.prepare_arithmetic_curriculum
+model-plan:
+	PYTHONPATH=src python scripts/banking_v2/train_banking_moe.py
 
-validate-arithmetic:
-	python -m hello_slm validate --config configs/arithmetic-30m.toml
-
-validate-curriculum:
-	python -m hello_slm validate --config configs/arithmetic-curriculum-30m.toml
+tiny-smoke:
+	PYTHONPATH=src python scripts/banking_v2/cloud_train_banking_moe.py \
+		--run-tiny-smoke \
+		--max-steps 1 \
+		--output-dir artifacts/banking-v2-tiny-smoke
 
 test:
-	python -m pytest
+	python -m pytest tests/test_banking_*.py poc/retail-bank-customer-service-poc/tests
 
 lint:
-	python -m ruff check src tests
+	python -m ruff check src scripts tests poc/retail-bank-customer-service-poc
 
-smoke:
-	python -m hello_slm smoke --config configs/smoke.toml
-
-clean-artifacts:
-	@echo "Remove artifacts/ manually after confirming no checkpoint is needed."
+typecheck:
+	python -m mypy src scripts tests

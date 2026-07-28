@@ -1,9 +1,4 @@
-"""Banking-v2 Qwen2-MoE helpers.
-
-This module is intentionally separate from the hello-world <500M trainer. It
-defines the large banking-domain MoE experiment as a guarded, testable lane
-without launching paid infrastructure.
-"""
+"""Guarded, testable Qwen2-MoE conversion and training helpers."""
 
 from __future__ import annotations
 

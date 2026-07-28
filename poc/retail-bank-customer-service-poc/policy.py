@@ -12,8 +12,8 @@ SENSITIVE_RESPONSE = (
     "or complete card/account numbers. This demo never needs those credentials."
 )
 MODEL_FAILURE_RESPONSE = (
-    "The model could not produce a safe, valid banking tool call. No synthetic account "
-    "data was changed. Please try one of the preset requests."
+    "The service could not produce a safe grounded response. No synthetic account "
+    "change was committed. Please refine the request or try one of the presets."
 )
 
 SECRET_VALUE = re.compile(

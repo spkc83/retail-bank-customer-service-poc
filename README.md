@@ -1,243 +1,246 @@
-# hello-SLM
+# Retail Bank Servicing Model Development
 
-An executable hello-world blueprint for training a focused conversational small
-language model from random initialization on a closed corpus and restricted
-vocabulary. It contains the full specification set plus a deliberately small
-PyTorch reference pipeline.
+Training, evaluation, routing, and demonstration code for a focused retail-bank
+customer-service model. The repository contains only the banking model-development
+track and its public proof-of-concept application.
 
-Two profiles share the same implementation:
+The released language model is an 8.94B-parameter Qwen2-MoE checkpoint derived
+from the pinned `Qwen/Qwen2.5-1.5B-Instruct` model. It is domain-adapted, not
+trained from random initialization. Approximately 2.07B parameters are active
+per token.
 
-- `smoke`: 123,200 parameters, tiny synthetic MIT-licensed conversations, CPU
-  execution, and structural acceptance only;
-- `focused-125m`: 129,000,192 parameters, intended as the starting configuration
-  for an approved domain corpus and a real GPU run.
+## Public artifacts
 
-The arithmetic work adds two profiles:
+- Model: https://huggingface.co/spkc83/retail-bank-servicing-moe-9b
+- Domain and intent router:
+  https://huggingface.co/spkc83/retail-bank-domain-intent-router
+- Router training dataset:
+  https://huggingface.co/datasets/spkc83/retail-bank-router-training-data
+- Public application:
+  https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
+- Standalone application source:
+  https://github.com/spkc83/retail-bank-servicing-poc
+- Model-development source:
+  https://github.com/spkc83/retail-bank-servicing
 
-- `arithmetic-30m`: 29,368,832 parameters, a 4,096-token restricted vocabulary,
-  and a reproducibly prepared 50,000-example Orca Math baseline corpus;
-- `arithmetic-curriculum-30m`: 27,795,968 parameters, a digit-atomic restricted
-  vocabulary, and 50,000 deterministic, answer-verified conversations.
+## System
 
-Those original hello-world profiles are below the hard limit of 500,000,000
-parameters. Banking-v2 is a separate, larger domain-adaptation experiment and
-does not satisfy that original size/from-scratch contract.
+```text
+Authenticated request
+  → credential guard
+  → CPU dual-head domain and intent router records advisory evidence
+  → deterministic capability planner selects the supported workflow
+  → server validates identity, arguments, and write authorization
+  → session-isolated synthetic SQLite backend executes reads or one write
+  → ZeroGPU 9B MoE finalizer receives grounded tool results
+  → server validates the model-authored final response before returning it
+```
 
-## What is included
+The 9B model does not choose tools in the deployed POC. The CPU router provides
+domain and Banking77-intent evidence for diagnostics, while the deterministic
+planner maps explicit customer language to supported capabilities. Read-only
+requests can bundle multiple reads, such as transfers plus recent
+transactions. Account-changing requests are limited to one explicit write at a
+time; mixed read/write or multi-write requests return a clarification without
+changing synthetic data.
 
-- normative data governance, tokenizer, model, training, evaluation, safety,
-  serving, reproducibility, operations, and verification specs;
-- versioned TOML configurations and JSON schemas;
-- a synthetic conversation corpus with exact hashes and training consent;
-- from-scratch restricted BPE, packed causal chat datasets, a decoder-only
-  RoPE/RMSNorm/SwiGLU Transformer, training/checkpoint/resume, evaluation, and
-  bounded generation;
-- unit and end-to-end smoke tests.
+The application is synthetic. It has no connection to a bank and cannot access
+or modify real accounts.
 
-Start with [the specification index](specs/README.md) and the
-[requirements ledger](specs/00-requirements.md).
+## Model architecture
 
-## Quick start
+- `Qwen2MoeForCausalLM`
+- 8,943,713,792 total parameters
+- approximately 2,073,443,840 active parameters per token
+- 28 layers
+- 28 routed experts per layer, top-2 routing
+- BF16 released checkpoint
+- inherited 151,936-token Qwen vocabulary
 
-Requires Python 3.11+ and PyTorch. Training stages never download a model,
-tokenizer, or corpus; source acquisition is an explicit preparation step.
+Compatible embeddings, attention, normalization, and language representations
+were copied from the pinned 1.5B base model. The dense MLP was expanded into a
+shared expert and zero-initialized routed residual experts. Router weights and
+routed down projections were then adapted for 1,000 optimizer steps.
+
+See [the architecture specification](specs/banking-v2/04-dense-to-moe-routing.md)
+for the conversion and routing details.
+
+## Training data
+
+Generative adaptation uses the prepared Bitext retail-banking corpus plus a
+small self-authored set of governed out-of-domain and multi-turn conversations.
+The released split contains 22,033 training, 1,008 validation, and 1,001 test
+conversations.
+
+Banking77 and CLINC150 are classifier-only sources. They are used for the
+dual-head router and are prohibited from the generative training lane.
+
+Data preparation is deterministic and enforces:
+
+- pinned source revisions and fingerprints;
+- placeholder normalization;
+- PII-like value scrubbing;
+- exact and clustered cross-split deduplication;
+- explicit source licenses and trainability;
+- exact stock responses only for governed OOD records.
 
 ```bash
 python -m pip install -e '.[dev]'
-hello-slm validate --config configs/smoke.toml
-hello-slm smoke --config configs/smoke.toml
-hello-slm chat --config configs/smoke.toml \
-  --checkpoint artifacts/smoke/checkpoints/latest.pt \
-  --prompt "Hello"
-```
-
-## Prepare the arithmetic corpus
-
-Install the data-preparation extra, then acquire and transform the immutable
-Orca Math source. Raw and generated files are ignored by Git; the source lock
-and preparation code are versioned.
-
-```bash
-python -m pip install -e '.[data,dev]'
-python -m hello_slm.prepare_math
-hello-slm validate --config configs/arithmetic-30m.toml
-```
-
-The default preparation scans all 200,035 source rows and deterministically
-selects 50,000 normalized, exact-deduplicated conversations (48,992 train, 503
-validation, and 505 test with seed 2101). See
-`data/arithmetic/preparation-report.json` for accepted/rejected counts and
-source fingerprints. Tokenizer construction and model training are subsequent
-explicit stages.
-
-## Train the working arithmetic curriculum
-
-The controlled curriculum is the primary hello-world tutor. It supports bounded
-integer addition, subtraction, and exact division. Multiplication examples are
-included as exploratory data, but multiplication is not a supported quality
-claim for this checkpoint.
-
-```bash
-python -m hello_slm.prepare_arithmetic_curriculum
-hello-slm validate --config configs/arithmetic-curriculum-30m.toml
-hello-slm build-tokenizer --config configs/arithmetic-curriculum-30m.toml
-hello-slm build-dataset --config configs/arithmetic-curriculum-30m.toml
-hello-slm train --config configs/arithmetic-curriculum-30m.toml
-hello-slm eval --config configs/arithmetic-curriculum-30m.toml
-hello-slm eval-arithmetic --config configs/arithmetic-curriculum-30m.toml
-hello-slm chat --config configs/arithmetic-curriculum-30m.toml \
-  --prompt "What is 2 + 3?" --max-new-tokens 64
-```
-
-The completed 2,000-step run reached test-split perplexity `1.0115` and token
-accuracy `99.54%`. Deterministic generated-answer evaluation scored `95.10%`
-over supported operations: addition `100%`, subtraction `100%`, and exact
-division `83.72%`. This is a closed-corpus paraphrase/fact-recall check: paired
-phrasings of a fact may cross splits, so it is not evidence of arithmetic
-reasoning on unseen facts. Multiplication scored `30%` and remains explicitly
-unsupported.
-
-## Shiny arithmetic chat lab
-
-The local Shiny for Python app loads the completed arithmetic checkpoint lazily,
-keeps it in memory between prompts, and includes preset addition, subtraction,
-exact-division, and limitation-check cases. Presets and typed prompts use the
-same deterministic inference path.
-
-```bash
-python -m pip install -e '.[app]'
-shiny run --reload src/hello_slm/shiny_app.py
-```
-
-Open the local address printed by Shiny (normally `http://127.0.0.1:8000`). The
-app requires the generated tokenizer and trained checkpoint under
-`artifacts/arithmetic-curriculum-30m/`; those large local artifacts remain
-ignored by Git. Each displayed turn is evaluated independently rather than as
-multi-turn context.
-
-## Banking-v2 adaptation track
-
-The arithmetic checkpoint produces gibberish outside its presets because it is
-a 27.8M-parameter model trained on a small, highly regular arithmetic corpus
-with a 156-token realized vocabulary. Its strong closed-corpus score measures
-paraphrase/fact recall, not broad language understanding.
-
-Banking-v2 addresses that limitation as a separate experiment:
-
-- 24,042 prepared generative conversations: 24,006 Bitext banking QA records
-  plus 36 self-authored OOD and multi-turn records;
-- 22,033 train, 1,008 validation, and 1,001 test conversations, split by whole
-  near-duplicate groups;
-- 13,083 Banking77 rows reserved for router evaluation and never used as
-  generative SFT;
-- zero unresolved placeholders, detected PII-like strings, or normalized
-  cross-split user duplicates in the generated report;
-- corpus fingerprint
-  `6d26ef95cdfcc16bdb1056844062f6b93618b5092626058610ccf0502352727f`;
-- exact out-of-domain response enforced by the serving router before
-  generation;
-- session-isolated, bounded multi-turn history and an evaluation-gated
-  one-versus-four candidate test-time-scaling policy.
-
-Prepare and validate the local dataset:
-
-```bash
-python -m pip install -e '.[data,scale,dev]'
 python -m hello_slm.banking_data audit-sources
 python -m hello_slm.banking_data prepare
-python -c "from pathlib import Path; from hello_slm.banking_data import validate_banking_v2_manifest; validate_banking_v2_manifest(Path('data/banking-v2/manifest.json'))"
 ```
 
-The proposed model upcycles the pinned Qwen2.5 1.5B Instruct checkpoint into a
-Qwen2-MoE model with 8,943,713,792 total parameters and approximately
-2,073,443,840 active parameters per token. This is supervised domain adaptation,
-not from-scratch 9B pretraining: the available corpus is far too small to
-pretrain a capable 9B general language model from random initialization.
+Generated corpora and downloaded source snapshots are ignored by Git. Their
+tracked lock files are under `data/sources/`.
 
-The local code/specification and tiny MoE backward smoke tests do not mean the
-9B checkpoint has been trained. The authorized paid run uses one RTX PRO 6000,
-has a 5-hour/USD 13.75 cap, and targets the private Hub repository
-`spkc83/retail-bank-servicing-moe-9b`. Paid compute and external repository creation are
-approval-gated.
+## MoE training and evaluation
 
-Inspect the guarded job plan and run the offline tiny training loop:
+The reproducible model shape and run limits are in
+`configs/banking-v2-moe-9b.toml`. The executable worker is
+`scripts/banking_v2/cloud_train_banking_moe.py`.
+
+Run the offline tiny architecture test:
 
 ```bash
-python scripts/banking_v2/cloud_train_banking_moe.py
-python scripts/banking_v2/cloud_train_banking_moe.py \
-  --run-tiny-smoke --max-steps 1 --output-dir artifacts/banking-v2-tiny-smoke
+PYTHONPATH=src python scripts/banking_v2/cloud_train_banking_moe.py \
+  --run-tiny-smoke \
+  --max-steps 1 \
+  --output-dir artifacts/banking-v2-tiny-smoke
 ```
 
-The full worker requires all three remote guards: `--execute-remote`,
-`--allow-remote-execution`, and
-`HELLO_SLM_ALLOW_REMOTE_TRAINING=banking-v2`. It saves the inference artifact at
-`artifacts/banking-v2-moe-9b/final/` and may upload it only when
-`--push-to-hub` is explicitly supplied.
-
-The separate banking Shiny app keeps bounded conversation history per session,
-shows router confidence and candidate count, and includes banking, follow-up,
-and OOD presets:
+Inspect the guarded full-run plan without launching paid infrastructure:
 
 ```bash
-shiny run --reload src/hello_slm/banking_shiny_app.py
+PYTHONPATH=src python scripts/banking_v2/train_banking_moe.py
 ```
 
-OOD routing works without a checkpoint. In-domain inference fails explicitly
-until the trained model exists at `artifacts/banking-v2-moe-9b/final/`; set
-`HELLO_SLM_BANKING_MODEL` to use another local Transformers checkpoint.
+Remote execution requires both the worker flag and its explicit confirmation
+environment variable. Checkpoint resumes verify the base revision, dataset
+fingerprint, converted-state manifest, optimizer, scheduler, and RNG state.
 
-See [the banking-v2 specification](specs/banking-v2/README.md) for data,
-conversion, expert-health, evaluation, and serving gates.
+The released run completed 1,000 steps on an RTX PRO 6000:
 
-## Model-driven retail-bank POC
+- final training loss: `1.2638`;
+- validation loss: `0.7775`;
+- every expert-health gate passed at steps 250, 500, 750, and 1,000.
 
-The standalone
-[`retail-bank-customer-service-poc`](poc/retail-bank-customer-service-poc)
-turns the banking artifacts into an authenticated, end-to-end demonstration:
+These values demonstrate a completed run, not production readiness. The raw
+model still requires external domain, credential, tool, and output guards.
 
-- two static demo logins mapped to separate fictional customers;
-- a CPU dual-head OOD and Banking77 intent gate;
-- native Qwen tool calls generated by the 9B checkpoint on ZeroGPU;
-- server-side tool validation and explicit authorization for write actions;
-- per-browser-session in-memory SQLite cloned from immutable synthetic data;
-- model-authored final responses grounded in the executed tool result.
+## Dual-head router
 
-The standalone source is published at
-https://github.com/spkc83/retail-bank-customer-service-poc and the live
-application is at
-https://huggingface.co/spaces/spkc83/retail-bank-customer-service-poc.
-Neither connects to a real bank or performs real transactions.
+The CPU router shares a DistilBERT encoder between:
 
-Individual stages are also available:
+- a binary supported-banking/OOD head;
+- a 77-way Banking77 intent head.
+
+Prepare and train it locally:
 
 ```bash
-hello-slm build-tokenizer --config configs/smoke.toml
-hello-slm build-dataset --config configs/smoke.toml
-hello-slm train --config configs/smoke.toml --max-steps 2
-hello-slm eval --config configs/smoke.toml \
-  --checkpoint artifacts/smoke/checkpoints/latest.pt
+PYTHONPATH=src python scripts/banking_v2/prepare_dual_head_router_data.py
+PYTHONPATH=src python scripts/banking_v2/train_dual_head_router.py --help
 ```
 
-## Important boundary
+The public router artifact reports intent macro F1 `0.951208`, in-domain
+false-refusal rate `0.013689`, and OOD false-accept rate `0.007733` at a
+calibrated banking threshold of `0.98`.
 
-Passing the smoke flow proves that the pipeline is coherent; it does not produce
-a useful, factual, private, or safe assistant. This repository does not include
-production serving, moderation, distributed training, formal privacy, or broad
-safety certification. A real release requires an approved corpus, target-scale
-training evidence, the numeric evaluation gates, and completed data/model cards.
+## Local model lab
+
+The Shiny application loads a local Transformers checkpoint and supports
+multi-turn banking chat:
+
+```bash
+RETAIL_BANK_MODEL=/path/to/checkpoint \
+  shiny run --reload src/hello_slm/banking_shiny_app.py
+```
+
+The canonical BF16 checkpoint needs more than 12 GB of VRAM. The conversion
+script creates a separate GGUF copy and quantizes it to `Q4_K_M`; it does not
+modify the released BF16 model. The resulting file is about 5.1 GiB and fits in
+the 12 GB TITAN V, but local inference is not a supported release path yet:
+current llama.cpp builds do not load this tied-output Qwen2-MoE checkpoint
+without a loader workaround, and the tested workaround did not produce valid
+text. Use the public ZeroGPU application for validated model inference.
+
+With the model snapshot and llama.cpp checked out locally:
+
+```bash
+scripts/banking_v2/quantize_local_gguf.sh \
+  /path/to/retail-bank-servicing-moe-9b \
+  /path/to/llama.cpp \
+  artifacts/gguf
+
+sha256sum artifacts/gguf/retail-bank-servicing-moe-9b-q4_k_m.gguf
+```
+
+## Public POC
+
+The deployable Gradio source is in
+`poc/retail-bank-customer-service-poc/`. It includes:
+
+- two static demonstration accounts configured through a Space secret;
+- a learned CPU domain/intent router used as an advisory classifier;
+- a deterministic capability planner for supported servicing workflows;
+- authorization checks for synthetic writes;
+- CPU session-isolated synthetic SQLite state;
+- stateless ZeroGPU 9B response finalization over sanitized tool results;
+- preset read, write, multi-turn, sensitive-data, and OOD cases.
+
+The public Space is operational on ZeroGPU. Authenticated end-to-end checks
+exercise deterministic workflow selection, policy validation,
+session-isolated SQLite reads and writes, exact monetary grounding,
+model-authored responses, sanitized multi-turn context, OOD refusal, and the
+credential guard for both demo users. The current synthetic data has limited
+address-history coverage through service-case records; it is not a full
+customer-profile audit log.
+
+ZeroGPU compatibility requires the decorated event function to live directly
+in `app.py` and Qwen2-MoE expert execution to use the eager implementation on
+the current Blackwell partition.
+
+## Verification
+
+```bash
+python -m pytest \
+  tests/test_banking_chat_runtime.py \
+  tests/test_banking_cloud_worker.py \
+  tests/test_banking_data.py \
+  tests/test_banking_dual_head_router.py \
+  tests/test_banking_hf_generator.py \
+  tests/test_banking_moe.py \
+  tests/test_banking_policy.py \
+  tests/test_banking_router_data.py \
+  tests/test_banking_router_training.py \
+  tests/test_banking_shiny_app.py \
+  poc/retail-bank-customer-service-poc/tests
+ruff check src scripts tests poc/retail-bank-customer-service-poc
+mypy src scripts tests
+```
 
 ## Repository map
 
 ```text
-configs/        experiment and evaluation profiles
-data/sources/   immutable external and synthetic dataset locks
-examples/       synthetic restricted corpus
-schemas/        serialized contract schemas
-specs/          normative build and acceptance specifications
-templates/      required model/data card templates
-src/hello_slm/  minimal reference implementation
-tests/          unit and end-to-end verification
+configs/        banking dense-baseline and MoE run configurations
+data_cards/     released classifier-dataset documentation
+data/sources/   governed source locks; generated data is ignored
+model_cards/    released generative-model and router documentation
+poc/            current authenticated Gradio application
+scripts/        cloud training, evaluation, and router tooling
+specs/          banking data, model, routing, evaluation, and serving contracts
+src/hello_slm/  banking data, model, router, policy, and local UI modules
+tests/          banking-only regression tests
 ```
 
-Licensed under MIT. The synthetic corpus is authored for this repository and is
-covered by the corpus manifest's explicit training grant.
+## Safety boundary
+
+This is a research demonstration, not financial advice or a production banking
+system. Do not enter passwords, PINs, one-time codes, full account numbers, or
+payment-card details. The model may produce incorrect or unsafe financial
+guidance and must remain behind deterministic validation and human review.
+
+## License
+
+Repository code is MIT licensed. Dataset rows retain their source licenses:
+Bitext generative records are CDLA-Sharing-1.0, self-authored records are MIT,
+and Banking77/CLINC150 classifier records are CC-BY-4.0.

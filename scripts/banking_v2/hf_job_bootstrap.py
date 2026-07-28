@@ -25,7 +25,7 @@ from typing import Any
 from huggingface_hub import HfApi
 
 HUB_DEST = "spkc83/retail-bank-servicing-moe-9b"
-ROOT = Path("/tmp/hello-slm-banking-v2")
+ROOT = Path("/tmp/retail-bank-servicing")
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,7 +58,7 @@ def publish_status(
         "per_layer_router_aux_loss_coef": per_layer_aux_coef,
         **extra,
     }
-    api.create_repo(repo_id=HUB_DEST, repo_type="model", private=True, exist_ok=True)
+    api.create_repo(repo_id=HUB_DEST, repo_type="model", private=False, exist_ok=True)
     api.upload_file(
         path_or_fileobj=io.BytesIO(json.dumps(payload, indent=2, sort_keys=True).encode()),
         path_in_repo=f"runs/{run_id}/status.json",

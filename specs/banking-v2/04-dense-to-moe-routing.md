@@ -1,403 +1,371 @@
 # Dense-to-MoE conversion and routing
 
-“Copies its learned language representations” means copying the pretrained
-model’s weights, not copying a separate language database or set of embeddings.
+This document explains how the pinned 1.5B Qwen checkpoint is expanded into the
+released 8.94B Qwen2-MoE checkpoint. All equations use plain text so they render
+consistently in GitHub, Hugging Face, terminals, and basic Markdown viewers.
 
-The pretrained 1.5B model has already learned useful transformations for
-syntax, vocabulary, dialogue structure, and common concepts. The conversion
-preserves those transformations while replacing each dense feed-forward block
-with a shared-plus-routed MoE block.
+“Copying learned language representations” means copying pretrained weights. It
+does not mean copying a separate language database.
 
-## 1. What the pretrained model contains
+## 1. Scope
 
-Each Qwen transformer layer is approximately:
+The base checkpoint is:
 
 ```text
-hidden state
-    │
-    ├── self-attention
-    │
-    └── dense MLP
-            gate projection
-            up projection
-            activation
-            down projection
+Qwen/Qwen2.5-1.5B-Instruct
+revision 989aa7980e4cf806f80c7fef2b1adb7bc71aa306
 ```
 
-The dense MLP computes:
+The conversion preserves the base model’s embeddings, attention,
+normalization, and initial output behavior while replacing each dense
+feed-forward block.
 
-\[
-\operatorname{DenseMLP}(h)
-=
-W_{\text{down}}
-\left(
-\operatorname{SiLU}(W_{\text{gate}}h)
-\odot
-W_{\text{up}}h
-\right)
-\]
+The released model is domain-adapted. It is not a 9B model trained from random
+initialization.
 
-Here, `h` is the contextual representation of one token.
+## 2. Notation and dimensions
 
-Language knowledge is distributed throughout:
+For one token in one transformer layer:
 
-- token embeddings;
-- attention projections;
-- layer-normalization weights;
-- MLP projections;
-- final normalization;
-- tied language-model output head.
+| Symbol | Meaning | Shape |
+|---|---|---:|
+| `h` | token hidden state | `1536` |
+| `W_gate` | dense gate projection | `8960 × 1536` |
+| `W_up` | dense up projection | `8960 × 1536` |
+| `W_down` | dense down projection | `1536 × 8960` |
+| `W_router` | MoE router matrix | `28 × 1536` |
+| `E` | routed expert count | `28` |
+| `K` | experts selected per token | `2` |
 
-There is no single “English-language component.” The behavior emerges from all
-these matrices working together.
+Each routed expert has intermediate width 2,048. The shared expert retains the
+base model’s intermediate width of 8,960.
 
-## 2. What is copied unchanged
+## 3. Original dense MLP
 
-The base is pinned to `Qwen/Qwen2.5-1.5B-Instruct`. The MoE model deliberately
-keeps the same core dimensions:
+The base Qwen layer uses a SwiGLU feed-forward block:
 
-- vocabulary: 151,936
-- hidden size: 1,536
-- layers: 28
-- query heads: 12
-- key/value heads: 2
-- dense intermediate size: 8,960
+```text
+D(h) = W_down × [SiLU(W_gate × h) element-wise-multiplied-by (W_up × h)]
+```
 
-Every tensor outside the dense MLPs is copied directly:
+The block is only one part of the learned language function. Knowledge is
+distributed across embeddings, attention, normalization, MLP weights, and the
+language-model head.
+
+## 4. Tensors copied without modification
+
+Every compatible tensor outside the dense MLP is copied directly:
 
 ```python
 converted = {
-    key: clone(value)
-    for key, value in dense_state.items()
-    if ".mlp." not in key
+    name: tensor.clone()
+    for name, tensor in dense_state.items()
+    if ".mlp." not in name
 }
 ```
 
-That preserves:
+This preserves:
 
-- the complete tokenizer embedding table;
-- all 28 self-attention blocks;
-- positional/RoPE behavior;
-- normalization weights;
-- the final language-model head.
+- the 151,936-token embedding table;
+- all 28 attention blocks;
+- rotary-position behavior;
+- all normalization weights;
+- final normalization;
+- the tied language-model output head.
 
-The tied `lm_head.weight` is omitted from the converted state and tied back to
+The tied `lm_head.weight` does not need an independent copy. It is tied back to
 the token embedding after loading.
 
-## 3. Replacing the dense MLP with MoE
+## 5. New shared-plus-routed block
 
-Each of the 28 layers becomes:
-
-```text
-                       ┌── shared dense expert ─────────┐
-hidden state ──────────┤                                ├── add ── output
-                       └── router → selected experts ───┘
-```
-
-The MoE block contains:
-
-- one shared expert, always active;
-- 28 routed experts;
-- a router that selects two routed experts for each token;
-- a learned gate controlling the shared expert.
-
-Mathematically:
-
-\[
-\operatorname{MoE}(h)
-=
-\sigma(w_s h)\operatorname{SharedExpert}(h)
-+
-\sum_{i \in \operatorname{Top2}(h)}
-p_i(h)\operatorname{Expert}_i(h)
-\]
-
-## 4. How the original dense behavior is preserved
-
-The shared expert receives the original dense MLP weights:
+Each dense MLP becomes one always-active shared expert plus 28 routed experts:
 
 ```text
-shared gate projection = original gate projection
-shared up projection   = original up projection
-shared down projection = 2 × original down projection
-shared gate weight     = 0
+                           ┌── shared expert ───────────────┐
+token hidden state ────────┤                                ├── sum ── output
+                           └── router → top-2 experts ──────┘
 ```
 
-Because the shared gate starts at zero:
+The converted block is:
 
-\[
-\sigma(0) = 0.5
-\]
+```text
+M(h) = shared_gate(h) × shared_expert(h)
+     + sum of [routing_weight_i(h) × expert_i(h)]
+       for the two selected experts
+```
+
+Definitions:
+
+- `shared_expert(h)` is the always-active shared expert;
+- `shared_gate(h)` controls the shared expert’s contribution;
+- `expert_i(h)` is routed expert `i`;
+- `top2(h)` is the set of two experts selected for token `h`;
+- `routing_weight_i(h)` is expert `i`’s normalized routing weight.
+
+## 6. Behavior-preserving initialization
+
+The shared expert starts from the original dense MLP:
+
+```text
+shared gate projection = W_gate
+shared up projection   = W_up
+shared down projection = 2 × W_down
+shared gate vector     = 0
+```
+
+The shared gate is a sigmoid:
+
+```text
+shared_gate(h) = sigmoid(shared_gate_vector dot h)
+```
+
+Because the shared gate vector starts at zero:
+
+```text
+shared_gate(h) = sigmoid(0) = 0.5
+```
+
+The initialized shared expert is:
+
+```text
+shared_expert(h)
+  = 2 × W_down
+    × [SiLU(W_gate × h) element-wise-multiplied-by (W_up × h)]
+```
 
 Therefore:
 
-\[
-0.5 \times
-\left(
-2W_{\text{down}}
-\left[
-\operatorname{SiLU}(W_{\text{gate}}h)
-\odot W_{\text{up}}h
-\right]
-\right)
-=
-\operatorname{DenseMLP}(h)
-\]
+```text
+shared_gate(h) × shared_expert(h)
+  = 0.5 × 2 × W_down
+    × [SiLU(W_gate × h) element-wise-multiplied-by (W_up × h)]
+  = D(h)
+```
 
-So the shared branch initially reproduces the original dense MLP.
-
-Meanwhile, every routed expert’s down projection starts at zero:
-
-\[
-W_{\text{expert-down}} = 0
-\]
-
-Consequently:
-
-\[
-\operatorname{Expert}_i(h)=0
-\]
-
-regardless of which experts the router selects. At initialization:
-
-\[
-\operatorname{MoE}(h)
-\approx
-\operatorname{DenseMLP}(h)
-\]
-
-This is the essential upcycling mechanism: the model starts as the pretrained
-1.5B model’s function, with additional expert branches initially contributing
-nothing.
-
-The full 9B conversion has not yet been executed, so exact full-checkpoint logit
-equivalence remains an acceptance test rather than completed evidence.
-
-## 5. How routed experts are initialized
-
-Each routed expert is smaller than the shared expert:
+Every routed expert starts with a zero down projection:
 
 ```text
-hidden size:                1,536
-routed intermediate size:  2,048
-shared intermediate size:  8,960
-experts per layer:         28
+expert_down_i = 0
 ```
 
-The fused expert gate/up tensor has shape:
+For routed expert `i`:
 
 ```text
-(28 experts, 4096 gate+up rows, 1536 hidden dimensions)
+expert_i(h)
+  = expert_down_i
+    × [SiLU(expert_gate_i × h)
+       element-wise-multiplied-by
+       (expert_up_i × h)]
+  = 0
 ```
 
-For each expert, the converter chooses 2,048 rows from the original dense gate
-projection and 2,048 corresponding rows from the dense up projection:
-
-```python
-offset = (layer * 997 + expert * 2048) % 8960
-expert_gate = dense_gate[offset : offset + 2048]
-expert_up   = dense_up[offset : offset + 2048]
-```
-
-Wrapping is used when the slice crosses the end of the matrix. Small
-deterministic noise is added so experts do not begin completely identical.
-
-The expert’s down projection has shape:
+Thus, before training:
 
 ```text
-(1536, 2048)
+M(h) = D(h)
 ```
 
-and starts at zero.
+This equality is the core upcycling invariant. The new routed capacity begins
+as a zero residual around the pretrained dense function.
 
-Thus every expert initially has pretrained feature detectors in its gate/up
-side, but cannot affect the model until its down projection learns a useful
-residual.
+## 7. Routed expert initialization
 
-## 6. How internal MoE routing works
+Each routed expert receives a deterministic 2,048-row slice of the original
+dense gate and up projections.
 
-Routing happens independently:
-
-- for every token;
-- in every transformer layer;
-- during both training and inference.
-
-For a batch containing `T = batch × sequence length` tokens, the layer’s hidden
-states have shape:
+For layer `layer`, expert `expert`, and expert row `row`:
 
 ```text
-(T, 1536)
+source_row
+  = (layer × 997 + expert × 2048 + row) modulo 8960
 ```
 
-Each layer has a router matrix:
+The selected source row is copied into both routed projections with small,
+deterministic noise:
 
 ```text
-W_router: (28, 1536)
+expert_gate[expert, row]
+  = W_gate[source_row] + gate_noise[layer, expert, row]
+
+expert_up[expert, row]
+  = W_up[source_row] + up_noise[layer, expert, row]
 ```
 
-The router calculates:
+The seed-controlled noise prevents all experts from beginning with identical
+feature detectors.
 
-\[
-r = h W_{\text{router}}^T
-\]
-
-producing 28 logits per token:
+The fused gate/up tensor for one layer has shape:
 
 ```text
-router logits: (T, 28)
+(28 experts, 4096 gate-plus-up rows, 1536 hidden dimensions)
 ```
 
-It then applies softmax:
-
-\[
-p_i = \frac{e^{r_i}}{\sum_j e^{r_j}}
-\]
-
-and selects the two largest probabilities:
-
-```python
-probabilities = softmax(router_logits)
-weights, expert_ids = topk(probabilities, k=2)
-weights = weights / weights.sum()
-```
-
-For example, one token might produce:
+Each routed down projection has shape:
 
 ```text
-expert 7:  0.42
-expert 19: 0.26
-expert 3:  0.08
-...
+(1536 hidden dimensions, 2048 expert dimensions)
 ```
 
-After selecting and renormalizing the top two:
+It starts at zero and learns a residual projection during adaptation.
+
+## 8. Internal token routing
+
+Routing occurs independently for every token in every transformer layer.
+
+For `T` non-padding tokens, the hidden-state matrix has shape:
 
 ```text
-expert 7:  0.618
-expert 19: 0.382
+H shape = T × 1536
 ```
 
-The routed output becomes:
-
-\[
-0.618E_7(h) + 0.382E_{19}(h)
-\]
-
-The next token can select completely different experts. Layer 12 can also
-route a token differently from layer 11.
-
-Experts are not manually labeled as “cards,” “loans,” or “transfers.” Any
-specialization must emerge from training.
-
-## 7. What is trained
-
-The current policy freezes the original language model and most new expert
-parameters.
-
-Trainable:
-
-- 28 router matrices per layer;
-- each routed expert’s down projection.
-
-Frozen:
-
-- embeddings and output head;
-- attention layers;
-- layer normalization;
-- shared expert;
-- routed expert gate/up projections.
-
-Parameter totals:
+The layer router produces 28 logits per token:
 
 ```text
-Entire model:       8,943,713,792
-Active per token:  ~2,073,443,840
-Trainable:          2,467,454,976
+Z = H × transpose(W_router)
+Z shape = T × 28
 ```
 
-Although 28 experts exist per layer, only two routed experts plus the shared
-expert execute for each token.
+For one token, expert `i` receives a softmax probability:
 
-## 8. How the experts begin learning
+```text
+p_i(h) = exp(logit_i)
+         ÷ sum(exp(logit_j) for j from 1 through 28)
+```
 
-At the first step, routed outputs are zero because their down matrices are
-zero. However, the down matrices still receive gradients:
+The router selects the two largest probabilities:
 
-\[
-\frac{\partial L}{\partial W_{\text{down}}}
-\neq 0
-\]
+```text
+top2(h) = the indices of the two largest values in p(h)
+```
 
-Their gate/up features are already nonzero, so the optimizer can learn how to
-project those fixed features back into the model’s hidden representation.
+The two selected probabilities are renormalized:
 
-As routed down matrices become nonzero:
+```text
+routing_weight_i(h)
+  = p_i(h) ÷ sum(p_j(h) for j in top2(h))
+```
 
-- selected experts begin affecting token predictions;
-- language-model loss begins training the router toward useful selections;
-- different experts can specialize around different patterns.
+Only selected experts receive a routing weight. Their routed residual is:
 
-The router also receives a load-balancing auxiliary loss with coefficient
-`0.01`. This discourages routing every token to the same one or two experts.
+```text
+routed_residual(h)
+  = sum(routing_weight_i(h) × expert_i(h) for i in top2(h))
+```
 
-## 9. Preventing expert collapse
+Example: experts 7 and 19 are selected with probabilities 0.42 and 0.26.
 
-After the first 250 steps, every layer must pass these gates:
+```text
+routing_weight_7  = 0.42 ÷ (0.42 + 0.26) ≈ 0.618
+routing_weight_19 = 0.26 ÷ (0.42 + 0.26) ≈ 0.382
 
-- every expert receives at least 0.5% of assignments;
+routed_residual(h)
+  ≈ 0.618 × expert_7(h) + 0.382 × expert_19(h)
+```
+
+Another token or layer may select different experts. Experts are not manually
+labeled as cards, loans, transfers, or other intents.
+
+## 9. Trainable parameters and gradient flow
+
+The adaptation policy freezes:
+
+- embeddings and tied output head;
+- attention and normalization;
+- the shared expert;
+- routed expert gate and up projections.
+
+It trains:
+
+- every layer’s router matrix;
+- every routed expert down projection.
+
+Exact model counts:
+
+| Quantity | Parameters |
+|---|---:|
+| Total checkpoint | 8,943,713,792 |
+| Estimated active per token | 2,073,443,840 |
+| Routed down projections | 2,466,250,752 |
+| Router matrices | 1,204,224 |
+| Total trainable | 2,467,454,976 |
+
+At initialization, routed down matrices receive nonzero gradients because
+their input features are nonzero:
+
+```text
+gradient(total_loss, expert_down_i) is not zero
+```
+
+The language-model gradient to routed gate/up weights and router choices is
+zero while every routed output is exactly zero.
+
+The auxiliary routing loss can still train the router immediately. Once routed
+down projections become nonzero, the language-model loss also informs routing.
+
+## 10. Load balancing and expert-health gates
+
+The training objective includes router load balancing:
+
+```text
+total_loss = language_model_loss + 0.01 × router_auxiliary_loss
+```
+
+Starting at step 250, every layer must satisfy:
+
+- each expert receives at least 0.5% of assignments;
 - no expert receives more than 20%;
 - normalized routing entropy is at least 0.75;
 - auxiliary loss is finite;
-- routed down projections receive nonzero gradients.
+- routed down projections receive finite, nonzero gradients.
 
-Training stops if the router collapses.
+Counts exclude padding tokens. Gates are evaluated every 250 steps over the
+final 50 steps of the interval.
 
-## 10. Two different kinds of routing
+The released 1,000-step run passed every per-layer expert-health gate at steps
+250, 500, 750, and 1,000.
 
-The project has two unrelated routers.
+## 11. Internal and external routing
 
-### External domain router
+The system contains two independent routers.
 
-This runs before language-model inference:
+### External domain and intent router
 
 ```text
-user query
-   │
-   ├── banking → run language model
-   └── OOD     → exact canned response, no generation
+customer message
+    ├── supported banking → run the language model
+    └── OOD               → return the exact stock response
 ```
 
-It enforces the financial-services boundary and exact stock response. The
-current implementation is a deterministic integration fixture, not yet the
-trained production router.
+This CPU DistilBERT model has a binary domain head and a 77-way Banking77 intent
+head. It enforces the application boundary before model inference.
 
 ### Internal MoE router
 
-This operates inside every transformer layer:
-
 ```text
-token hidden state → select 2 of 28 experts
+token hidden state → select 2 of 28 experts in this layer
 ```
 
-It does not decide whether a question is banking-related and cannot guarantee
-the canned OOD response.
+This router distributes neural computation. It does not decide whether a user
+request belongs to the banking domain.
 
-The external router handles application policy; the internal router distributes
-neural computation.
+The external router enforces policy. The internal router allocates model
+capacity.
 
-## Important limitation
+## 12. Evidence and limitations
 
-Upcycling does not transform 1.5B worth of learned knowledge into 9B worth of
-learned knowledge instantly.
+The full conversion and 1,000-step adaptation run completed. The released BF16
+checkpoint contains 8,943,713,792 parameters.
 
-At initialization, this is effectively:
+The repository tests the dense-equivalence calculation and requires maximum
+absolute logit error no greater than `0.00001` before training.
+
+The expansion does not create 9B parameters of pretrained knowledge. At
+initialization, the model is approximately:
 
 ```text
 pretrained 1.5B language capability
-+ approximately 7.4B parameters of mostly inactive/untrained expert capacity
++ 7.4B parameters of mostly inactive routed capacity
 ```
 
-The banking corpus would teach the residual experts domain behavior, but five
-million tokens are still limited. The additional experts can specialize; they
-cannot acquire the breadth of a genuinely pretrained 9B model from that corpus
-alone.
+The restricted banking corpus teaches residual domain behavior. It cannot give
+the model the breadth of a 9B checkpoint pretrained on a large general corpus.

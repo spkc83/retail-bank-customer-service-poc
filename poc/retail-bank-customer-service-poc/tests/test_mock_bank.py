@@ -36,6 +36,26 @@ def test_sessions_and_authenticated_customers_are_isolated() -> None:
     assert bank.snapshot("maya.demo", "maya-session")["cards"][0]["last4"] == "7319"
 
 
+def test_file_backed_state_is_shared_across_worker_registries(tmp_path: Path) -> None:
+    first = SessionBankRegistry.from_json(
+        ROOT / "synthetic_bank.json",
+        database_dir=tmp_path,
+    )
+    second = SessionBankRegistry.from_json(
+        ROOT / "synthetic_bank.json",
+        database_dir=tmp_path,
+    )
+
+    first.execute("alex.demo", "shared-session", "freeze_card", {})
+
+    assert second.snapshot("alex.demo", "shared-session")["cards"][0]["status"] == "frozen"
+    assert second.snapshot("alex.demo", "other-session")["cards"][0]["status"] == "active"
+
+    second.reset("alex.demo", "shared-session")
+
+    assert first.snapshot("alex.demo", "shared-session")["cards"][0]["status"] == "active"
+
+
 def test_supported_mock_actions_mutate_only_session_database() -> None:
     bank = registry()
     user = "alex.demo"
@@ -50,6 +70,37 @@ def test_supported_mock_actions_mutate_only_session_database() -> None:
     assert cancelled["transfer"]["status"] == "cancelled"
     assert replaced["card"]["status"] == "replacement_pending"
     assert len(snapshot["service_cases"]) == 3
+
+
+def test_read_bundle_returns_ordered_consistent_results_without_mutation() -> None:
+    bank = registry()
+
+    result = bank.execute_read_bundle(
+        "alex.demo",
+        "read-session",
+        (
+            ("list_transfers", {}),
+            ("list_transactions", {"limit": 3}),
+        ),
+    )
+
+    assert tuple(result) == ("list_transfers", "list_transactions")
+    assert len(result["list_transfers"]["transfers"]) == 2
+    assert len(result["list_transactions"]["transactions"]) == 3
+    assert bank.snapshot("alex.demo", "read-session")["transfers"][0]["status"] == "pending"
+
+
+def test_read_bundle_rejects_write_tools_before_execution() -> None:
+    bank = registry()
+
+    with pytest.raises(ValueError, match="read bundle"):
+        bank.execute_read_bundle(
+            "alex.demo",
+            "read-session",
+            (("list_accounts", {}), ("freeze_card", {})),
+        )
+
+    assert bank.snapshot("alex.demo", "read-session")["cards"][0]["status"] == "active"
 
 
 def test_tool_scope_rejects_unknown_users_sessions_and_cross_customer_arguments() -> None:

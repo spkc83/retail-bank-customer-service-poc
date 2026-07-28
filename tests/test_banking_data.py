@@ -156,7 +156,7 @@ def test_prepare_generates_banking_v2_dataset_and_report(tmp_path: Path) -> None
         assert set(coverage["multi_turn_patterns"]) == required_patterns
 
     manifest = validate_banking_v2_manifest(output_dir / "manifest.json")
-    assert manifest["name"] == "hello-slm-banking-v2"
+    assert manifest["name"] == "retail-bank-servicing-v2"
     assert [entry["name"] for entry in manifest["generative_sft"]] == [
         "train",
         "validation",

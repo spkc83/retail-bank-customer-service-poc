@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 READ_TOOLS = {
     "list_accounts",
@@ -23,6 +25,18 @@ WRITE_TOOLS = {
     "replace_card",
 }
 SUPPORTED_TOOLS = READ_TOOLS | WRITE_TOOLS
+TOOL_ARGUMENTS = {
+    "list_accounts": set(),
+    "list_cards": set(),
+    "list_service_cases": set(),
+    "list_transactions": {"limit"},
+    "list_transfers": set(),
+    "cancel_transfer": {"transfer_id"},
+    "dispute_transaction": {"transaction_id"},
+    "freeze_card": {"last4"},
+    "replace_card": {"last4"},
+}
+T = TypeVar("T")
 
 
 @dataclass
@@ -39,6 +53,7 @@ class SessionBankRegistry:
         *,
         ttl_seconds: float = 7200,
         max_sessions: int = 32,
+        database_dir: str | Path | None = None,
     ) -> None:
         if payload.get("contract") != "synthetic-retail-bank-v1":
             raise ValueError("unexpected synthetic bank contract")
@@ -54,6 +69,9 @@ class SessionBankRegistry:
         }
         self._ttl_seconds = ttl_seconds
         self._max_sessions = max_sessions
+        self._database_dir = Path(database_dir) if database_dir is not None else None
+        if self._database_dir is not None:
+            self._database_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._sessions: dict[tuple[str, str], SessionEntry] = {}
         self._lock = threading.RLock()
 
@@ -64,9 +82,15 @@ class SessionBankRegistry:
         *,
         ttl_seconds: float = 7200,
         max_sessions: int = 32,
+        database_dir: str | Path | None = None,
     ) -> SessionBankRegistry:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        return cls(payload, ttl_seconds=ttl_seconds, max_sessions=max_sessions)
+        return cls(
+            payload,
+            ttl_seconds=ttl_seconds,
+            max_sessions=max_sessions,
+            database_dir=database_dir,
+        )
 
     def snapshot(self, username: str, session_hash: str) -> dict[str, Any]:
         entry = self._entry(username, session_hash)
@@ -75,10 +99,14 @@ class SessionBankRegistry:
 
     def reset(self, username: str, session_hash: str) -> dict[str, Any]:
         key = self._validated_key(username, session_hash)
+        if self._database_dir is not None:
+            entry = self._entry(username, session_hash)
+            with entry.lock:
+                _reset_seed(entry.connection, self._customers[username])
+                return _snapshot(entry.connection)
         with self._lock:
-            entry = self._sessions.pop(key, None)
-            if entry is not None:
-                entry.connection.close()
+            if key in self._sessions:
+                self._sessions.pop(key).connection.close()
         return self.snapshot(username, session_hash)
 
     def execute(
@@ -88,25 +116,73 @@ class SessionBankRegistry:
         tool_name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
+        result, _ = self.execute_atomic(
+            username,
+            session_hash,
+            tool_name,
+            arguments,
+            finalize=lambda _result: None,
+        )
+        return result
+
+    def execute_atomic(
+        self,
+        username: str,
+        session_hash: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        finalize: Callable[[dict[str, Any]], T],
+    ) -> tuple[dict[str, Any], T]:
+        """Commit only after the caller validates its final response."""
+
         if tool_name not in SUPPORTED_TOOLS:
             raise ValueError(f"unsupported tool: {tool_name}")
-        allowed_arguments = {
-            "list_accounts": set(),
-            "list_cards": set(),
-            "list_service_cases": set(),
-            "list_transactions": {"limit"},
-            "list_transfers": set(),
-            "cancel_transfer": {"transfer_id"},
-            "dispute_transaction": {"transaction_id"},
-            "freeze_card": {"last4"},
-            "replace_card": {"last4"},
-        }[tool_name]
+        allowed_arguments = TOOL_ARGUMENTS[tool_name]
         extras = set(arguments) - allowed_arguments
         if extras:
             raise ValueError(f"unsupported arguments for {tool_name}: {sorted(extras)}")
         entry = self._entry(username, session_hash)
         with entry.lock:
-            result = _execute(entry.connection, tool_name, arguments)
+            entry.connection.execute("BEGIN IMMEDIATE")
+            try:
+                result = _execute(entry.connection, tool_name, arguments)
+                finalized = finalize(result)
+            except Exception:
+                entry.connection.rollback()
+                raise
+            entry.connection.commit()
+            return result, finalized
+
+    def execute_read_bundle(
+        self,
+        username: str,
+        session_hash: str,
+        calls: tuple[tuple[str, dict[str, Any]], ...],
+    ) -> dict[str, dict[str, Any]]:
+        """Execute an ordered read-only workflow against one consistent snapshot."""
+
+        if not calls:
+            raise ValueError("read bundle must contain at least one tool")
+        for tool_name, arguments in calls:
+            if tool_name not in READ_TOOLS:
+                raise ValueError(f"read bundle cannot execute {tool_name}")
+            extras = set(arguments) - TOOL_ARGUMENTS[tool_name]
+            if extras:
+                raise ValueError(
+                    f"unsupported arguments for {tool_name}: {sorted(extras)}"
+                )
+        entry = self._entry(username, session_hash)
+        with entry.lock:
+            entry.connection.execute("BEGIN")
+            try:
+                result = {
+                    tool_name: _execute(entry.connection, tool_name, arguments)
+                    for tool_name, arguments in calls
+                }
+            except Exception:
+                entry.connection.rollback()
+                raise
             entry.connection.commit()
             return result
 
@@ -130,14 +206,33 @@ class SessionBankRegistry:
                         key=lambda candidate: self._sessions[candidate].last_access,
                     )
                     self._sessions.pop(oldest_key).connection.close()
-                connection = sqlite3.connect(":memory:", check_same_thread=False)
+                database = (
+                    ":memory:"
+                    if self._database_dir is None
+                    else str(self._database_path(username, session_hash))
+                )
+                connection = sqlite3.connect(
+                    database,
+                    check_same_thread=False,
+                    timeout=30,
+                )
                 connection.row_factory = sqlite3.Row
                 _initialize(connection)
-                _seed_customer(connection, self._customers[username])
+                customer_count = connection.execute(
+                    "SELECT COUNT(*) FROM customer"
+                ).fetchone()[0]
+                if customer_count == 0:
+                    _seed_customer(connection, self._customers[username])
                 entry = SessionEntry(connection=connection, last_access=now)
                 self._sessions[key] = entry
             entry.last_access = now
             return entry
+
+    def _database_path(self, username: str, session_hash: str) -> Path:
+        if self._database_dir is None:
+            raise RuntimeError("database directory is not configured")
+        digest = hashlib.sha256(f"{username}\0{session_hash}".encode()).hexdigest()
+        return self._database_dir / f"{digest}.sqlite3"
 
     def _purge(self, now: float) -> None:
         expired = [
@@ -153,7 +248,7 @@ def _initialize(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
         PRAGMA foreign_keys = ON;
-        CREATE TABLE customer (
+        CREATE TABLE IF NOT EXISTS customer (
             customer_id TEXT PRIMARY KEY,
             login TEXT NOT NULL UNIQUE,
             display_name TEXT NOT NULL,
@@ -161,7 +256,7 @@ def _initialize(connection: sqlite3.Connection) -> None:
             city TEXT NOT NULL,
             member_since TEXT NOT NULL
         );
-        CREATE TABLE account (
+        CREATE TABLE IF NOT EXISTS account (
             account_id TEXT PRIMARY KEY,
             customer_id TEXT NOT NULL REFERENCES customer(customer_id),
             name TEXT NOT NULL,
@@ -172,7 +267,7 @@ def _initialize(connection: sqlite3.Connection) -> None:
             current_balance_cents INTEGER NOT NULL,
             status TEXT NOT NULL
         );
-        CREATE TABLE card (
+        CREATE TABLE IF NOT EXISTS card (
             card_id TEXT PRIMARY KEY,
             customer_id TEXT NOT NULL REFERENCES customer(customer_id),
             account_id TEXT NOT NULL REFERENCES account(account_id),
@@ -181,7 +276,7 @@ def _initialize(connection: sqlite3.Connection) -> None:
             status TEXT NOT NULL,
             wallet_status TEXT NOT NULL
         );
-        CREATE TABLE bank_transaction (
+        CREATE TABLE IF NOT EXISTS bank_transaction (
             transaction_id TEXT PRIMARY KEY,
             account_id TEXT NOT NULL REFERENCES account(account_id),
             posted_at TEXT NOT NULL,
@@ -192,7 +287,7 @@ def _initialize(connection: sqlite3.Connection) -> None:
             category TEXT NOT NULL,
             disputed INTEGER NOT NULL
         );
-        CREATE TABLE bank_transfer (
+        CREATE TABLE IF NOT EXISTS bank_transfer (
             transfer_id TEXT PRIMARY KEY,
             customer_id TEXT NOT NULL REFERENCES customer(customer_id),
             from_account_id TEXT NOT NULL REFERENCES account(account_id),
@@ -203,7 +298,7 @@ def _initialize(connection: sqlite3.Connection) -> None:
             status TEXT NOT NULL,
             reference TEXT NOT NULL
         );
-        CREATE TABLE service_case (
+        CREATE TABLE IF NOT EXISTS service_case (
             case_id TEXT PRIMARY KEY,
             customer_id TEXT NOT NULL REFERENCES customer(customer_id),
             case_type TEXT NOT NULL,
@@ -299,6 +394,24 @@ def _seed_customer(connection: sqlite3.Connection, customer: dict[str, Any]) -> 
             ),
         )
     connection.commit()
+
+
+def _reset_seed(connection: sqlite3.Connection, customer: dict[str, Any]) -> None:
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        for table in (
+            "service_case",
+            "bank_transfer",
+            "bank_transaction",
+            "card",
+            "account",
+            "customer",
+        ):
+            connection.execute(f"DELETE FROM {table}")
+        _seed_customer(connection, customer)
+    except Exception:
+        connection.rollback()
+        raise
 
 
 def _snapshot(connection: sqlite3.Connection) -> dict[str, Any]:

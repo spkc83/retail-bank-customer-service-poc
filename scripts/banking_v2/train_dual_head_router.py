@@ -57,7 +57,7 @@ class RouterDataset(Dataset[dict[str, Any]]):
 class DualHeadRouter(nn.Module):
     def __init__(self, encoder: nn.Module, *, hidden_size: int, num_intents: int) -> None:
         super().__init__()
-        self.encoder = encoder
+        self.encoder: Any = encoder
         self.dropout = nn.Dropout(0.1)
         self.domain_head = nn.Linear(hidden_size, 2)
         self.intent_head = nn.Linear(hidden_size, num_intents)
@@ -259,7 +259,7 @@ def main() -> int:
         num_training_steps=total_steps,
     )
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
-    history = []
+    history: list[dict[str, Any]] = []
     best_score = -math.inf
 
     with tempfile.TemporaryDirectory(prefix="retail-bank-router-") as temp_dir:

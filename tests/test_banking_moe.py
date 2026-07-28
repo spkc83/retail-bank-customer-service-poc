@@ -263,7 +263,7 @@ def test_banking_v2_job_script_is_dry_run_guarded() -> None:
     assert '"generative_sft_dataset": "data/banking-v2/manifest.json"' in result.stdout
     assert '"router_eval_dataset": "PolyAI/banking77"' in result.stdout
     assert '"rtx-pro-6000"' in result.stdout
-    assert "executable_worker_implemented_not_launched" in result.stdout
+    assert "guarded_reproduction_plan_for_released_model" in result.stdout
     assert "Dry-run only" in result.stdout
 
 

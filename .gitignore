@@ -9,8 +9,6 @@ build/
 dist/
 artifacts/
 data/raw/
-data/arithmetic/
-data/arithmetic-curriculum/
 data/banking-v2/
 data/banking-router-v1/
 data/sources/banking-v2-bitext-source.csv

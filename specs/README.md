@@ -1,25 +1,17 @@
-# Specification index
+# Retail banking model specification
+
+The banking specification is the only active model-development contract in this
+repository.
 
 Read in order:
 
-1. [Requirements](00-requirements.md)
-2. [System architecture](01-system-architecture.md)
-3. [Data and governance](02-data-and-governance.md)
-4. [Restricted tokenizer](03-tokenizer.md)
-5. [Model](04-model.md)
-6. [Training](05-training.md)
-7. [Evaluation](06-evaluation.md)
-8. [Safety, security, and privacy](07-safety-security-privacy.md)
-9. [Serving and chat](08-serving-and-chat.md)
-10. [Reproducibility and operations](09-reproducibility-and-operations.md)
-11. [Verification plan](10-verification-plan.md)
-12. [Decisions and risks](11-decisions-and-risks.md)
-13. [Traceability](12-traceability.md)
+1. [Corpus, governance, and acceptance gates](banking-v2/README.md)
+2. [Model conversion and training](banking-v2/02-model-training.md)
+3. [Evaluation and serving](banking-v2/03-evaluation-serving.md)
+4. [Dense-to-MoE initialization and routing](banking-v2/04-dense-to-moe-routing.md)
+5. [Dual-head domain and intent router](banking-v2/05-dual-head-router.md)
 
-Separate experiment tracks:
-
-- [Banking-v2 domain adaptation, MoE, routing, and multi-turn chat](banking-v2/README.md)
-
-The numbered documents are normative unless a section says otherwise. Templates
-under `templates/` are required release evidence, and schemas/configurations are
-machine-readable parts of the specification.
+The released model card is
+[Retail Bank Servicing MoE 9B](../model_cards/retail-bank-servicing-moe-9b.md).
+The deployable application contract and operating instructions are in the
+[POC README](../poc/retail-bank-customer-service-poc/README.md).

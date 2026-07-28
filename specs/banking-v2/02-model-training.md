@@ -5,9 +5,8 @@
 Banking-v2 is domain adaptation of the pinned
 `Qwen/Qwen2.5-1.5B-Instruct` checkpoint at revision
 `989aa7980e4cf806f80c7fef2b1adb7bc71aa306`. It is not from-scratch
-pretraining and is not covered by the original `<500M` hello-world contract.
-The prepared banking corpus is suitable for supervised domain adaptation, not
-for training a general 9B model from random initialization.
+pretraining. The prepared banking corpus is suitable for supervised domain
+adaptation, not for training a general 9B model from random initialization.
 
 ## Dense baseline
 

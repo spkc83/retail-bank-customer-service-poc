@@ -48,7 +48,7 @@ from hello_slm.banking_moe import (
     topk_assignments,
 )
 
-REMOTE_CONFIRMATION_ENV = "HELLO_SLM_ALLOW_REMOTE_TRAINING"
+REMOTE_CONFIRMATION_ENV = "RETAIL_BANK_ALLOW_REMOTE_TRAINING"
 REMOTE_CONFIRMATION_VALUE = "banking-v2"
 TRAINING_SEED = 7101
 EXPERT_HEALTH_GATE_INTERVAL_STEPS = 250
@@ -204,7 +204,7 @@ def build_dry_run_plan(config: WorkerConfig) -> dict[str, Any]:
             "train with Accelerate/FSDP-compatible BF16 loop",
             "checkpoint with resume metadata and expert-health telemetry",
             "save final model/tokenizer locally",
-            "optionally push to private Hub when --push-to-hub is set",
+            "optionally push to the public Hub destination when --push-to-hub is set",
         ],
         "will_not_do_without_guard": [
             "download 9B or dense base weights",
@@ -993,7 +993,7 @@ def run_remote_training(config: WorkerConfig) -> dict[str, Any]:
         from huggingface_hub import HfApi
 
         api = HfApi()
-        api.create_repo(repo_id=config.hub_dest, repo_type="model", private=True, exist_ok=True)
+        api.create_repo(repo_id=config.hub_dest, repo_type="model", private=False, exist_ok=True)
         api.upload_folder(
             repo_id=config.hub_dest,
             repo_type="model",

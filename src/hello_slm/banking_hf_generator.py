@@ -10,10 +10,10 @@ import torch
 
 from hello_slm.banking_policy import ChatMessage, DomainRouteResult
 
-BANKING_MODEL_ENV = "HELLO_SLM_BANKING_MODEL"
+BANKING_MODEL_ENV = "RETAIL_BANK_MODEL"
 DEFAULT_BANKING_MODEL_PATH = Path("artifacts") / "banking-v2-moe-9b" / "final"
 BANKING_SYSTEM_PROMPT = (
-    "You are Hello SLM Banking, a retail banking support assistant. "
+    "You are a retail banking support assistant. "
     "Answer only questions about accounts, cards, transfers, payments, loans, "
     "or related financial-services support. Do not answer unrelated questions."
 )
@@ -32,7 +32,7 @@ class MissingBankingCheckpointError(RuntimeError):
 
 
 class HuggingFaceBankingGenerator:
-    """Lazy Transformers-backed generator for the future banking-v2 checkpoint."""
+    """Lazy Transformers-backed generator for the trained banking checkpoint."""
 
     def __init__(
         self,

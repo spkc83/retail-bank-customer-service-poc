@@ -151,8 +151,11 @@ def main() -> int:
 
 
 def _download(url: str) -> bytes:
-    with tempfile.TemporaryDirectory(prefix="hello-slm-router-"):
-        request = urllib.request.Request(url, headers={"User-Agent": "hello-slm/0.1"})
+    with tempfile.TemporaryDirectory(prefix="retail-bank-router-"):
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "retail-bank-servicing/0.1"},
+        )
         with urllib.request.urlopen(request, timeout=60) as response:
             return response.read()
 
@@ -185,7 +188,7 @@ def _write_data_card(path: Path, manifest: dict[str, Any]) -> None:
                 "  - en",
                 "---",
                 "",
-                "# Hello Banking dual-head router data",
+                "# Retail Bank dual-head router data",
                 "",
                 "Governed classifier-only data derived from PolyAI Banking77 and UCI CLINC150.",
                 "It is not included in generative SFT.",

@@ -6,22 +6,19 @@ import html
 import os
 from typing import Any
 
-if os.environ.get("POC_SKIP_MODEL_LOAD") != "1":
-    import spaces  # noqa: F401
-
 import gradio as gr
 
 from auth import load_demo_auth
-from model_service import ToolCallError
+from model_service import GroundedBankingService, ModelResponseError
+from orchestration import plan_workflow
 from policy import (
     MODEL_FAILURE_RESPONSE,
-    OOD_RESPONSE,
     SENSITIVE_RESPONSE,
     contains_sensitive_value,
 )
 from router import ROUTER_REVISION, LearnedBankingRouter
 from state import BANK
-from zero_gpu_runtime import run_model_service
+from zero_gpu_runtime import MODEL_REVISION, generate_final_answer
 
 AUTH_CREDENTIALS = load_demo_auth()
 SKIP_ROUTER_LOAD = os.environ.get("POC_SKIP_ROUTER_LOAD") == "1"
@@ -45,8 +42,10 @@ CSS = """
 """
 
 PRESETS = [
+    "Hello, how are you?",
     "Show my account balances.",
     "Show my five most recent transactions.",
+    "Show transfers and recent transactions.",
     "What is the status of my debit card?",
     "My card was stolen. Freeze it.",
     "Please replace my debit card.",
@@ -54,6 +53,8 @@ PRESETS = [
     "Show my recent transfers.",
     "Cancel my pending transfer.",
     "Show my open service cases.",
+    "When was my mailing address changed?",
+    "Can you help me open a mortgage account?",
     "What is the weather tomorrow?",
 ]
 
@@ -68,38 +69,67 @@ def respond(
         return (
             SENSITIVE_RESPONSE,
             render_snapshot(BANK.snapshot(username, session_hash)),
-            "🛡️ Credential guard blocked the request before routing or GPU allocation.",
+            "🛡️ Credential guard blocked the request before routing or model inference.",
         )
     route = route_query(message, history)
-    if route["route"] != "in_domain":
+    plan = plan_workflow(message, history, route)
+    if plan.direct_response is not None:
         return (
-            OOD_RESPONSE,
+            plan.direct_response,
             render_snapshot(BANK.snapshot(username, session_hash)),
             (
-                "🧭 CPU domain router refused the request before ZeroGPU allocation "
-                f"(banking probability {route.get('banking_probability')!s})."
+                f"🧭 No backend tool or ZeroGPU inference was needed. "
+                f"Decision: `{plan.category}` ({plan.reason})."
             ),
         )
+    service = GroundedBankingService(
+        bank=BANK,
+        finalizer=generate_final_answer,
+    )
     try:
-        result = run_model_service(username, session_hash, message, history)
-    except (ToolCallError, RuntimeError, ValueError):
+        result = service.execute(
+            username=username,
+            session_hash=session_hash,
+            message=message,
+            history=history,
+            plan=plan,
+        )
+    except ModelResponseError as error:
         return (
             MODEL_FAILURE_RESPONSE,
             render_snapshot(BANK.snapshot(username, session_hash)),
-            "⚠️ Model output failed tool validation; no unvalidated action was executed.",
+            (
+                "⚠️ The deterministic workflow or grounded model response failed "
+                f"safely; no synthetic action was committed. Reason: {error}"
+            ),
         )
+    except (RuntimeError, ValueError):
+        return (
+            MODEL_FAILURE_RESPONSE,
+            render_snapshot(BANK.snapshot(username, session_hash)),
+            "⚠️ The model service was unavailable; no synthetic action was committed.",
+        )
+    workflow_label = " + ".join(result.workflow_tools)
     response = (
-        f"{result['response']}\n\n"
-        f"---\n_Model tool: `{result['tool_name']}` · "
-        f"model revision `{str(result['model_revision'])[:8]}…`_"
+        f"{result.response}\n\n"
+        f"---\n_Model workflow: `{workflow_label.replace(' + ', '` + `')}` · "
+        f"model revision `{MODEL_REVISION[:8]}…`_"
     )
+    if plan.category == "single_write":
+        activity = (
+            f"✅ The deterministic workflow executed one explicit write "
+            f"(`{workflow_label}`) inside the session transaction; the 9B model "
+            "wrote the grounded final answer before commit."
+        )
+    else:
+        activity = (
+            f"✅ The deterministic workflow executed `{workflow_label}` against the "
+            "authenticated synthetic session, then the 9B model wrote the grounded answer."
+        )
     return (
         response,
-        render_snapshot(result["snapshot"]),
-        (
-            f"✅ 9B model proposed `{result['tool_name']}`; the policy validated it, "
-            "the session database executed it, and the model wrote the final answer."
-        ),
+        render_snapshot(result.snapshot),
+        activity,
     )
 
 
@@ -225,8 +255,8 @@ with gr.Blocks(
         <div class="synthetic-banner">
         <strong>Fictional data only.</strong> The authenticated profiles, balances, cards,
         transactions, transfers, and actions are synthetic. The 9B model runs on ZeroGPU,
-        proposes constrained backend tools, and writes the final response. No real banking
-        system is connected.
+        writes grounded customer-facing answers after a deterministic workflow executes
+        the supported backend operations. No real banking system is connected.
         </div>
         """
     )
@@ -254,8 +284,10 @@ with gr.Blocks(
                 examples=PRESETS,
                 cache_examples=False,
                 example_labels=[
+                    "Greeting",
                     "Balances",
                     "Transactions",
+                    "Transfers + transactions",
                     "Card status",
                     "Freeze stolen card",
                     "Replace card",
@@ -263,6 +295,8 @@ with gr.Blocks(
                     "Transfers",
                     "Cancel transfer",
                     "Service cases",
+                    "Address history",
+                    "Unsupported banking",
                     "OOD check",
                 ],
                 title=None,

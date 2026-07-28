@@ -61,13 +61,13 @@ def test_remote_execution_requires_flag_and_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = _worker_config(tmp_path, allow_remote=True, execute_remote=True)
-    monkeypatch.delenv("HELLO_SLM_ALLOW_REMOTE_TRAINING", raising=False)
+    monkeypatch.delenv("RETAIL_BANK_ALLOW_REMOTE_TRAINING", raising=False)
 
     assert not remote_execution_allowed(config)
-    with pytest.raises(PermissionError, match="HELLO_SLM_ALLOW_REMOTE_TRAINING=banking-v2"):
+    with pytest.raises(PermissionError, match="RETAIL_BANK_ALLOW_REMOTE_TRAINING=banking-v2"):
         assert_remote_execution_allowed(config)
 
-    monkeypatch.setenv("HELLO_SLM_ALLOW_REMOTE_TRAINING", "banking-v2")
+    monkeypatch.setenv("RETAIL_BANK_ALLOW_REMOTE_TRAINING", "banking-v2")
     assert remote_execution_allowed(config)
 
 

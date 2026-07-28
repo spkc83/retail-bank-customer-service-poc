@@ -1,10 +1,10 @@
 #!/usr/bin/env python
-"""Guarded banking-v2 MoE conversion/training spec generator.
+"""Guarded banking-v2 MoE conversion/training reproduction-plan generator.
 
-This script is cloud-intended documentation plus executable guardrails. It does
-not implement training, submit a Hugging Face Job, or create a Hub repository.
-A future paid training path requires both ``--allow-paid-job`` and
-``HELLO_SLM_ALLOW_PAID_JOB=banking-v2``.
+This script emits the pinned plan used by the executable cloud worker. It does
+not itself submit a Hugging Face Job or create a Hub repository. Reproducing
+the paid training run requires both ``--allow-paid-job`` and
+``RETAIL_BANK_ALLOW_PAID_JOB=banking-v2``.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--hub-dest",
         default=BANKING_V2_HUB_DEST,
-        help="Private Hugging Face Hub destination. No repo is created by this script.",
+        help="Public Hugging Face Hub destination. No repo is created by this script.",
     )
     parser.add_argument(
         "--dry-run",
@@ -55,7 +55,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def paid_job_confirmed(args: argparse.Namespace) -> bool:
-    return bool(args.allow_paid_job and os.environ.get("HELLO_SLM_ALLOW_PAID_JOB") == "banking-v2")
+    return bool(
+        args.allow_paid_job
+        and os.environ.get("RETAIL_BANK_ALLOW_PAID_JOB") == "banking-v2"
+    )
 
 
 def build_job_plan(config_path: str | Path, hub_dest: str) -> dict[str, Any]:
@@ -63,10 +66,10 @@ def build_job_plan(config_path: str | Path, hub_dest: str) -> dict[str, Any]:
     pins = BankingV2Pins()
     summary = banking_v2_training_summary(cfg)
     return {
-        "job_status": "executable_worker_implemented_not_launched",
+        "job_status": "guarded_reproduction_plan_for_released_model",
         "config_path": str(config_path),
         "hub_dest": hub_dest,
-        "private_hub_repo": True,
+        "public_hub_repo": True,
         "job": {
             "provider": "hugging-face-jobs",
             "flavor": "rtx-pro-6000",
@@ -116,8 +119,10 @@ def build_job_plan(config_path: str | Path, hub_dest: str) -> dict[str, Any]:
         },
         "launch_guard": {
             "requires_flag": "--allow-paid-job",
-            "requires_env": "HELLO_SLM_ALLOW_PAID_JOB=banking-v2",
-            "current_env_confirmed": os.environ.get("HELLO_SLM_ALLOW_PAID_JOB") == "banking-v2",
+            "requires_env": "RETAIL_BANK_ALLOW_PAID_JOB=banking-v2",
+            "current_env_confirmed": (
+                os.environ.get("RETAIL_BANK_ALLOW_PAID_JOB") == "banking-v2"
+            ),
         },
         "cloud_command_template": [
             "Submit scripts/banking_v2/cloud_train_banking_moe.py through the "
@@ -125,7 +130,7 @@ def build_job_plan(config_path: str | Path, hub_dest: str) -> dict[str, Any]:
         ],
         "approval_gated_next_actions": [
             "package and upload the local source plus prepared corpus for the ephemeral job",
-            "create the private destination model repository",
+            "verify or create the public destination model repository",
             "submit the paid single-process RTX PRO 6000 job with a 5-hour timeout",
         ],
     }
@@ -139,7 +144,7 @@ def main() -> int:
     if not paid_job_confirmed(args):
         print(
             "Dry-run only: paid training requires --allow-paid-job and "
-            "HELLO_SLM_ALLOW_PAID_JOB=banking-v2."
+            "RETAIL_BANK_ALLOW_PAID_JOB=banking-v2."
         )
         return 0
 

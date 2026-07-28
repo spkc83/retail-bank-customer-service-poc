@@ -1,8 +1,8 @@
-# Banking-v2 specification
+# Banking corpus and governance specification
 
-Banking-v2 is a separate retail-banking adaptation track. It does not replace the
-arithmetic hello-world model, does not use the v1 corpus manifest contract, and
-does not claim that 24k SFT examples are sufficient for 9B pretraining.
+This specification governs the retail-banking generative and router datasets.
+The approximately 24,000 generative examples support supervised domain
+adaptation; they are not sufficient for 9B training from random initialization.
 
 ## Source roles
 
@@ -30,10 +30,9 @@ Banking-v2 uses `format_version = 2` with `contract =
 - `generative_sft`: train, validation, and test JSONL for chat adaptation.
 - `router_eval`: Banking77 intent-router/eval JSONL, excluded from generative SFT.
 
-The v1 `load_and_validate_corpus` path is intentionally not claimed compatible:
-v1 rejects duplicate assistant targets and only allowlists MIT. Banking-v2 needs
-repeated exact OOD responses for `task = "ood_gate"` and preserves Bitext and
-Banking77 license attribution.
+The manifest separates generative and classifier-only license policies.
+Repeated exact assistant targets are allowed only for `task = "ood_gate"`.
+Bitext, self-authored, Banking77, and CLINC150 provenance remains explicit.
 
 ## Transform rules
 

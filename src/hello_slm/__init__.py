@@ -1,3 +1,3 @@
-"""A minimal, from-scratch restricted-corpus language-model pipeline."""
+"""Retail-banking model development, routing, evaluation, and demo support."""
 
 __version__ = "0.1.0"

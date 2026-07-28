@@ -83,7 +83,7 @@ def _preset_button(preset: BankingPreset) -> ui.Tag:
 
 app_ui = ui.page_sidebar(
     ui.sidebar(
-        ui.h2("Hello SLM Banking"),
+        ui.h2("Retail Bank Servicing"),
         ui.p("Retail banking multi-turn checkpoint lab."),
         ui.input_action_button("clear_chat", "Clear conversation", width="100%"),
         ui.hr(),
@@ -120,7 +120,7 @@ app_ui = ui.page_sidebar(
         ),
     ),
     ui.tags.p(ui.tags.strong("OOD stock response: "), OOD_STOCK_RESPONSE),
-    title="Hello SLM · Banking Services Lab",
+    title="Retail Bank Servicing · Model Lab",
     fillable=True,
 )
 

@@ -18,7 +18,7 @@ from hello_slm.config import canonical_json_bytes, file_sha256
 
 SPLITS = ("train", "validation", "test")
 CREATED_AT = "2026-07-24T00:00:00Z"
-SOURCE_NAME = "hello-slm-banking-v2"
+SOURCE_NAME = "retail-bank-servicing-v2"
 SYSTEM_PROMPT = (
     "You are a retail banking support assistant. Help with accounts, cards, transfers, "
     "payments, loans, fees, branches, ATMs, and related financial-services support. "
@@ -399,7 +399,7 @@ def _synthetic_records(*, split_seed: int) -> Iterator[PreparedRecord]:
                         "ood", split, base["topic"], str(index), prompt
                     ),
                     split_key=split_key,
-                    source="hello-slm-banking-v2-synthetic",
+                    source="retail-bank-servicing-v2-synthetic",
                     license="MIT",
                     messages=(
                         _message("system", SYSTEM_PROMPT, loss=False),
@@ -431,7 +431,7 @@ def _synthetic_records(*, split_seed: int) -> Iterator[PreparedRecord]:
                     "multi", split, base["base_issue"], base["turn_pattern"]
                 ),
                 split_key=split_key,
-                source="hello-slm-banking-v2-synthetic",
+                source="retail-bank-servicing-v2-synthetic",
                 license="MIT",
                 messages=messages,
                 metadata={
@@ -680,12 +680,9 @@ def _build_report(
         },
         "lock_path": str(lock_path),
         "known_integration_gaps": [
-            "Existing configs/corpus.toml allows MIT only; banking-v2 needs a separate policy "
-            "before load_and_validate_corpus compatibility is claimed.",
-            "Existing corpus validator rejects duplicate assistant targets; banking-v2 OOD "
-            "requires "
-            "many prompts with one exact canned response, so a v2-aware policy is required.",
-            "data/banking-v2/ should be added to .gitignore by the integration lane.",
+            "The generative and classifier-only lanes use separate license and "
+            "trainability policies.",
+            "Repeated exact assistant targets are allowed only for governed OOD records.",
         ],
     }
 
@@ -759,7 +756,7 @@ def _write_split_files(
                     "OOD/multi-turn records"
                 ),
                 "licenses": ["CDLA-Sharing-1.0", "MIT"],
-                "rights_holder": "Bitext and Hello SLM authors",
+                "rights_holder": "Bitext and Retail Bank Model Development contributors",
                 "allowed_use": _allowed_use_for_split(split),
                 "pii": "none-detected",
                 "synthetic_data": True,

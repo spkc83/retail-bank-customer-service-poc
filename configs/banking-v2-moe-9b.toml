@@ -3,7 +3,7 @@ name = "banking-v2-moe-9b"
 description = "Guarded Qwen2-MoE SFT/domain-adaptation plan for banking-services chat."
 format = "banking_v2_cloud_job_config_not_v1_experiment_schema"
 hub_dest = "spkc83/retail-bank-servicing-moe-9b"
-private_hub_repo = true
+private_hub_repo = false
 
 [model]
 base_model = "Qwen/Qwen2.5-1.5B-Instruct"
