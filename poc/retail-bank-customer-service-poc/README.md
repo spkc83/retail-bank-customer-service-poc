@@ -56,7 +56,8 @@ clean public documentation.
 ```text
 Static login
   → CPU dual-head domain/intent router
-  → ZeroGPU 9B model emits one constrained tool call
+  → intent narrows the tool schema presented to the ZeroGPU 9B model
+  → 9B model emits one constrained tool call
   → server validates tool name, arguments, identity scope, and write authorization
   → per-session ephemeral SQLite executes against synthetic records
   → ZeroGPU 9B model receives the tool result and writes the final response
@@ -79,13 +80,19 @@ process and ZeroGPU worker process to share the same session state.
 Write tools require explicit customer language such as “freeze,” “replace,”
 “dispute,” or “cancel,” even when the model proposes the tool.
 
+If the 9B model emits malformed syntax for an explicit `cancel ... transfer`
+request, the learned `cancel_transfer` intent can repair the operation name.
+The repair never supplies a customer or transfer identifier; the policy and
+authenticated session backend still resolve and validate the pending synthetic
+transfer.
+
 ## Authentication
 
 The two demo usernames are `alex.demo` and `maya.demo`. Deployment passwords
-are not committed; CI uses non-secret test-only values. The Space reads the
-live credentials from the write-only `DEMO_AUTH_JSON` secret. Gradio’s static
-authentication is appropriate only for a limited POC; it is not a production
-identity system.
+are not committed; local tests use non-secret test-only values. The Space reads
+the live credentials from the write-only `DEMO_AUTH_JSON` secret. Gradio’s
+static authentication is appropriate only for a limited POC; it is not a
+production identity system.
 
 ## Local verification
 

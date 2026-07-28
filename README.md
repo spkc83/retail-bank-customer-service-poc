@@ -29,11 +29,17 @@ per token.
 Authenticated request
   → credential guard
   → CPU dual-head domain and intent router
-  → 9B MoE model selects one constrained banking tool
+  → intent narrows the tool schema presented to the 9B MoE model
+  → 9B model selects one constrained banking tool
   → server validates identity, arguments, and write authorization
   → session-isolated synthetic SQLite backend executes
   → model receives the tool result and writes the final response
 ```
+
+For an explicit `cancel ... transfer` request, the learned intent may repair
+malformed 9B tool syntax to `cancel_transfer`. The repair supplies no customer
+or record identifier; authorization and session-scoped backend resolution still
+run before execution.
 
 The application is synthetic. It has no connection to a bank and cannot access
 or modify real accounts.

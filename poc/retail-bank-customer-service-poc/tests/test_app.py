@@ -67,13 +67,14 @@ def test_model_path_uses_authenticated_identity_and_updates_dashboard(
 
     seen = {}
 
-    def model_call(username, session_hash, message, history):
+    def model_call(username, session_hash, message, history, intent_hint):
         seen.update(
             {
                 "username": username,
                 "session_hash": session_hash,
                 "message": message,
                 "history": history,
+                "intent_hint": intent_hint,
             }
         )
         return {
@@ -82,6 +83,7 @@ def test_model_path_uses_authenticated_identity_and_updates_dashboard(
             "tool_result": {},
             "snapshot": app_module.BANK.snapshot(username, session_hash),
             "model_revision": "revision",
+            "selection_source": "model",
         }
 
     monkeypatch.setattr(app_module, "router", InDomainRouter())
@@ -95,6 +97,45 @@ def test_model_path_uses_authenticated_identity_and_updates_dashboard(
 
     assert seen["username"] == "maya.demo"
     assert seen["session_hash"] == "maya-browser"
+    assert seen["intent_hint"] == "pending_transfer"
     assert "Model tool: `list_transfers`" in response
     assert "Travel Checking" in dashboard
     assert "9B model proposed" in activity
+
+
+def test_app_reports_learned_intent_repair_without_claiming_model_selection(
+    app_module,
+    monkeypatch,
+) -> None:
+    class CancelRouter:
+        threshold = 0.98
+
+        def classify(self, message, history):
+            return {
+                "route": "in_domain",
+                "banking_probability": 0.999,
+                "intent": "cancel_transfer",
+            }
+
+    def repaired_call(username, session_hash, message, history, intent_hint):
+        return {
+            "response": "I cancelled the USD 450.00 transfer in this synthetic demo.",
+            "tool_name": "cancel_transfer",
+            "tool_result": {},
+            "snapshot": app_module.BANK.snapshot(username, session_hash),
+            "model_revision": "revision",
+            "selection_source": "router_policy_repair",
+        }
+
+    monkeypatch.setattr(app_module, "router", CancelRouter())
+    monkeypatch.setattr(app_module, "_run_model_service", repaired_call)
+
+    response, _, activity = app_module.respond(
+        "Cancel the transfer of $450 to River Consulting.",
+        [],
+        request(),
+    )
+
+    assert "Model tool: `cancel_transfer`" in response
+    assert "learned intent router repaired" in activity
+    assert "9B model proposed" not in activity

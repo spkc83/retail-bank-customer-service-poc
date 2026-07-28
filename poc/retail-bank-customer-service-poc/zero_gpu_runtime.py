@@ -103,6 +103,7 @@ def run_model_service(
     session_hash: str,
     message: str,
     history: list[dict[str, Any]],
+    intent_hint: str | None = None,
 ) -> dict[str, Any]:
     service = ModelDrivenBankingService(
         bank=BANK,
@@ -113,6 +114,7 @@ def run_model_service(
         session_hash=session_hash,
         message=message,
         history=history,
+        intent_hint=intent_hint,
     )
     if generated_response_is_unsafe(reply.response):
         raise RuntimeError("model response requested prohibited credentials")
@@ -122,4 +124,5 @@ def run_model_service(
         "tool_result": reply.tool_result,
         "snapshot": reply.snapshot,
         "model_revision": MODEL_REVISION,
+        "selection_source": reply.selection_source,
     }

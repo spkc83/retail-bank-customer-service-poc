@@ -63,6 +63,7 @@ def test_model_tool_call_executes_mock_action_then_model_writes_final_answer() -
     assert reply.tool_name == "freeze_card"
     assert "4821" in reply.response
     assert reply.snapshot["cards"][0]["status"] == "frozen"
+    assert reply.selection_source == "model"
     assert len(generator.calls) == 2
     assert generator.calls[0]["tools"]
     assert generator.calls[1]["tools"] is None
@@ -134,6 +135,63 @@ def test_ungrounded_selector_is_removed() -> None:
 
     assert ground_tool_call_arguments("Freeze my stolen card.", tool_call) == ValidatedToolCall(
         name="freeze_card",
+        arguments={},
+    )
+
+
+def test_cancel_transfer_repairs_malformed_model_selection_from_learned_intent() -> None:
+    generator = ScriptedGenerator(
+        [
+            "I will cancel the River Consulting transfer.",
+            "I cancelled the USD 450.00 transfer in this synthetic demo.",
+        ]
+    )
+    service = ModelDrivenBankingService(bank=bank(), generator=generator)
+
+    reply = service.reply(
+        username="alex.demo",
+        session_hash="session",
+        message="I want to cancel the transfer of $450 to River Consulting.",
+        history=[],
+        intent_hint="cancel_transfer",
+    )
+
+    assert reply.tool_name == "cancel_transfer"
+    assert reply.selection_source == "router_policy_repair"
+    assert reply.tool_result["transfer"]["recipient"] == "River Consulting"
+    assert reply.tool_result["transfer"]["status"] == "cancelled"
+    selected_tools = generator.calls[0]["tools"]
+    assert isinstance(selected_tools, list)
+    assert [tool["function"]["name"] for tool in selected_tools] == ["cancel_transfer"]
+
+
+def test_cancel_transfer_repair_requires_explicit_action_and_object() -> None:
+    service = ModelDrivenBankingService(
+        bank=bank(),
+        generator=ScriptedGenerator(["No tool call."]),
+    )
+
+    with pytest.raises(ToolCallError, match="exactly one tool call"):
+        service.reply(
+            username="alex.demo",
+            session_hash="session",
+            message="What is its status?",
+            history=[],
+            intent_hint="cancel_transfer",
+        )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"name":"list_accounts","arguments":{}}',
+        '```json\n{"name":"list_accounts","arguments":{}}\n```',
+        '<tool_call>{"name":"list_accounts","arguments":"{}"}</tool_call>',
+    ],
+)
+def test_tool_call_parser_accepts_safe_qwen_json_variants(payload: str) -> None:
+    assert parse_and_validate_tool_call(payload) == ValidatedToolCall(
+        name="list_accounts",
         arguments={},
     )
 

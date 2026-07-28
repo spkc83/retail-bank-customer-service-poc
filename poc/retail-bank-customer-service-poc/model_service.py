@@ -112,6 +112,10 @@ simulations only. Tool results contain display-ready monetary strings; copy thos
 exactly and never recalculate them. After receiving the tool result, answer clearly and mention
 that any action was performed only in the synthetic demo."""
 
+INTENT_TOOL_HINTS = {
+    "cancel_transfer": "cancel_transfer",
+}
+
 
 class TextGenerator(Protocol):
     def generate(
@@ -140,6 +144,7 @@ class ServiceReply:
     tool_name: str
     tool_result: dict[str, Any]
     snapshot: dict[str, Any]
+    selection_source: str
 
 
 class ModelDrivenBankingService:
@@ -159,14 +164,23 @@ class ModelDrivenBankingService:
         session_hash: str,
         message: str,
         history: list[dict[str, Any]],
+        intent_hint: str | None = None,
     ) -> ServiceReply:
-        messages = _bounded_messages(message, history)
+        messages = _bounded_messages(message, history, intent_hint=intent_hint)
         selection = self.generator.generate(
             messages,
-            tools=TOOL_SCHEMAS,
+            tools=_tool_schemas_for_intent(intent_hint),
             max_new_tokens=128,
         )
-        tool_call = parse_and_validate_tool_call(selection)
+        selection_source = "model"
+        try:
+            tool_call = parse_and_validate_tool_call(selection)
+            _enforce_intent_tool(tool_call, intent_hint)
+        except ToolCallError as selection_error:
+            tool_call = repair_tool_call_from_intent(message, intent_hint)
+            if tool_call is None:
+                raise selection_error
+            selection_source = "router_policy_repair"
         authorize_tool_call(message, tool_call)
         tool_call = ground_tool_call_arguments(message, tool_call)
         tool_result = self.bank.execute(
@@ -209,15 +223,19 @@ class ModelDrivenBankingService:
             tool_name=tool_call.name,
             tool_result=tool_result,
             snapshot=self.bank.snapshot(username, session_hash),
+            selection_source=selection_source,
         )
 
 
 def parse_and_validate_tool_call(text: str) -> ValidatedToolCall:
     opening = "<tool_call>"
     closing = "</tool_call>"
-    if text.count(opening) != 1 or text.count(closing) != 1:
-        raise ToolCallError("model must return exactly one tool call")
-    payload = text.split(opening, maxsplit=1)[1].split(closing, maxsplit=1)[0].strip()
+    if text.count(opening) == 1 and text.count(closing) == 1:
+        payload = text.split(opening, maxsplit=1)[1].split(closing, maxsplit=1)[0].strip()
+    elif opening not in text and closing not in text:
+        payload = _unfenced_json(text)
+    else:
+        raise ToolCallError("model must return exactly one complete tool call")
     try:
         parsed = json.loads(payload)
     except json.JSONDecodeError as error:
@@ -228,6 +246,11 @@ def parse_and_validate_tool_call(text: str) -> ValidatedToolCall:
     arguments = parsed["arguments"]
     if not isinstance(name, str) or name not in _tool_names():
         raise ToolCallError(f"unsupported tool: {name}")
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError as error:
+            raise ToolCallError("tool arguments string must contain valid JSON") from error
     if not isinstance(arguments, dict):
         raise ToolCallError("tool arguments must be an object")
     allowed = {
@@ -258,6 +281,25 @@ def parse_and_validate_tool_call(text: str) -> ValidatedToolCall:
             if not isinstance(value, str) or not value or len(value) > 64:
                 raise ToolCallError(f"{identifier} must be a short non-empty string")
     return ValidatedToolCall(name=name, arguments=arguments)
+
+
+def repair_tool_call_from_intent(
+    message: str,
+    intent_hint: str | None,
+) -> ValidatedToolCall | None:
+    """Repair only an explicit, object-qualified write request.
+
+    The learned router may repair malformed model syntax, but it never supplies a
+    customer or record selector. Authorization and session-scoped backend resolution
+    still run after this function.
+    """
+
+    if intent_hint != "cancel_transfer":
+        return None
+    terms = set(_normalized_terms(message))
+    if not terms.intersection({"cancel", "revoke", "stop"}) or "transfer" not in terms:
+        return None
+    return ValidatedToolCall(name="cancel_transfer", arguments={})
 
 
 def authorize_tool_call(message: str, tool_call: ValidatedToolCall) -> None:
@@ -315,6 +357,8 @@ def ground_tool_call_arguments(
 def _bounded_messages(
     message: str,
     history: list[dict[str, Any]],
+    *,
+    intent_hint: str | None = None,
 ) -> list[dict[str, object]]:
     if not isinstance(message, str) or not message.strip():
         raise ValueError("message must be a non-empty string")
@@ -325,11 +369,58 @@ def _bounded_messages(
         and item.get("role") == "user"
         and isinstance(item.get("content"), str)
     ]
+    expected_tool = INTENT_TOOL_HINTS.get(intent_hint or "")
+    system_prompt = SYSTEM_PROMPT
+    if expected_tool is not None:
+        system_prompt += (
+            "\nThe learned banking-intent router classified this request as "
+            f"{intent_hint}. If compatible with the customer request, call "
+            f"{expected_tool} and no other tool."
+        )
     return [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         *usable,
         {"role": "user", "content": message.strip()},
     ]
+
+
+def _tool_schemas_for_intent(intent_hint: str | None) -> list[dict[str, object]]:
+    expected_tool = INTENT_TOOL_HINTS.get(intent_hint or "")
+    if expected_tool is None:
+        return TOOL_SCHEMAS
+    return [
+        schema
+        for schema in TOOL_SCHEMAS
+        if schema["function"]["name"] == expected_tool  # type: ignore[index]
+    ]
+
+
+def _enforce_intent_tool(
+    tool_call: ValidatedToolCall,
+    intent_hint: str | None,
+) -> None:
+    expected_tool = INTENT_TOOL_HINTS.get(intent_hint or "")
+    if expected_tool is not None and tool_call.name != expected_tool:
+        raise ToolCallError(
+            f"model selected {tool_call.name} for router intent {intent_hint}"
+        )
+
+
+def _unfenced_json(text: str) -> str:
+    payload = text.strip()
+    if payload.startswith("```") and payload.endswith("```"):
+        lines = payload.splitlines()
+        if len(lines) >= 3:
+            payload = "\n".join(lines[1:-1]).strip()
+    if not payload.startswith("{") or not payload.endswith("}"):
+        raise ToolCallError("model must return exactly one tool call")
+    return payload
+
+
+def _normalized_terms(message: str) -> list[str]:
+    return "".join(
+        character.lower() if character.isalnum() else " " for character in message
+    ).split()
 
 
 def _tool_names() -> set[str]:

@@ -98,8 +98,9 @@ def run_model_service(
     session_hash: str,
     message: str,
     history: list[dict[str, Any]],
+    intent_hint: str | None = None,
 ) -> dict[str, Any]:
-    return _run_model_service(username, session_hash, message, history)
+    return _run_model_service(username, session_hash, message, history, intent_hint)
 
 
 @spaces.GPU(size="large", duration=90)
@@ -126,25 +127,48 @@ def respond(
             ),
         )
     try:
-        result = _run_model_service(username, session_hash, message, history)
-    except (ToolCallError, RuntimeError, ValueError):
+        result = _run_model_service(
+            username,
+            session_hash,
+            message,
+            history,
+            str(route["intent"]) if route.get("intent") is not None else None,
+        )
+    except ToolCallError as error:
         return (
             MODEL_FAILURE_RESPONSE,
             render_snapshot(BANK.snapshot(username, session_hash)),
-            "⚠️ Model output failed tool validation; no unvalidated action was executed.",
+            (
+                "⚠️ Model output failed tool validation; no unvalidated action was "
+                f"executed. Reason: {error}"
+            ),
+        )
+    except (RuntimeError, ValueError):
+        return (
+            MODEL_FAILURE_RESPONSE,
+            render_snapshot(BANK.snapshot(username, session_hash)),
+            "⚠️ The model service was unavailable; no synthetic action was executed.",
         )
     response = (
         f"{result['response']}\n\n"
         f"---\n_Model tool: `{result['tool_name']}` · "
         f"model revision `{str(result['model_revision'])[:8]}…`_"
     )
+    if result.get("selection_source") == "router_policy_repair":
+        activity = (
+            f"✅ The learned intent router repaired malformed model tool syntax to "
+            f"`{result['tool_name']}`; policy validated it, the session database "
+            "executed it, and the 9B model wrote the final answer."
+        )
+    else:
+        activity = (
+            f"✅ 9B model proposed `{result['tool_name']}`; the policy validated it, "
+            "the session database executed it, and the model wrote the final answer."
+        )
     return (
         response,
         render_snapshot(result["snapshot"]),
-        (
-            f"✅ 9B model proposed `{result['tool_name']}`; the policy validated it, "
-            "the session database executed it, and the model wrote the final answer."
-        ),
+        activity,
     )
 
 
