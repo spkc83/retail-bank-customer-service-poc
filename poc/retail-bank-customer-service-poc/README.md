@@ -41,11 +41,15 @@ including model-selected reads and writes for both authenticated demo users.
 - Model-development source:
   https://github.com/spkc83/retail-bank-model-development
 - 9B conversational model:
-  https://huggingface.co/spkc83/retail-bank-servicing-moe-9b/tree/b2466ca4b157f420432a5e20a14573e83954deae
+  https://huggingface.co/spkc83/retail-bank-servicing-moe-9b
 - Domain and intent router:
-  https://huggingface.co/spkc83/retail-bank-domain-intent-router/tree/e7d928e5cf8c8be0883625f276c4e6c85c35eaf1
+  https://huggingface.co/spkc83/retail-bank-domain-intent-router
 - Governed router dataset:
   https://huggingface.co/datasets/spkc83/retail-bank-router-training-data
+
+The application code pins immutable model and router weight revisions for
+reproducible inference; the links above intentionally point to the current,
+clean public documentation.
 
 ## Request path
 
