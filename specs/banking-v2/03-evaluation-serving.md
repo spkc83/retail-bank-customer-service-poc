@@ -7,9 +7,10 @@ latest user turn and bounded conversation history pass through four gates:
 
 ```text
 credential guard
+  → ZeroGPU-managed /chat event
   → CPU dual-head domain/intent router
   → deterministic capability planner
-  → CPU synthetic backend plus stateless ZeroGPU finalizer
+  → CPU synthetic backend plus stateless 9B finalizer when needed
 ```
 
 The router is an advisory classifier and audit signal, not a prompt suggestion
@@ -63,9 +64,10 @@ an in-domain conversation that transitions to an out-of-domain request.
 ## Test-time scaling
 
 Test-time scaling is not enabled in the deployed POC. Each backend-executing
-request uses one deterministic ZeroGPU generation for final answer writing.
-Direct conversational, unsupported-banking, OOD, credential-guard, and
-clarification responses use zero neural generations.
+request uses one deterministic 9B generation for final answer writing. The
+registered chat handler is the ZeroGPU allocation boundary; direct
+conversational, unsupported-banking, OOD, credential-guard, and clarification
+responses still use zero neural generations after entering that event.
 
 Any future multi-candidate path must prove at least a two-point improvement on
 the held-out composite score over the one-generation baseline. OOD false

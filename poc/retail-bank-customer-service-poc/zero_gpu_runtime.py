@@ -12,8 +12,9 @@ if SKIP_MODEL_LOAD:
 
     class _Spaces:
         @staticmethod
-        def GPU(**_kwargs: Any) -> Any:
+        def GPU(**kwargs: Any) -> Any:
             def decorator(function: Any) -> Any:
+                function._zero_gpu_config = dict(kwargs)
                 return function
 
             return decorator
@@ -22,10 +23,11 @@ if SKIP_MODEL_LOAD:
     tokenizer = None
     model = None
 else:
-    import spaces as spaces_runtime
+    import spaces
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    spaces_runtime = spaces
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
@@ -39,7 +41,6 @@ else:
     model.eval()
 
 
-@spaces_runtime.GPU(size="large", duration=90)
 def generate_final_answer(
     messages: list[dict[str, str]],
     grounded_results: dict[str, Any],

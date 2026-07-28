@@ -66,7 +66,7 @@ def test_app_constructs_expected_authenticated_api_surface(app_module) -> None:
         ("Can you open a mortgage for me?", "not supported"),
     ],
 )
-def test_direct_cpu_paths_bypass_zero_gpu(
+def test_direct_paths_bypass_model_finalizer(
     app_module,
     monkeypatch: pytest.MonkeyPatch,
     message: str,
@@ -81,6 +81,14 @@ def test_direct_cpu_paths_bypass_zero_gpu(
 
     assert expected in response
     assert "No backend tool" in activity
+
+
+def test_registered_chat_handler_is_the_zero_gpu_boundary(app_module) -> None:
+    assert app_module.respond._zero_gpu_config == {
+        "size": "large",
+        "duration": 90,
+    }
+    assert not hasattr(app_module.generate_final_answer, "_zero_gpu_config")
 
 
 def test_sensitive_guard_bypasses_router_and_zero_gpu(

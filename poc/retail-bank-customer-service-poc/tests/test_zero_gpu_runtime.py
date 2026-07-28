@@ -15,6 +15,7 @@ def test_zero_gpu_boundary_is_stateless_and_fails_cleanly_without_model(
 
     assert not hasattr(runtime, "BANK")
     assert not hasattr(runtime, "run_model_service")
+    assert not hasattr(runtime.generate_final_answer, "_zero_gpu_config")
     with pytest.raises(RuntimeError, match="unavailable"):
         runtime.generate_final_answer(
             [{"role": "user", "content": "Show my balance."}],

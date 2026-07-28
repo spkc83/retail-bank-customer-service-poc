@@ -9,7 +9,7 @@ import html
 import os
 from typing import Any
 
-from zero_gpu_runtime import MODEL_REVISION, generate_final_answer
+from zero_gpu_runtime import MODEL_REVISION, generate_final_answer, spaces_runtime
 
 import gradio as gr
 
@@ -63,6 +63,7 @@ PRESETS = [
 ]
 
 
+@spaces_runtime.GPU(size="large", duration=90)
 def respond(
     message: str,
     history: list[dict[str, Any]],

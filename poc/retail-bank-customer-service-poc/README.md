@@ -57,11 +57,11 @@ clean public documentation.
 
 ```text
 Static login
-  → CPU dual-head domain/intent router
-  → deterministic capability planner
+  → ZeroGPU-managed /chat event
+  → CPU dual-head domain/intent router and deterministic capability planner
   → server validates workflow, arguments, identity scope, and write authorization
   → per-session ephemeral SQLite executes against synthetic records
-  → ZeroGPU 9B finalizer receives sanitized grounded results
+  → 9B finalizer receives sanitized grounded results when a model answer is needed
   → server validates the final response before returning it
 ```
 
@@ -69,12 +69,13 @@ Credential-bearing requests are rejected before model inference. The
 capability planner handles greetings and acknowledgements directly, returns a
 stock response for explicit non-banking subjects, and returns an honest
 unsupported-banking response when the request is financial-services related but
-outside the POC backend. Customer identity is derived only from Gradio
+outside the POC backend. The registered `/chat` event is the ZeroGPU boundary
+required by the hosted runtime; direct policy responses still skip neural
+generation after allocation. Customer identity is derived only from Gradio
 authentication. Tool arguments cannot select a customer. Each browser page
 session receives an isolated, TTL-limited database cloned from the immutable
 synthetic seed. The database files live only in the Space's temporary runtime
-storage, allowing the CPU web process and ZeroGPU worker process to share the
-same session state.
+storage, allowing successive ZeroGPU workers to share the same session state.
 
 ## Supported workflows
 
