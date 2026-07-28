@@ -1,4 +1,4 @@
-"""Authenticated, model-driven synthetic retail-bank customer-service POC."""
+"""Authenticated model-driven synthetic retail-bank conversational POC."""
 
 # ZeroGPU must patch PyTorch before the CPU router imports it.
 # ruff: noqa: I001
@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 import uuid
 from typing import Any
@@ -13,25 +14,29 @@ from typing import Any
 if os.environ.get("POC_SKIP_MODEL_LOAD") == "1":
     from zero_gpu_runtime import (
         MODEL_REVISION,
-        generate_final_answer,
+        count_tokens,
+        generate_text,
         spaces_runtime as spaces,
     )
 else:
     import spaces
 
-    from zero_gpu_runtime import MODEL_REVISION, generate_final_answer
+    from zero_gpu_runtime import MODEL_REVISION, count_tokens, generate_text
 
 import gradio as gr
 
 from auth import load_demo_auth
 from model_service import (
-    GroundedBankingService,
-    ModelResponseError,
-    verified_read_response,
+    AgentExecutionError,
+    AgentProtocolError,
+    ConversationalBankingAgent,
+    ModelRuntime,
+    ToolCall,
+    canonical_conversation,
 )
-from orchestration import plan_workflow
 from policy import (
     MODEL_FAILURE_RESPONSE,
+    OOD_RESPONSE,
     SENSITIVE_RESPONSE,
     contains_sensitive_value,
 )
@@ -61,162 +66,96 @@ CSS = """
 
 PRESETS = [
     "Hello, how are you?",
+    "yo, sup?",
     "Show my account balances.",
+    "What happened with the money I sent recently?",
     "Show my five most recent transactions.",
-    "Show transfers and recent transactions.",
     "What is the status of my debit card?",
     "My card was stolen. Freeze it.",
     "Please replace my debit card.",
-    "I did not make the latest card purchase. Dispute it.",
-    "Show my recent transfers.",
-    "Cancel my pending transfer.",
-    "Show my open service cases.",
+    "I did not make the North Harbor Market purchase. Dispute it.",
+    "Cancel the pending transfer to River Consulting.",
     "When was my mailing address changed?",
     "Can you help me open a mortgage account?",
     "What is the weather tomorrow?",
 ]
 
-PENDING_RESPONSE = (
-    "The 9B model is preparing a grounded answer from the synthetic banking records…"
-)
-DISMISS_RECOVERED_GPU_ERROR_JS = """
-(...args) => {
-  const dismiss = () => {
-    for (const toast of document.querySelectorAll('[data-testid="toast-body"]')) {
-      const title = toast.querySelector('.toast-title')?.textContent?.trim();
-      if (title === 'ZeroGPU worker error') {
-        toast.querySelector('[data-testid="toast-close"]')?.click();
-      }
-    }
-  };
-  setTimeout(dismiss, 0);
-  setTimeout(dismiss, 250);
-  setTimeout(dismiss, 750);
-  return args;
-}
-"""
+PENDING_RESPONSE = "The 9B model is thinking and may call the synthetic bank tools…"
 
-def respond(
-    message: str,
-    history: list[dict[str, Any]],
-    request: gr.Request,
-) -> tuple[str, str, str]:
-    username, session_hash, plan, direct = _prepare_request(message, history, request)
-    if direct is not None:
-        return direct
-    if plan is None:
-        raise RuntimeError("model-backed request is missing a workflow plan")
-    service = GroundedBankingService(
-        bank=BANK,
-        finalizer=generate_final_answer,
-    )
-    try:
-        result = service.execute(
-            username=username,
-            session_hash=session_hash,
-            message=message,
-            history=history,
-            plan=plan,
-        )
-    except ModelResponseError as error:
-        return (
-            _workflow_error_response(error),
-            render_snapshot(BANK.snapshot(username, session_hash)),
-            (
-                "⚠️ The deterministic workflow or grounded model response failed "
-                f"safely; no synthetic action was committed. Reason: {error}"
-            ),
-        )
-    except (RuntimeError, ValueError):
-        return (
-            MODEL_FAILURE_RESPONSE,
-            render_snapshot(BANK.snapshot(username, session_hash)),
-            "⚠️ The model service was unavailable; no synthetic action was committed.",
-        )
-    workflow_label = " + ".join(result.workflow_tools)
-    response_path = (
-        "9B model finalizer"
-        if result.selection_source == "model_finalizer"
-        else "verified grounded repair after 9B validation"
-    )
-    response = (
-        f"{result.response}\n\n"
-        f"---\n_Model workflow: `{workflow_label.replace(' + ', '` + `')}` · "
-        f"{response_path} · model revision `{MODEL_REVISION[:8]}…`_"
-    )
-    finalization_activity = (
-        "the 9B model wrote the grounded final answer"
-        if result.selection_source == "model_finalizer"
-        else "server validation replaced an ungrounded model draft with verified results"
-    )
-    if plan.category == "single_write":
-        activity = (
-            f"✅ The deterministic workflow executed one explicit write "
-            f"(`{workflow_label}`) inside the session transaction; "
-            f"{finalization_activity} before commit."
-        )
-    else:
-        activity = (
-            f"✅ The deterministic workflow executed `{workflow_label}` against the "
-            f"authenticated synthetic session, then {finalization_activity}."
-        )
-    return (
-        response,
-        render_snapshot(result.snapshot),
-        activity,
-    )
+
+class _RuntimeModel(ModelRuntime):
+    def generate(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        max_new_tokens: int,
+    ) -> str:
+        return generate_text(messages, tools, max_new_tokens)
+
+    def count_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> int:
+        return count_tokens(messages, tools)
 
 
 def dispatch_turn(
     message: str,
-    history: list[dict[str, Any]],
+    visible_history: list[dict[str, Any]],
+    conversation_history: list[dict[str, Any]],
     session_epoch: int,
     request: gr.Request,
-) -> tuple[Any, list[dict[str, str]], list[dict[str, str]], str, str, Any, Any, Any, Any]:
-    canonical_history = _canonical_history(history)
-    username, session_hash, plan, direct = _prepare_request(
-        message,
-        canonical_history,
-        request,
-    )
-    if direct is not None:
-        response, snapshot, activity = direct
-        completed = _with_assistant_turn(canonical_history, message, response)
-        enabled = gr.update(interactive=True)
-        return (
-            gr.update(value="", interactive=True),
-            completed,
-            completed,
-            snapshot,
-            activity,
-            gr.skip(),
-            enabled,
-            enabled,
-            enabled,
+) -> tuple[Any, list[dict[str, str]], list[dict[str, Any]], str, str, str, Any, Any, Any, Any]:
+    if not isinstance(message, str) or not message.strip():
+        raise ValueError("message must be a non-empty string")
+    username, session_hash = _identity(request)
+    visible = _visible_history(visible_history)
+    conversation = canonical_conversation(conversation_history)
+
+    if contains_sensitive_value(message):
+        return _direct_turn(
+            message=message,
+            response=SENSITIVE_RESPONSE,
+            visible=visible,
+            conversation=conversation,
+            snapshot=render_snapshot(BANK.snapshot(username, session_hash)),
+            activity="Credential-value input was rejected before routing or model inference.",
+            diagnostics="### Experiment diagnostics\n\nInput guard: credential value detected.",
         )
-    if plan is None:
-        raise RuntimeError("model-backed request is missing a workflow plan")
+
+    route = route_query(message, conversation)
+    if route.get("route") == "out_of_domain":
+        return _direct_turn(
+            message=message,
+            response=OOD_RESPONSE,
+            visible=visible,
+            conversation=conversation,
+            snapshot=render_snapshot(BANK.snapshot(username, session_hash)),
+            activity="High-confidence OOD head decision; the 9B model was not invoked.",
+            diagnostics=_render_diagnostics(route, (), (), "OOD stock response"),
+        )
+
     pending = {
         "turn_id": uuid.uuid4().hex,
         "message": message.strip(),
-        "history": canonical_history,
+        "conversation": conversation,
+        "router_result": route,
         "epoch": int(session_epoch),
     }
-    visible = [
-        *canonical_history,
+    pending_visible = [
+        *visible,
         {"role": "user", "content": message.strip()},
         {"role": "assistant", "content": PENDING_RESPONSE},
     ]
     disabled = gr.update(interactive=False)
     return (
         gr.update(value="", interactive=False),
-        visible,
-        canonical_history,
+        pending_visible,
+        conversation,
         render_snapshot(BANK.snapshot(username, session_hash)),
-        (
-            f"⏳ Workflow `{plan.category}` is waiting for the registered "
-            "ZeroGPU model event."
-        ),
+        "The allowed/uncertain turn is queued for the registered 9B ZeroGPU event.",
+        _render_diagnostics(route, (), (), "waiting for 9B model"),
         pending,
         disabled,
         disabled,
@@ -228,32 +167,108 @@ def dispatch_turn(
 def finalize_turn(
     pending: dict[str, Any],
     session_epoch: int,
-    current_history: list[dict[str, Any]],
+    current_visible: list[dict[str, Any]],
+    current_conversation: list[dict[str, Any]],
     request: gr.Request,
-) -> tuple[list[dict[str, str]], list[dict[str, str]], str, str, Any, Any, Any, Any]:
-    message, history, pending_epoch = _pending_turn(pending)
-    canonical_history = _canonical_history(current_history)
+) -> tuple[list[dict[str, str]], list[dict[str, Any]], str, str, str, Any, Any, Any, Any]:
+    message, conversation, router_result, pending_epoch = _pending_turn(pending)
     if pending_epoch != int(session_epoch):
         username, session_hash = _identity(request)
         enabled = gr.update(interactive=True)
         return (
-            canonical_history,
-            canonical_history,
+            _visible_history(current_visible),
+            canonical_conversation(current_conversation),
             render_snapshot(BANK.snapshot(username, session_hash)),
-            "↺ The pending model turn expired because this demo session was reset.",
+            "The queued model turn expired because this demo session was reset.",
+            "### Experiment diagnostics\n\nStale turn discarded.",
             gr.update(value="", interactive=True),
             enabled,
             enabled,
             enabled,
         )
-    response, snapshot, activity = respond(message, history, request)
-    completed = _with_assistant_turn(history, message, response)
+
+    username, session_hash = _identity(request)
+    agent = ConversationalBankingAgent(bank=BANK, model=_RuntimeModel())
+    try:
+        result = agent.run_turn(
+            username=username,
+            session_hash=session_hash,
+            message=message,
+            conversation=conversation,
+            router_result=router_result,
+        )
+    except AgentExecutionError as error:
+        failed_conversation = [
+            *error.conversation,
+            {"role": "assistant", "content": MODEL_FAILURE_RESPONSE},
+        ]
+        enabled = gr.update(interactive=True)
+        return (
+            _visible_from_conversation(failed_conversation),
+            failed_conversation,
+            render_snapshot(error.snapshot),
+            (
+                "The 9B model failed after executing the tool calls shown in "
+                "diagnostics. No CPU-authored servicing answer was substituted."
+            ),
+            (
+                f"{_render_diagnostics(
+                    router_result,
+                    error.tool_calls,
+                    error.tool_results,
+                    '9B second-pass failure',
+                )}\n\n"
+                f"Failure type: `{type(error.__cause__).__name__}`"
+            ),
+            gr.update(value="", interactive=True),
+            enabled,
+            enabled,
+            enabled,
+        )
+    except (AgentProtocolError, RuntimeError, TypeError, ValueError) as error:
+        failed_conversation = _with_text_turn(
+            conversation,
+            message,
+            MODEL_FAILURE_RESPONSE,
+        )
+        enabled = gr.update(interactive=True)
+        return (
+            _visible_from_conversation(failed_conversation),
+            failed_conversation,
+            render_snapshot(BANK.snapshot(username, session_hash)),
+            (
+                "The 9B model event failed. No CPU-authored servicing answer was "
+                "substituted; the synthetic dashboard shows the current backend state."
+            ),
+            (
+                f"{_render_diagnostics(router_result, (), (), '9B model failure')}\n\n"
+                f"Failure type: `{type(error).__name__}`"
+            ),
+            gr.update(value="", interactive=True),
+            enabled,
+            enabled,
+            enabled,
+        )
+
     enabled = gr.update(interactive=True)
     return (
-        completed,
-        completed,
-        snapshot,
-        activity,
+        _visible_from_conversation(result.conversation),
+        result.conversation,
+        render_snapshot(result.snapshot),
+        (
+            "The 9B model authored the response directly."
+            if not result.tool_calls
+            else (
+                "The 9B model selected and called the synthetic tools, then authored "
+                "the final response from their results."
+            )
+        ),
+        _render_diagnostics(
+            router_result,
+            result.tool_calls,
+            result.tool_results,
+            "9B model-authored",
+        ),
         gr.update(value="", interactive=True),
         enabled,
         enabled,
@@ -264,38 +279,39 @@ def finalize_turn(
 def fail_pending_turn(
     pending: dict[str, Any],
     session_epoch: int,
-    current_history: list[dict[str, Any]],
+    current_visible: list[dict[str, Any]],
+    current_conversation: list[dict[str, Any]],
     request: gr.Request,
-) -> tuple[list[dict[str, str]], list[dict[str, str]], str, str, Any, Any, Any, Any]:
-    message, history, pending_epoch = _pending_turn(pending)
-    canonical_history = _canonical_history(current_history)
+) -> tuple[list[dict[str, str]], list[dict[str, Any]], str, str, str, Any, Any, Any, Any]:
+    message, conversation, router_result, pending_epoch = _pending_turn(pending)
     username, session_hash = _identity(request)
     enabled = gr.update(interactive=True)
     if pending_epoch != int(session_epoch):
-        completed = canonical_history
-        activity = "↺ The failed model turn was discarded after the demo session reset."
-    else:
-        fallback = _read_failure_fallback(
-            username,
-            session_hash,
-            message,
-            history,
-            request,
+        return (
+            _visible_history(current_visible),
+            canonical_conversation(current_conversation),
+            render_snapshot(BANK.snapshot(username, session_hash)),
+            "The failed model turn was discarded after the demo session reset.",
+            "### Experiment diagnostics\n\nStale failed turn discarded.",
+            gr.update(value="", interactive=True),
+            enabled,
+            enabled,
+            enabled,
         )
-        if fallback is None:
-            response = MODEL_FAILURE_RESPONSE
-            activity = (
-                "⚠️ ZeroGPU could not allocate or complete the model turn. "
-                "No synthetic write was committed."
-            )
-        else:
-            response, activity = fallback
-        completed = _with_assistant_turn(history, message, response)
+    failed_conversation = _with_text_turn(
+        conversation,
+        message,
+        MODEL_FAILURE_RESPONSE,
+    )
     return (
-        completed,
-        completed,
+        _visible_from_conversation(failed_conversation),
+        failed_conversation,
         render_snapshot(BANK.snapshot(username, session_hash)),
-        activity,
+        (
+            "ZeroGPU could not allocate or complete the 9B model turn. "
+            "No CPU-authored servicing answer was substituted."
+        ),
+        _render_diagnostics(router_result, (), (), "ZeroGPU/model unavailable"),
         gr.update(value="", interactive=True),
         enabled,
         enabled,
@@ -308,28 +324,14 @@ def route_query(
     history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if router is None:
-        return {
-            "route": "out_of_domain",
-            "banking_probability": None,
-            "intent": None,
-            "threshold": None,
-            "router_revision": ROUTER_REVISION,
-            "reason": "router unavailable; failed closed",
-        }
+        return _uncertain_route("router unavailable; delegated to the 9B model")
     try:
         return router.classify(message, history)
-    except (TypeError, ValueError):
-        return {
-            "route": "out_of_domain",
-            "banking_probability": None,
-            "intent": None,
-            "threshold": router.threshold,
-            "router_revision": ROUTER_REVISION,
-            "reason": "invalid route request; failed closed",
-        }
+    except (RuntimeError, TypeError, ValueError):
+        return _uncertain_route("router failed; delegated to the 9B model")
 
 
-def load_profile(request: gr.Request) -> tuple[str, str, str]:
+def load_profile(request: gr.Request) -> tuple[str, str, str, str]:
     username, session_hash = _identity(request)
     snapshot = BANK.snapshot(username, session_hash)
     customer = snapshot["customer"]
@@ -345,7 +347,8 @@ def load_profile(request: gr.Request) -> tuple[str, str, str]:
     return (
         profile,
         render_snapshot(snapshot),
-        "Ready. Select a preset or ask the model to inspect the synthetic account.",
+        "Ready. Allowed turns are handled by the 9B model; high-confidence OOD is gated.",
+        "### Experiment diagnostics\n\nNo turn has run yet.",
     )
 
 
@@ -354,29 +357,18 @@ def refresh_snapshot(request: gr.Request) -> str:
     return render_snapshot(BANK.snapshot(username, session_hash))
 
 
-def reset_demo(
-    request: gr.Request,
-) -> tuple[list[dict[str, str]], str, str]:
-    username, session_hash = _identity(request)
-    snapshot = BANK.reset(username, session_hash)
-    return (
-        [],
-        render_snapshot(snapshot),
-        "↺ This browser session was reset from the immutable synthetic seed.",
-    )
-
-
 def reset_session(
     session_epoch: int,
     request: gr.Request,
-) -> tuple[list[dict[str, str]], list[dict[str, str]], str, str, int, Any, Any, Any, Any]:
-    visible, snapshot, activity = reset_demo(request)
+) -> tuple[list[Any], list[Any], str, str, int, Any, Any, Any, Any]:
+    username, session_hash = _identity(request)
+    snapshot = BANK.reset(username, session_hash)
     enabled = gr.update(interactive=True)
     return (
-        visible,
-        visible,
-        snapshot,
-        activity,
+        [],
+        [],
+        render_snapshot(snapshot),
+        "This browser session and complete model conversation were reset.",
         int(session_epoch) + 1,
         gr.update(value="", interactive=True),
         enabled,
@@ -419,6 +411,37 @@ def render_snapshot(snapshot: dict[str, Any]) -> str:
     )
 
 
+def _direct_turn(
+    *,
+    message: str,
+    response: str,
+    visible: list[dict[str, str]],
+    conversation: list[dict[str, Any]],
+    snapshot: str,
+    activity: str,
+    diagnostics: str,
+) -> tuple[Any, list[dict[str, str]], list[dict[str, Any]], str, str, str, Any, Any, Any, Any]:
+    completed_conversation = _with_text_turn(conversation, message, response)
+    completed_visible = [
+        *visible,
+        {"role": "user", "content": message.strip()},
+        {"role": "assistant", "content": response},
+    ]
+    enabled = gr.update(interactive=True)
+    return (
+        gr.update(value="", interactive=True),
+        completed_visible,
+        completed_conversation,
+        snapshot,
+        activity,
+        diagnostics,
+        gr.skip(),
+        enabled,
+        enabled,
+        enabled,
+    )
+
+
 def _identity(request: gr.Request) -> tuple[str, str]:
     username = request.username
     session_hash = request.session_hash
@@ -433,76 +456,32 @@ def _money(cents: Any, currency: Any) -> str:
     return f"{str(currency)} {int(cents) / 100:,.2f}"
 
 
-def _workflow_error_response(error: ModelResponseError) -> str:
-    reason = str(error).lower()
-    if "not pending" in reason:
-        return (
-            "That synthetic transfer is already completed, so it cannot be cancelled. "
-            "No synthetic data was changed."
-        )
-    return MODEL_FAILURE_RESPONSE
-
-
-def _prepare_request(
-    message: str,
-    history: list[dict[str, Any]],
-    request: gr.Request,
-) -> tuple[str, str, Any, tuple[str, str, str] | None]:
-    if not isinstance(message, str) or not message.strip():
-        raise ValueError("message must be a non-empty string")
-    username, session_hash = _identity(request)
-    if contains_sensitive_value(message):
-        return (
-            username,
-            session_hash,
-            None,
-            (
-                SENSITIVE_RESPONSE,
-                render_snapshot(BANK.snapshot(username, session_hash)),
-                "🛡️ Credential guard blocked the request before routing or model inference.",
-            ),
-        )
-    route = route_query(message, history)
-    plan = plan_workflow(message, history, route)
-    if plan.direct_response is None:
-        return username, session_hash, plan, None
-    return (
-        username,
-        session_hash,
-        plan,
-        (
-            plan.direct_response,
-            render_snapshot(BANK.snapshot(username, session_hash)),
-            (
-                f"🧭 No backend tool or ZeroGPU inference was needed. "
-                f"Decision: `{plan.category}` ({plan.reason})."
-            ),
-        ),
-    )
-
-
-def _canonical_history(history: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _visible_history(history: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     if not isinstance(history, list):
         return []
-    canonical: list[dict[str, str]] = []
-    for item in history:
-        if not isinstance(item, dict):
-            continue
-        role = item.get("role")
-        content = item.get("content")
-        if role not in {"user", "assistant"} or not isinstance(content, str):
-            continue
-        canonical.append({"role": str(role), "content": content})
-    return canonical
+    return [
+        {"role": str(item["role"]), "content": str(item["content"])}
+        for item in history
+        if isinstance(item, dict)
+        and item.get("role") in {"user", "assistant"}
+        and isinstance(item.get("content"), str)
+        and str(item["content"]).strip()
+    ]
 
 
-def _with_assistant_turn(
-    history: list[dict[str, str]],
+def _visible_from_conversation(
+    conversation: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    return _visible_history(conversation)
+
+
+def _with_text_turn(
+    conversation: list[dict[str, Any]],
     message: str,
     response: str,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     return [
-        *history,
+        *canonical_conversation(conversation),
         {"role": "user", "content": message.strip()},
         {"role": "assistant", "content": response},
     ]
@@ -510,63 +489,85 @@ def _with_assistant_turn(
 
 def _pending_turn(
     pending: dict[str, Any],
-) -> tuple[str, list[dict[str, str]], int]:
+) -> tuple[str, list[dict[str, Any]], dict[str, Any], int]:
     if not isinstance(pending, dict):
         raise ValueError("pending model turn must be an object")
-    turn_id = pending.get("turn_id")
-    message = pending.get("message")
-    history = pending.get("history")
-    epoch = pending.get("epoch")
-    if not isinstance(turn_id, str) or not turn_id:
+    if not isinstance(pending.get("turn_id"), str) or not pending["turn_id"]:
         raise ValueError("pending model turn is missing a turn ID")
+    message = pending.get("message")
+    router_result = pending.get("router_result")
+    epoch = pending.get("epoch")
     if not isinstance(message, str) or not message.strip():
         raise ValueError("pending model turn is missing a message")
+    if not isinstance(router_result, dict):
+        raise ValueError("pending model turn is missing router diagnostics")
     if not isinstance(epoch, int) or isinstance(epoch, bool):
         raise ValueError("pending model turn has an invalid epoch")
-    return message.strip(), _canonical_history(history), epoch
+    return (
+        message.strip(),
+        canonical_conversation(pending.get("conversation")),
+        router_result,
+        epoch,
+    )
 
 
-def _read_failure_fallback(
-    username: str,
-    session_hash: str,
-    message: str,
-    history: list[dict[str, str]],
-    request: gr.Request,
-) -> tuple[str, str] | None:
-    try:
-        _, _, plan, direct = _prepare_request(message, history, request)
-        if (
-            direct is not None
-            or plan is None
-            or plan.category not in {"single_read", "multi_read"}
-        ):
-            return None
-        calls = tuple(
-            (
-                tool,
-                {"limit": 5} if tool == "list_transactions" else {},
-            )
-            for tool in plan.read_tools
+def _uncertain_route(reason: str) -> dict[str, Any]:
+    return {
+        "route": "uncertain",
+        "banking_probability": None,
+        "ood_probability": None,
+        "confidence": None,
+        "intent": None,
+        "intent_confidence": None,
+        "intent_candidates": [],
+        "threshold": None,
+        "ood_threshold": None,
+        "router_revision": ROUTER_REVISION,
+        "reason": reason,
+    }
+
+
+def _render_diagnostics(
+    route: dict[str, Any],
+    calls: tuple[ToolCall, ...],
+    results: tuple[dict[str, Any], ...],
+    response_path: str,
+) -> str:
+    candidates = route.get("intent_candidates")
+    candidate_text = (
+        "\n".join(
+            f"- `{item.get('intent')}`: {float(item.get('probability', 0)):.3f}"
+            for item in candidates
+            if isinstance(item, dict)
         )
-        raw_results = BANK.execute_read_bundle(
-            username,
-            session_hash,
-            calls,
+        if isinstance(candidates, list)
+        else ""
+    )
+    call_text = (
+        "\n".join(
+            f"- `{call.name}` `{json.dumps(call.arguments, sort_keys=True)}`"
+            for call in calls
         )
-        workflow_label = " + ".join(plan.read_tools)
-        response = (
-            f"{verified_read_response(raw_results)}\n\n"
-            f"---\n_Model workflow: "
-            f"`{workflow_label.replace(' + ', '` + `')}` · "
-            "verified CPU read fallback · ZeroGPU unavailable_"
+        or "- None"
+    )
+    result_text = (
+        "\n".join(
+            f"- `{item.get('name')}`: {'success' if item.get('ok') else 'error'}"
+            for item in results
         )
-        activity = (
-            "⚠️ ZeroGPU was unavailable, so the server returned a verified "
-            "read-only rendering of the synthetic backend results. No write ran."
-        )
-        return response, activity
-    except (RuntimeError, TypeError, ValueError):
-        return None
+        or "- None"
+    )
+    return (
+        "### Experiment diagnostics\n\n"
+        f"- Route: `{route.get('route')}`\n"
+        f"- In-domain probability: `{route.get('banking_probability')}`\n"
+        f"- OOD probability: `{route.get('ood_probability')}`\n"
+        f"- Response path: `{response_path}`\n\n"
+        f"**Top intents**\n{candidate_text or '- None'}\n\n"
+        f"**9B tool calls**\n{call_text}\n\n"
+        f"**Tool results**\n{result_text}\n\n"
+        f"Model revision: `{MODEL_REVISION[:12]}…`"
+    )
 
 
 with gr.Blocks(
@@ -579,10 +580,10 @@ with gr.Blocks(
         # Retail Bank Customer Service POC
 
         <div class="synthetic-banner">
-        <strong>Fictional data only.</strong> The authenticated profiles, balances, cards,
-        transactions, transfers, and actions are synthetic. The 9B model runs on ZeroGPU,
-        writes grounded customer-facing answers after a deterministic workflow executes
-        the supported backend operations. No real banking system is connected.
+        <strong>Fictional data only.</strong> The dual-head classifier gates
+        high-confidence OOD requests and supplies intent guidance. The 9B model owns
+        allowed conversation, tool selection, tool arguments, and final responses.
+        No real banking system is connected.
         </div>
         """
     )
@@ -591,6 +592,7 @@ with gr.Blocks(
             profile_panel = gr.HTML()
             snapshot_panel = gr.Markdown()
             activity_panel = gr.Markdown()
+            diagnostics_panel = gr.Markdown()
             with gr.Row():
                 refresh_button = gr.Button("Refresh state", size="sm")
                 reset_button = gr.Button("Reset demo", size="sm")
@@ -600,11 +602,11 @@ with gr.Blocks(
                 height=590,
                 layout="bubble",
                 type="messages",
-                placeholder="Ask the model to inspect or update the synthetic bank profile.",
+                placeholder="Talk naturally to the 9B synthetic bank agent.",
             )
             with gr.Row():
                 message_box = gr.Textbox(
-                    placeholder="Ask about the signed-in synthetic bank profile.",
+                    placeholder="Ask the signed-in synthetic bank agent.",
                     show_label=False,
                     scale=8,
                     submit_btn=False,
@@ -613,10 +615,10 @@ with gr.Blocks(
             gr.Examples(
                 examples=[[prompt] for prompt in PRESETS],
                 inputs=message_box,
-                label="Preset test cases",
+                label="Preset evaluation prompts",
             )
 
-    chat_history = gr.State([])
+    conversation_history = gr.State([])
     pending_turn = gr.State(None)
     session_epoch = gr.State(0)
     route_message = gr.Textbox(visible=False)
@@ -633,33 +635,38 @@ with gr.Blocks(
     dispatch_event = gr.on(
         triggers=[message_box.submit, send_button.click],
         fn=dispatch_turn,
-        inputs=[message_box, chat_history, session_epoch],
+        inputs=[message_box, chatbot, conversation_history, session_epoch],
         outputs=[
             message_box,
             chatbot,
-            chat_history,
+            conversation_history,
             snapshot_panel,
             activity_panel,
+            diagnostics_panel,
             pending_turn,
             send_button,
             reset_button,
             refresh_button,
         ],
         api_name="chat",
-        api_description=(
-            "Authenticated CPU dispatch for synthetic retail-bank servicing chat."
-        ),
+        api_description="CPU OOD dispatch followed by a registered 9B ZeroGPU event.",
         queue=True,
         trigger_mode="once",
     )
     model_event = pending_turn.change(
         finalize_turn,
-        inputs=[pending_turn, session_epoch, chat_history],
+        inputs=[
+            pending_turn,
+            session_epoch,
+            chatbot,
+            conversation_history,
+        ],
         outputs=[
             chatbot,
-            chat_history,
+            conversation_history,
             snapshot_panel,
             activity_panel,
+            diagnostics_panel,
             message_box,
             send_button,
             reset_button,
@@ -671,12 +678,18 @@ with gr.Blocks(
     )
     model_event.failure(
         fail_pending_turn,
-        inputs=[pending_turn, session_epoch, chat_history],
+        inputs=[
+            pending_turn,
+            session_epoch,
+            chatbot,
+            conversation_history,
+        ],
         outputs=[
             chatbot,
-            chat_history,
+            conversation_history,
             snapshot_panel,
             activity_panel,
+            diagnostics_panel,
             message_box,
             send_button,
             reset_button,
@@ -684,11 +697,10 @@ with gr.Blocks(
         ],
         api_name=False,
         queue=True,
-        js=DISMISS_RECOVERED_GPU_ERROR_JS,
     )
     demo.load(
         load_profile,
-        outputs=[profile_panel, snapshot_panel, activity_panel],
+        outputs=[profile_panel, snapshot_panel, activity_panel, diagnostics_panel],
         api_name=False,
     )
     refresh_button.click(
@@ -702,7 +714,7 @@ with gr.Blocks(
         inputs=session_epoch,
         outputs=[
             chatbot,
-            chat_history,
+            conversation_history,
             snapshot_panel,
             activity_panel,
             session_epoch,

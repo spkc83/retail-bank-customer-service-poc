@@ -31,8 +31,8 @@ TOOL_ARGUMENTS = {
     "list_service_cases": set(),
     "list_transactions": {"limit"},
     "list_transfers": set(),
-    "cancel_transfer": {"transfer_id"},
-    "dispute_transaction": {"transaction_id"},
+    "cancel_transfer": {"recipient", "transfer_id"},
+    "dispute_transaction": {"description", "transaction_id"},
     "freeze_card": {"last4"},
     "replace_card": {"last4"},
 }
@@ -473,7 +473,11 @@ def _execute(
         card["status"] = status
         return {"card": card, "simulated": True}
     if tool_name == "dispute_transaction":
-        transaction = _selected_transaction(connection, arguments.get("transaction_id"))
+        transaction = _selected_transaction(
+            connection,
+            arguments.get("transaction_id"),
+            arguments.get("description"),
+        )
         connection.execute(
             "UPDATE bank_transaction SET disputed = 1 WHERE transaction_id = ?",
             (transaction["transaction_id"],),
@@ -486,7 +490,11 @@ def _execute(
         transaction["disputed"] = True
         return {"transaction": transaction, "simulated": True}
     if tool_name == "cancel_transfer":
-        transfer = _selected_transfer(connection, arguments.get("transfer_id"))
+        transfer = _selected_transfer(
+            connection,
+            arguments.get("transfer_id"),
+            arguments.get("recipient"),
+        )
         connection.execute(
             "UPDATE bank_transfer SET status = 'cancelled' WHERE transfer_id = ?",
             (transfer["transfer_id"],),
@@ -508,7 +516,20 @@ def _selected_card(connection: sqlite3.Connection, last4: Any) -> dict[str, Any]
 def _selected_transaction(
     connection: sqlite3.Connection,
     transaction_id: Any,
+    description: Any = None,
 ) -> dict[str, Any]:
+    if transaction_id is not None and description is not None:
+        raise ValueError("select a transaction by ID or description, not both")
+    if description is not None:
+        return _one_casefold_match(
+            connection,
+            """
+            SELECT * FROM bank_transaction
+            WHERE amount_cents < 0 AND disputed = 0 AND lower(description) = lower(?)
+            """,
+            str(description),
+            "transaction",
+        )
     if transaction_id is None:
         return _one(
             connection,
@@ -525,7 +546,23 @@ def _selected_transaction(
     )
 
 
-def _selected_transfer(connection: sqlite3.Connection, transfer_id: Any) -> dict[str, Any]:
+def _selected_transfer(
+    connection: sqlite3.Connection,
+    transfer_id: Any,
+    recipient: Any = None,
+) -> dict[str, Any]:
+    if transfer_id is not None and recipient is not None:
+        raise ValueError("select a transfer by ID or recipient, not both")
+    if recipient is not None:
+        return _one_casefold_match(
+            connection,
+            """
+            SELECT * FROM bank_transfer
+            WHERE status = 'pending' AND lower(recipient) = lower(?)
+            """,
+            str(recipient),
+            "transfer",
+        )
     if transfer_id is None:
         return _one(
             connection,
@@ -540,6 +577,20 @@ def _selected_transfer(connection: sqlite3.Connection, transfer_id: Any) -> dict
         "SELECT * FROM bank_transfer WHERE transfer_id = ? AND status = 'pending'",
         (str(transfer_id),),
     )
+
+
+def _one_casefold_match(
+    connection: sqlite3.Connection,
+    query: str,
+    value: str,
+    record_type: str,
+) -> dict[str, Any]:
+    rows = connection.execute(query, (value,)).fetchall()
+    if len(rows) != 1:
+        raise ValueError(
+            f"expected exactly one matching synthetic {record_type}; found {len(rows)}"
+        )
+    return _row(rows[0])
 
 
 def _create_case(connection: sqlite3.Connection, case_type: str, subject: str) -> None:

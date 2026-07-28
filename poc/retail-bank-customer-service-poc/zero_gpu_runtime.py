@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
@@ -41,28 +40,39 @@ else:
     model.eval()
 
 
-def generate_final_answer(
-    messages: list[dict[str, str]],
-    grounded_results: dict[str, Any],
+def count_tokens(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+) -> int:
+    if tokenizer is None:
+        raise RuntimeError("ZeroGPU model tokenizer is unavailable")
+    rendered = tokenizer.apply_chat_template(
+        messages,
+        tools=tools,
+        tokenize=True,
+        add_generation_prompt=True,
+    )
+    input_ids = rendered.get("input_ids") if hasattr(rendered, "get") else rendered
+    if not hasattr(input_ids, "__len__"):
+        raise RuntimeError("tokenizer did not return countable input IDs")
+    return len(input_ids)
+
+
+def generate_text(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
     max_new_tokens: int,
 ) -> str:
-    """Run only stateless grounded response generation on ZeroGPU."""
-
     if tokenizer is None or model is None:
         raise RuntimeError("ZeroGPU model is unavailable")
     if not messages or messages[0].get("role") != "system":
-        raise ValueError("finalizer messages must begin with a system prompt")
+        raise ValueError("model messages must begin with a system prompt")
     if not 1 <= max_new_tokens <= 512:
         raise ValueError("max_new_tokens must be between 1 and 512")
 
-    rendered_messages = [dict(item) for item in messages]
-    rendered_messages[0]["content"] = (
-        f"{rendered_messages[0]['content']}\n\n"
-        "VERIFIED SYNTHETIC WORKFLOW RESULTS (the only factual source):\n"
-        f"{json.dumps(grounded_results, sort_keys=True)}"
-    )
     rendered = tokenizer.apply_chat_template(
-        rendered_messages,
+        messages,
+        tools=tools,
         tokenize=False,
         add_generation_prompt=True,
     )

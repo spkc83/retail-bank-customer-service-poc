@@ -6,7 +6,7 @@ import sys
 import pytest
 
 
-def test_zero_gpu_boundary_is_stateless_and_fails_cleanly_without_model(
+def test_zero_gpu_runtime_exposes_generic_generation_and_exact_counting_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("POC_SKIP_MODEL_LOAD", "1")
@@ -14,11 +14,37 @@ def test_zero_gpu_boundary_is_stateless_and_fails_cleanly_without_model(
     runtime = importlib.import_module("zero_gpu_runtime")
 
     assert not hasattr(runtime, "BANK")
-    assert not hasattr(runtime, "run_model_service")
-    assert not hasattr(runtime.generate_final_answer, "_zero_gpu_config")
+    assert not hasattr(runtime.generate_text, "_zero_gpu_config")
     with pytest.raises(RuntimeError, match="unavailable"):
-        runtime.generate_final_answer(
+        runtime.generate_text(
             [{"role": "user", "content": "Show my balance."}],
-            {"list_accounts": {"accounts": []}},
-            128,
+            [],
+            512,
         )
+    with pytest.raises(RuntimeError, match="unavailable"):
+        runtime.count_tokens(
+            [{"role": "user", "content": "Show my balance."}],
+            [],
+        )
+
+
+def test_token_count_uses_input_ids_from_batch_encoding_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("POC_SKIP_MODEL_LOAD", "1")
+    sys.modules.pop("zero_gpu_runtime", None)
+    runtime = importlib.import_module("zero_gpu_runtime")
+
+    class FakeTokenizer:
+        def apply_chat_template(self, *_args, **_kwargs):
+            return {
+                "input_ids": [11, 12, 13, 14],
+                "attention_mask": [1, 1, 1, 1],
+            }
+
+    runtime.tokenizer = FakeTokenizer()
+
+    assert runtime.count_tokens(
+        [{"role": "system", "content": "system"}],
+        [],
+    ) == 4

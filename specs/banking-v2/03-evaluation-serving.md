@@ -1,106 +1,90 @@
 # Banking-v2 evaluation and serving
 
-## Serving path
+## Serving experiment
 
-The public POC uses deterministic orchestration for backend selection. The
-latest user turn and bounded conversation history pass through four gates:
-
-```text
-credential guard
-  → CPU /chat dispatch and dual-head domain/intent router
-  → deterministic capability planner
-  → direct response, or registered ZeroGPU model event when needed
-  → CPU synthetic backend plus stateless 9B finalizer
-```
-
-The router is an advisory classifier and audit signal, not a prompt suggestion
-and not the component that selects backend operations. The deterministic
-planner decides whether to answer directly, execute a supported read bundle,
-execute one supported write, ask for clarification, return an unsupported
-banking response, or return the exact out-of-domain response:
+The public POC evaluates a model-driven dual-head-router plus 9B-agent design:
 
 ```text
-I can only help with retail banking and financial-services questions. Please ask about accounts, cards, transfers, payments, loans, or related banking support.
+credential-value guard
+  → dual-head CPU classifier
+  → high-confidence OOD stock response, or
+  → 9B model with intent guidance and token-budgeted history
+  → direct response or one generated batch of Qwen tool calls
+  → synthetic backend tool results
+  → second 9B generation for the final response
 ```
 
-The released router uses a shared DistilBERT encoder with a binary
-supported-banking/OOD head and a 77-way Banking77 intent head. Its held-out
-results are intent macro F1
-`0.951208`, in-domain false-refusal rate `0.013689`, OOD false-accept rate
-`0.007733`, and calibrated banking threshold `0.98`. These results are
-diagnostic POC gates; deterministic capability evidence still controls the
-backend path.
+The domain head produces `in_domain`, `uncertain`, or `out_of_domain`.
+`p(in_domain) >= 0.98` is in-domain, `p(in_domain) <= 0.02` is high-confidence
+OOD, and the middle region is uncertain. Only high-confidence OOD bypasses the
+9B model. The intent head always exposes its top three predictions; they are
+included as advisory model context rather than mapped to backend workflows.
 
-## Workflow rules
+## Model and tool ownership
 
-The planner implements the deployed capability contract:
+For allowed and uncertain turns, the 9B model owns natural conversation,
+contextual interpretation, clarification, tool selection, user-facing tool
+arguments, and final response generation.
 
-- greetings and acknowledgements return direct conversational responses;
-- explicit non-banking topics return the stock OOD response before ZeroGPU
-  inference;
-- unsupported banking requests return an honest POC-limitation response;
-- read-only requests can bundle multiple supported reads in user-requested
-  order;
-- account-changing requests are limited to one explicit write in a turn;
-- mixed read/write or multi-write requests return clarification and make no
-  synthetic change;
-- mailing-address history is limited to available synthetic service cases, not
-  a full profile audit log.
+The runtime performs mechanical Qwen `<tool_call>` parsing and direct invocation
+of generated mock functions. It does not contain a regex capability planner,
+semantic authorization validator, deterministic grounded repair, or
+CPU-generated servicing fallback.
 
-The 9B model is a grounded response finalizer. It receives only sanitized,
-verified workflow results and must not invent balances, dates, identifiers,
-statuses, or actions. Server-side validation rejects empty, unsafe, or
-internal-identifier-bearing final responses. For writes, finalizer failure
-rolls back the synthetic backend transaction. Multi-read responses and
-incomplete or contradictory factual drafts use a labeled deterministic
-rendering of the verified workflow results.
+One first-pass generation may contain up to eight ordered calls. Malformed tool
+protocol fails the model turn. Unknown tool names, unsupported arguments, and
+backend errors are returned as structured tool results for the second
+generation. A plain first-pass response completes without tool execution.
 
-## Multi-turn behavior
+## Context contract
 
-History is isolated per authenticated user and browser session. The finalizer
-receives a bounded list of sanitized alternating user/assistant messages plus
-the current user message. Assistant messages are stripped of UI diagnostics
-before reuse. Tests must cover clarification, follow-up, user correction, and
-an in-domain conversation that transitions to an out-of-domain request.
+The complete valid transcript is retained per authenticated browser session.
+Canonical state contains user, assistant, assistant-tool-call, tool-result, and
+final-assistant messages.
 
-## Test-time scaling
+The operating input budget is 8,192 tokenizer-measured tokens, with 512 new
+tokens reserved for generation. Context selection retains the system prompt and
+current router guidance, the complete latest interaction, and newest earlier
+complete interactions while they fit. A tool-call chain is never split. An
+oversized latest interaction fails rather than being silently truncated.
 
-Test-time scaling is not enabled in the deployed POC. Each backend-executing
-request uses one deterministic 9B generation for final answer writing. A CPU
-chat-dispatch event handles direct conversational, unsupported-banking, OOD,
-credential-guard, and clarification responses without requesting a GPU. Only a
-unique pending model turn triggers the separately registered ZeroGPU event.
-The UI prevents another submit or reset while that event is pending, and a
-session epoch causes stale queued turns to execute nothing.
+The model checkpoint's hard context limit is 32,768 tokens; the lower operating
+budget controls ZeroGPU latency and memory.
 
-ZeroGPU failure may fall back only for read workflows, using a labeled
-deterministic rendering of sanitized verified backend results. Writes do not
-use this fallback and remain uncommitted when model finalization is unavailable.
+## Observability and evaluation
 
-Any future multi-candidate path must prove at least a two-point improvement on
-the held-out composite score over the one-generation baseline. OOD false
-accepts and in-domain false refusals may each regress by no more than 0.5
-percentage points. The verifier may rank complete candidates but may not
-synthesize a new answer. Seeds, decoding parameters, candidate text, scores,
-selected index, router decision, workflow plan, and latency must be recorded
-for reproducibility.
+The UI reports domain probabilities, top-three intent predictions, generated
+tool calls and arguments, tool status, response path, and current synthetic
+backend state.
+
+UI presets and prior screenshots are regression examples only. The held-out
+evaluation must cover paraphrases, conversational follow-ups, intent-head
+errors, OOD boundaries, multi-tool selection, write arguments, grounding, and
+naturalness.
+
+## Failure behavior
+
+ZeroGPU allocation, generation, token-budget, or protocol failure returns an
+honest model-unavailable answer. It never substitutes a deterministic banking
+response. Mock tools execute when generated. Since this is a behavioral
+experiment without a rollback policy, a successful synthetic write remains
+visible if second-pass generation later fails.
 
 ## Release gates
 
-- exact canned response on 100% of accepted held-out OOD cases
-- in-domain false-refusal rate at most 2%
-- contextual banking-follow-up false-refusal rate at most 5%
-- Banking77 intent-router macro F1 at least 0.90
-- unresolved placeholder rate zero
-- response/intent consistency at least 0.90
-- multi-turn continuity score at least 0.85
-- deterministic workflow accuracy at least 0.95 on supported POC intents
-- zero committed writes on clarification, OOD, unsupported, unsafe, or
-  unavailable-finalizer paths
-- no PII-like strings in released training or evaluation files
-- dense baseline and MoE evaluated on the same frozen splits
+- Banking77 intent macro F1 at least 0.90;
+- in-domain false-refusal rate at most 2%;
+- held-out high-confidence OOD false-accept rate at most 1%;
+- greetings and customer-service small talk reach the 9B model;
+- tool-name accuracy at least 0.95 on supported held-out scenarios;
+- tool-argument accuracy at least 0.90;
+- multi-turn reference-resolution accuracy at least 0.85;
+- malformed tool-call rate below 1%;
+- model-authored response rate 100% for successful allowed turns;
+- no CPU-generated servicing answer during model unavailability;
+- complete canonical tool chains are retained or omitted as whole units;
+- dense baseline and MoE are evaluated on the same frozen scenarios.
 
-The public POC must display enough route, workflow, and backend-state evidence
-to debug failures without exposing internal identifiers to the finalizer or to
-the customer response. Presets are smoke tests only and must not be presented
-as evidence of generalization.
+An authenticated live ZeroGPU tool round trip is required to claim hosted model
+inference. A running Space that only reaches the failure handler does not pass
+that gate.

@@ -14,111 +14,95 @@ models:
   - spkc83/retail-bank-domain-intent-router
 datasets:
   - spkc83/retail-bank-router-training-data
-short_description: Authenticated 9B retail-banking demo with synthetic data.
+short_description: Dual-head router plus 9B model-driven synthetic banking chat.
 ---
 
 # Retail Bank Customer Service POC
 
-An authenticated, model-driven customer-service demonstration for a fictional
-retail bank. A CPU router classifies the request, a deterministic capability
-planner selects supported workflows, a session-isolated SQLite backend executes
-against synthetic records, and the 9B banking model runs on Hugging Face
-ZeroGPU only to write the final grounded customer response.
+This authenticated POC tests whether a dual-head OOD/intent classifier plus the
+9B banking MoE can provide natural multi-turn customer service and operate a
+synthetic retail-bank backend. It is deliberately model-driven rather than a
+deterministic servicing simulator.
 
-Everything in the application is synthetic. It has no connection to a real
-bank, cannot access real accounts, and cannot perform real transactions.
-
-## Current deployment status
-
-Static authentication, the learned domain/intent router, OOD refusal, and the
-synthetic dashboard are live. The public Gradio Blocks application uses a CPU
-dispatch event and a separately registered ZeroGPU model event on an RTX PRO
-6000 Blackwell partition. It supports read bundles and one-write-at-a-time
-synthetic actions for both authenticated demo users.
+Everything is fictional. The application has no connection to a bank and
+cannot access real accounts or perform real transactions.
 
 ## Live artifacts
 
-- Live application: https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
-- Public source: https://github.com/spkc83/retail-bank-servicing-poc
-- Model-development source:
-  https://github.com/spkc83/retail-bank-servicing
-- 9B conversational model:
-  https://huggingface.co/spkc83/retail-bank-servicing-moe-9b
-- Domain and intent router:
+- Application: https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
+- POC source: https://github.com/spkc83/retail-bank-servicing-poc
+- Model-development source: https://github.com/spkc83/retail-bank-servicing
+- 9B model: https://huggingface.co/spkc83/retail-bank-servicing-moe-9b
+- Dual-head router:
   https://huggingface.co/spkc83/retail-bank-domain-intent-router
-- Governed router dataset:
-  https://huggingface.co/datasets/spkc83/retail-bank-router-training-data
 
-The application code pins immutable model and router weight revisions for
-reproducible inference; the links above intentionally point to the current,
-clean public documentation.
-
-## Request path
+## Runtime
 
 ```text
-Static login
-  → CPU /chat dispatch, credential guard, dual-head router, and capability planner
-  → direct conversational/policy response, or a unique pending model turn
-  → registered ZeroGPU model event for backend-executing workflows only
-  → server validates workflow, arguments, identity scope, and write authorization
-  → per-session ephemeral SQLite executes against synthetic records
-  → 9B finalizer receives sanitized grounded results when a model answer is needed
-  → server validates the final response before returning it
+Authenticated user and stored session transcript
+  → dual-head CPU classifier
+  → high-confidence OOD: stock response
+  → allowed or uncertain: registered ZeroGPU 9B event
+  → 9B direct response, or Qwen <tool_call> JSON
+  → direct execution against session-isolated synthetic SQLite
+  → tool results appended to model history
+  → second 9B generation produces the final answer
 ```
 
-Credential-bearing requests are rejected before model inference. The
-capability planner handles greetings and acknowledgements directly, returns a
-stock response for explicit non-banking subjects, and returns an honest
-unsupported-banking response when the request is financial-services related but
-outside the POC backend. Those direct paths never allocate ZeroGPU. Only a
-model-backed pending turn changes the hidden session state that triggers the
-registered GPU event. The input and reset controls remain disabled until model
-success or failure, and a reset epoch invalidates stale queued turns. Customer
-identity is derived only from Gradio authentication, never from pending state.
-Tool arguments cannot select a customer. Each browser page session receives an
-isolated, TTL-limited database cloned from the immutable synthetic seed. The
-database files live only in the Space's temporary runtime storage, allowing
-successive ZeroGPU workers to share the same session state.
+The domain head has three operating regions: `in_domain`, `uncertain`, and
+`out_of_domain`. Only high-confidence OOD bypasses the model. The intent head's
+top three predictions and probabilities are advisory context for the 9B model;
+they do not select a tool.
 
-If ZeroGPU allocation fails, read-only workflows return a clearly labeled,
-verified CPU rendering of the same sanitized synthetic backend results. This
-keeps customer inspection usable without presenting the fallback as model
-output. Writes never use that fallback and remain uncommitted unless model
-finalization succeeds.
+The 9B model owns greetings, conversational responses, contextual reasoning,
+clarification, tool selection, tool arguments, and final wording. The runtime
+only parses Qwen's tool-call format and invokes the named mock function. There
+is no deterministic workflow planner, authorization policy, grounded-response
+repair, or template-generated read fallback.
 
-## Supported workflows
+## Conversation context
 
-- list accounts, balances, cards, transactions, transfers, and service cases;
-- freeze or replace a synthetic card;
-- dispute a synthetic debit transaction;
-- cancel a synthetic transfer when it is pending.
+The application stores the complete valid session transcript, including user
+and assistant messages, assistant tool calls, ordered tool results, and final
+model responses.
 
-Read-only requests can execute multiple backend reads in one response, such as
-transfers plus recent transactions. The mailing-address history preset is
-backed by the limited synthetic service-case records, not a full profile-change
-audit table. Server validation uses a labeled deterministic grounded repair for
-multi-read answers and for model drafts that omit required balance labels,
-the limited-history qualifier, or verified workflow values.
+Each inference builds a tokenizer-measured prompt with an 8,192-token input
+budget and reserves 512 tokens for generation. The system prompt and complete
+current interaction are always retained. Newest prior interactions are added
+while they fit; a user/tool-call/tool-result/final-answer chain is never split.
+An oversized current interaction fails visibly instead of being truncated.
 
-Write workflows require explicit customer language such as “freeze,”
-“replace,” “dispute,” or “cancel.” The planner permits only one write per user
-turn and does not combine writes with reads. A deterministic,
-authenticated-session resolver matches customer-described records, such as card
-last four digits, transfer recipient or amount, or latest purchase, to exactly
-one synthetic backend record. Unknown, completed, or ambiguous targets fail
-safely. Write actions commit only after the ZeroGPU model's final answer passes
-credential, unsafe-output, and internal-identifier validation; unavailable or
-unsafe finalization rolls back the synthetic action. A contradictory or
-incomplete write acknowledgement is replaced with a response rendered only
-from the verified action result before commit.
+## Synthetic tools
+
+- list accounts, cards, transactions, transfers, and service cases;
+- freeze or replace a card;
+- dispute a transaction by merchant description;
+- cancel a pending transfer by recipient.
+
+The model may emit multiple calls in one first-pass generation. Calls execute
+in generated order. Backend or schema errors return to the 9B model as tool
+results so it can explain the outcome naturally.
+
+Because this is an experimental synthetic backend rather than a production
+security architecture, generated mock writes execute directly. If a write
+succeeds and the second model generation later fails, the dashboard still shows
+that synthetic mutation.
+
+## Failure behavior and diagnostics
+
+If ZeroGPU allocation or generation fails, the chat reports that the 9B model
+is unavailable. It does not substitute a Python-generated banking answer.
+
+The diagnostics panel exposes domain probabilities, top intent predictions,
+generated tool names and arguments, tool status, and the response path. Presets
+are evaluation prompts, not production routing rules or proof of
+generalization.
 
 ## Authentication
 
-The two demo usernames are `alex.demo` and `maya.demo`. Deployment passwords
-are not committed; local tests use non-secret test-only values. The Space reads
-the live credentials from the write-only `DEMO_AUTH_JSON` secret. Gradio’s
-static authentication is appropriate only for a limited POC; it is not a
-production identity system.
+The demo usernames are `alex.demo` and `maya.demo`. Passwords are provided
+through the Space's write-only `DEMO_AUTH_JSON` secret and are not committed.
+Authentication exists only to select isolated synthetic customer records.
 
 ## Local verification
 
@@ -131,8 +115,5 @@ pytest
 ruff check .
 ```
 
-The skip flags are for UI and service-contract tests only. Release verification
-also runs authenticated live ZeroGPU checks for deterministic workflow
-selection, exact grounding, validated database execution, state mutation,
-model-authored final responses, sanitized alternating history, OOD refusal, and
-credential rejection.
+Release verification additionally requires a live ZeroGPU model-authored tool
+round trip; an honest infrastructure failure is not counted as model inference.

@@ -8,13 +8,14 @@ import pytest
 
 from mock_bank import SessionBankRegistry
 from model_service import (
-    GroundedBankingService,
-    ModelResponseError,
-    _bounded_messages,
-    _grounding_payload,
-    verified_read_response,
+    INPUT_TOKEN_BUDGET,
+    MODEL_TOOLS,
+    AgentExecutionError,
+    AgentProtocolError,
+    ConversationalBankingAgent,
+    parse_tool_calls,
+    select_token_budgeted_context,
 )
-from orchestration import plan_workflow
 
 ROOT = Path(__file__).parents[1]
 
@@ -23,347 +24,302 @@ def bank() -> SessionBankRegistry:
     return SessionBankRegistry.from_json(ROOT / "synthetic_bank.json")
 
 
-def route(*, in_domain: bool = True, intent: str | None = None) -> dict[str, Any]:
-    return {
-        "route": "in_domain" if in_domain else "out_of_domain",
-        "intent": intent,
-        "banking_probability": 0.99 if in_domain else 0.2,
-    }
-
-
-class RecordingFinalizer:
+class RecordingModel:
     def __init__(self, outputs: list[str]) -> None:
         self.outputs = list(outputs)
         self.calls: list[dict[str, Any]] = []
 
-    def __call__(
+    def generate(
         self,
-        messages: list[dict[str, str]],
-        grounded_results: dict[str, Any],
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
         max_new_tokens: int,
     ) -> str:
         self.calls.append(
             {
                 "messages": messages,
-                "grounded_results": grounded_results,
+                "tools": tools,
                 "max_new_tokens": max_new_tokens,
             }
         )
         return self.outputs.pop(0)
 
-
-def test_verified_read_response_rejects_write_results() -> None:
-    with pytest.raises(ValueError, match="read-only"):
-        verified_read_response(
-            {
-                "cancel_transfer": {
-                    "transfer": {
-                        "recipient": "River Consulting",
-                        "amount_cents": 45000,
-                        "status": "cancelled",
-                    }
-                }
-            }
-        )
+    def count_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> int:
+        return len(json.dumps({"messages": messages, "tools": tools}))
 
 
-def test_multi_read_executes_exact_workflow_and_model_finalizes_grounded_bundle() -> None:
-    finalizer = RecordingFinalizer(
-        ["Your recent transfers and transactions are shown from the synthetic demo."]
-    )
-    service = GroundedBankingService(bank=bank(), finalizer=finalizer)
-    message = "Show transfers and recent transactions."
-    plan = plan_workflow(message, [], route(intent="pending_transfer"))
-
-    reply = service.execute(
-        username="alex.demo",
-        session_hash="session",
-        message=message,
-        history=[],
-        plan=plan,
-    )
-
-    assert reply.workflow_tools == ("list_transfers", "list_transactions")
-    assert reply.selection_source == "grounded_repair"
-    assert len(finalizer.calls) == 1
-    grounded = finalizer.calls[0]["grounded_results"]
-    assert tuple(grounded) == ("list_transfers", "list_transactions")
-    serialized = json.dumps(grounded)
-    assert "_id" not in serialized
-    assert "_cents" not in serialized
-    assert "USD 450.00" in serialized
-
-
-def test_single_read_uses_service_cases_for_address_history() -> None:
-    finalizer = RecordingFinalizer(
-        [
-            "The available synthetic service-case history shows the mailing address "
-            "update on June 18, 2026."
-        ]
-    )
-    service = GroundedBankingService(bank=bank(), finalizer=finalizer)
-    message = "When was my mailing address changed?"
-
-    reply = service.execute(
-        username="alex.demo",
-        session_hash="session",
-        message=message,
-        history=[],
-        plan=plan_workflow(message, [], route(intent="edit_personal_details")),
-    )
-
-    assert reply.workflow_tools == ("list_service_cases",)
-    grounded = finalizer.calls[0]["grounded_results"]
-    assert grounded["list_service_cases"]["service_cases"][0]["created_at"].startswith(
-        "2026-06-18"
-    )
-
-
-def test_cancel_pending_transfer_resolves_exact_recipient_and_commits_after_finalization() -> None:
-    finalizer = RecordingFinalizer(
-        ["I cancelled the USD 450.00 River Consulting transfer in the synthetic demo."]
-    )
-    registry = bank()
-    service = GroundedBankingService(bank=registry, finalizer=finalizer)
-    message = "Cancel pending transfer to River Consulting."
-
-    reply = service.execute(
-        username="alex.demo",
-        session_hash="session",
-        message=message,
-        history=[],
-        plan=plan_workflow(message, [], route(in_domain=False)),
-    )
-
-    assert reply.workflow_tools == ("cancel_transfer",)
-    assert reply.tool_result["cancel_transfer"]["transfer"]["status"] == "cancelled"
-    assert registry.snapshot("alex.demo", "session")["transfers"][0]["status"] == "cancelled"
-
-
-def test_cancel_without_selector_resolves_only_when_one_pending_transfer_exists() -> None:
-    finalizer = RecordingFinalizer(
-        ["I cancelled the only pending transfer in this synthetic demo."]
-    )
-    registry = bank()
-    service = GroundedBankingService(bank=registry, finalizer=finalizer)
-    message = "Cancel my pending transfer."
-
-    reply = service.execute(
-        username="alex.demo",
-        session_hash="session",
-        message=message,
-        history=[],
-        plan=plan_workflow(message, [], route()),
-    )
-
-    assert reply.tool_result["cancel_transfer"]["transfer"]["recipient"] == "River Consulting"
-    assert reply.tool_result["cancel_transfer"]["transfer"]["status"] == "cancelled"
-
-
-def test_completed_transfer_cancellation_fails_without_mutation_or_model_call() -> None:
-    finalizer = RecordingFinalizer(["This output must not be used."])
-    registry = bank()
-    service = GroundedBankingService(bank=registry, finalizer=finalizer)
-    message = "Cancel the completed transfer to Jamie Lee."
-
-    with pytest.raises(ModelResponseError, match="not pending"):
-        service.execute(
-            username="alex.demo",
-            session_hash="session",
-            message=message,
-            history=[],
-            plan=plan_workflow(message, [], route()),
-        )
-
-    assert finalizer.calls == []
-    assert [item["status"] for item in registry.snapshot("alex.demo", "session")["transfers"]] == [
-        "pending",
-        "completed",
-    ]
-
-
-def test_unsafe_final_answer_rolls_back_write() -> None:
-    finalizer = RecordingFinalizer(
-        ["Please provide your password so I can finish freezing the card."]
-    )
-    registry = bank()
-    service = GroundedBankingService(bank=registry, finalizer=finalizer)
-    message = "Freeze my debit card ending in 4821."
-
-    with pytest.raises(ModelResponseError, match="unsafe"):
-        service.execute(
-            username="alex.demo",
-            session_hash="session",
-            message=message,
-            history=[],
-            plan=plan_workflow(message, [], route()),
-        )
-
-    assert registry.snapshot("alex.demo", "session")["cards"][0]["status"] == "active"
-
-
-def test_empty_final_answer_rolls_back_write() -> None:
-    finalizer = RecordingFinalizer(["  "])
-    registry = bank()
-    service = GroundedBankingService(bank=registry, finalizer=finalizer)
-    message = "Replace my debit card ending in 4821."
-
-    with pytest.raises(ModelResponseError, match="empty"):
-        service.execute(
-            username="alex.demo",
-            session_hash="session",
-            message=message,
-            history=[],
-            plan=plan_workflow(message, [], route()),
-        )
-
-    assert registry.snapshot("alex.demo", "session")["cards"][0]["status"] == "active"
-
-
-def test_internal_identifier_in_final_answer_is_rejected_and_write_rolls_back() -> None:
-    finalizer = RecordingFinalizer(
-        ["I froze internal record card_alex_debit in the synthetic demo."]
-    )
-    registry = bank()
-    service = GroundedBankingService(bank=registry, finalizer=finalizer)
-    message = "Freeze my debit card."
-
-    with pytest.raises(ModelResponseError, match="internal identifier"):
-        service.execute(
-            username="alex.demo",
-            session_hash="session",
-            message=message,
-            history=[],
-            plan=plan_workflow(message, [], route()),
-        )
-
-    assert registry.snapshot("alex.demo", "session")["cards"][0]["status"] == "active"
-
-
-def test_bounded_messages_preserve_sanitized_user_and_assistant_turns() -> None:
-    messages = _bounded_messages(
-        "What about my card?",
-        [
-            {"role": "user", "content": "Show my balances."},
-            {
-                "role": "assistant",
-                "content": (
-                    "Your synthetic checking balance is USD 12,500.00.\n\n"
-                    "---\n_Model workflow: `list_accounts` · revision `abc…`_"
-                ),
-            },
+def router_guidance() -> dict[str, Any]:
+    return {
+        "route": "in_domain",
+        "banking_probability": 0.99,
+        "ood_probability": 0.01,
+        "intent": "pending_transfer",
+        "intent_confidence": 0.81,
+        "intent_candidates": [
+            {"intent": "pending_transfer", "probability": 0.81},
+            {"intent": "cancel_transfer", "probability": 0.12},
+            {"intent": "card_payment_fee_charged", "probability": 0.03},
         ],
-    )
-
-    assert {"role": "user", "content": "Show my balances."} in messages
-    assert {
-        "role": "assistant",
-        "content": "Your synthetic checking balance is USD 12,500.00.",
-    } in messages
-    assert all("Model workflow" not in item["content"] for item in messages)
-
-
-def test_grounding_payload_removes_internal_fields_and_formats_money() -> None:
-    grounded = _grounding_payload(
-        {
-            "transfer_id": "trf_internal",
-            "from_account_id": "acct_internal",
-            "login": "alex.demo",
-            "recipient": "River Consulting",
-            "amount_cents": 45_000,
-            "currency": "USD",
-        }
-    )
-
-    assert grounded == {
-        "recipient": "River Consulting",
-        "amount": "USD 450.00",
-        "currency": "USD",
     }
 
 
-def test_ungrounded_model_money_is_replaced_with_verified_backend_values() -> None:
-    finalizer = RecordingFinalizer(
-        ["Your checking account balance is USD 9,999.99."]
-    )
-    service = GroundedBankingService(bank=bank(), finalizer=finalizer)
-    message = "What is my checking account balance?"
+def test_public_tool_schemas_use_customer_facing_arguments() -> None:
+    schemas = {
+        item["function"]["name"]: item["function"]["parameters"]
+        for item in MODEL_TOOLS
+    }
 
-    reply = service.execute(
+    assert set(schemas) == {
+        "list_accounts",
+        "list_cards",
+        "list_service_cases",
+        "list_transactions",
+        "list_transfers",
+        "freeze_card",
+        "replace_card",
+        "dispute_transaction",
+        "cancel_transfer",
+    }
+    assert set(schemas["cancel_transfer"]["properties"]) == {"recipient"}
+    assert set(schemas["dispute_transaction"]["properties"]) == {"description"}
+    assert "transfer_id" not in json.dumps(MODEL_TOOLS)
+    assert "transaction_id" not in json.dumps(MODEL_TOOLS)
+
+
+def test_qwen_tool_call_parser_accepts_multiple_ordered_calls_and_ignores_prose() -> None:
+    calls = parse_tool_calls(
+        """I will check both.
+<tool_call>
+{"name": "list_transfers", "arguments": {}}
+</tool_call>
+<tool_call>
+{"name": "list_transactions", "arguments": {"limit": 3}}
+</tool_call>"""
+    )
+
+    assert [call.name for call in calls] == ["list_transfers", "list_transactions"]
+    assert calls[1].arguments == {"limit": 3}
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "<tool_call>not-json</tool_call>",
+        '<tool_call>{"name": "", "arguments": {}}</tool_call>',
+        '<tool_call>{"name": "list_accounts", "arguments": []}</tool_call>',
+        "<tool_call>",
+    ],
+)
+def test_qwen_tool_call_parser_rejects_malformed_protocol(output: str) -> None:
+    with pytest.raises(AgentProtocolError):
+        parse_tool_calls(output)
+
+
+def test_plain_first_pass_text_is_a_model_authored_conversational_answer() -> None:
+    model = RecordingModel(["Hey! What can I help you with today?"])
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
+
+    result = agent.run_turn(
         username="alex.demo",
         session_hash="session",
-        message=message,
-        history=[],
-        plan=plan_workflow(
-            message,
-            [],
-            route(intent="balance_not_updated_after_cheque_or_cash_deposit"),
-        ),
+        message="yo, sup?",
+        conversation=[],
+        router_result=router_guidance(),
     )
 
-    assert reply.selection_source == "grounded_repair"
-    assert "USD 3,245.67" in reply.response
-    assert "USD 3,300.12 current" in reply.response
-    assert "USD 9,999.99" not in reply.response
-    assert "All data and actions shown here are synthetic." in reply.response
+    assert result.response == "Hey! What can I help you with today?"
+    assert result.tool_calls == ()
+    assert result.conversation == [
+        {"role": "user", "content": "yo, sup?"},
+        {"role": "assistant", "content": result.response},
+    ]
+    assert len(model.calls) == 1
+    assert model.calls[0]["tools"] == MODEL_TOOLS
 
 
-def test_incomplete_account_balance_answer_is_replaced_with_labeled_values() -> None:
-    finalizer = RecordingFinalizer(
-        ["Your checking account balance is USD 3,300.12."]
+def test_tool_calls_execute_in_order_and_second_model_pass_writes_final_answer() -> None:
+    model = RecordingModel(
+        [
+            """
+<tool_call>
+{"name": "list_transfers", "arguments": {}}
+</tool_call>
+<tool_call>
+{"name": "list_transactions", "arguments": {"limit": 2}}
+</tool_call>
+""",
+            "You have two transfers. River Consulting is pending, and Jamie Lee is completed.",
+        ]
     )
-    service = GroundedBankingService(bank=bank(), finalizer=finalizer)
-    message = "What is my checking account balance?"
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
 
-    reply = service.execute(
+    result = agent.run_turn(
         username="alex.demo",
         session_hash="session",
-        message=message,
-        history=[],
-        plan=plan_workflow(message, [], route(intent="cash_withdrawal")),
+        message="What transfers are there, and show my latest transactions too.",
+        conversation=[],
+        router_result=router_guidance(),
     )
 
-    assert reply.selection_source == "grounded_repair"
-    assert "USD 3,245.67 available" in reply.response
-    assert "USD 3,300.12 current" in reply.response
+    assert [call.name for call in result.tool_calls] == [
+        "list_transfers",
+        "list_transactions",
+    ]
+    assert len(result.tool_results) == 2
+    assert all(item["ok"] is True for item in result.tool_results)
+    assert len(model.calls) == 2
+    assert model.calls[0]["tools"] == MODEL_TOOLS
+    assert model.calls[1]["tools"] is None
+    assert [item["role"] for item in result.conversation] == [
+        "user",
+        "assistant",
+        "tool",
+        "tool",
+        "assistant",
+    ]
+    assert result.conversation[-1]["content"] == result.response
 
 
-def test_misleading_cancel_acknowledgement_is_replaced_before_commit() -> None:
-    finalizer = RecordingFinalizer(
-        ["Please provide the transfer reference so I can initiate cancellation."]
+def test_model_selected_write_uses_friendly_argument_without_authorization_layer() -> None:
+    model = RecordingModel(
+        [
+            """
+<tool_call>
+{"name": "cancel_transfer", "arguments": {"recipient": "River Consulting"}}
+</tool_call>
+""",
+            "Done — I cancelled the River Consulting transfer.",
+        ]
     )
     registry = bank()
-    service = GroundedBankingService(bank=registry, finalizer=finalizer)
-    message = "Cancel the pending transfer to River Consulting."
+    agent = ConversationalBankingAgent(bank=registry, model=model)
 
-    reply = service.execute(
+    result = agent.run_turn(
         username="alex.demo",
         session_hash="session",
-        message=message,
-        history=[],
-        plan=plan_workflow(message, [], route(intent="cancel_transfer")),
+        message="Please take care of the River Consulting transfer.",
+        conversation=[],
+        router_result=router_guidance(),
     )
 
-    assert reply.selection_source == "grounded_repair"
-    assert "USD 450.00 transfer to River Consulting is cancelled" in reply.response
+    assert result.tool_results[0]["ok"] is True
     assert registry.snapshot("alex.demo", "session")["transfers"][0]["status"] == "cancelled"
 
 
-def test_address_history_without_limit_qualifier_uses_grounded_repair() -> None:
-    finalizer = RecordingFinalizer(
-        ["Your mailing address was updated on June 18, 2026."]
+def test_unknown_tool_and_backend_error_return_to_model_as_tool_results() -> None:
+    model = RecordingModel(
+        [
+            """
+<tool_call>
+{"name": "close_account", "arguments": {}}
+</tool_call>
+<tool_call>
+{"name": "cancel_transfer", "arguments": {"recipient": "Nobody"}}
+</tool_call>
+""",
+            "I could not complete either requested operation.",
+        ]
     )
-    service = GroundedBankingService(bank=bank(), finalizer=finalizer)
-    message = "When was my mailing address changed?"
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
 
-    reply = service.execute(
+    result = agent.run_turn(
         username="alex.demo",
         session_hash="session",
-        message=message,
-        history=[],
-        plan=plan_workflow(message, [], route(intent="edit_personal_details")),
+        message="Do those operations.",
+        conversation=[],
+        router_result=router_guidance(),
     )
 
-    assert reply.selection_source == "grounded_repair"
-    assert "Limited service-case history" in reply.response
-    assert "2026-06-18" in reply.response
+    assert [item["ok"] for item in result.tool_results] == [False, False]
+    assert "unsupported tool" in result.tool_results[0]["error"]
+    assert "matching" in result.tool_results[1]["error"]
+    assert len(model.calls) == 2
+
+
+def test_second_pass_tool_call_is_a_protocol_error_after_tool_already_executed() -> None:
+    model = RecordingModel(
+        [
+            '<tool_call>{"name": "freeze_card", "arguments": {"last4": "4821"}}</tool_call>',
+            '<tool_call>{"name": "list_cards", "arguments": {}}</tool_call>',
+        ]
+    )
+    registry = bank()
+    agent = ConversationalBankingAgent(bank=registry, model=model)
+
+    with pytest.raises(AgentExecutionError, match="second") as failure:
+        agent.run_turn(
+            username="alex.demo",
+            session_hash="session",
+            message="Freeze card 4821.",
+            conversation=[],
+            router_result=router_guidance(),
+        )
+
+    assert failure.value.tool_calls[0].name == "freeze_card"
+    assert failure.value.tool_results[0]["ok"] is True
+    assert [item["role"] for item in failure.value.conversation] == [
+        "user",
+        "assistant",
+        "tool",
+    ]
+    assert registry.snapshot("alex.demo", "session")["cards"][0]["status"] == "frozen"
+
+
+def test_token_budget_keeps_latest_complete_tool_chain_and_newest_fitting_turns() -> None:
+    system = {"role": "system", "content": "system"}
+    old = [
+        {"role": "user", "content": "old " * 30},
+        {"role": "assistant", "content": "old answer " * 30},
+    ]
+    middle = [
+        {"role": "user", "content": "middle"},
+        {"role": "assistant", "content": "middle answer"},
+    ]
+    latest = [
+        {"role": "user", "content": "show transfers"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "type": "function",
+                    "function": {"name": "list_transfers", "arguments": {}},
+                }
+            ],
+        },
+        {"role": "tool", "name": "list_transfers", "content": '{"ok": true}'},
+    ]
+
+    selected = select_token_budgeted_context(
+        system,
+        [*old, *middle, *latest],
+        tools=MODEL_TOOLS,
+        token_counter=lambda messages, _tools: len(json.dumps(messages)),
+        input_budget=430,
+    )
+
+    assert selected[0] == system
+    assert latest == selected[-len(latest) :]
+    assert middle[0] in selected
+    assert old[0] not in selected
+    latest_roles = [item["role"] for item in selected[-len(latest) :]]
+    assert latest_roles == ["user", "assistant", "tool"]
+
+
+def test_token_budget_rejects_oversized_latest_group_without_truncation() -> None:
+    with pytest.raises(AgentProtocolError, match="latest conversation turn"):
+        select_token_budgeted_context(
+            {"role": "system", "content": "system"},
+            [{"role": "user", "content": "x" * 100}],
+            tools=MODEL_TOOLS,
+            token_counter=lambda messages, _tools: len(json.dumps(messages)),
+            input_budget=50,
+        )
+
+
+def test_default_input_budget_is_8192_tokens() -> None:
+    assert INPUT_TOKEN_BUDGET == 8192

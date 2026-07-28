@@ -12,8 +12,8 @@ SENSITIVE_RESPONSE = (
     "or complete card/account numbers. This demo never needs those credentials."
 )
 MODEL_FAILURE_RESPONSE = (
-    "The service could not produce a safe grounded response. No synthetic account "
-    "change was committed. Please refine the request or try one of the presets."
+    "The 9B conversational model is currently unavailable, so this turn could not "
+    "be completed. No CPU-generated banking answer was substituted."
 )
 
 SECRET_VALUE = re.compile(

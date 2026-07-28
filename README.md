@@ -28,21 +28,19 @@ per token.
 ```text
 Authenticated request
   → credential guard
-  → CPU dual-head domain and intent router records advisory evidence
-  → deterministic capability planner selects the supported workflow
-  → server validates identity, arguments, and write authorization
-  → session-isolated synthetic SQLite backend executes reads or one write
-  → ZeroGPU 9B MoE finalizer receives grounded tool results
-  → server validates the model-authored final response before returning it
+  → CPU dual-head router gates high-confidence OOD requests
+  → intent probabilities guide the ZeroGPU 9B MoE agent
+  → 9B model responds directly or emits Qwen tool calls
+  → session-isolated synthetic SQLite executes generated calls
+  → tool results return to the 9B model for its final response
 ```
 
-The 9B model does not choose tools in the deployed POC. The CPU router provides
-domain and Banking77-intent evidence for diagnostics, while the deterministic
-planner maps explicit customer language to supported capabilities. Read-only
-requests can bundle multiple reads, such as transfers plus recent
-transactions. Account-changing requests are limited to one explicit write at a
-time; mixed read/write or multi-write requests return a clarification without
-changing synthetic data.
+The POC is a behavioral experiment. The dual-head router exposes a three-way
+domain decision plus its top three intent predictions. Only high-confidence OOD
+bypasses the 9B model. For allowed and uncertain turns, the 9B model owns
+conversation, clarification, tool selection, tool arguments, and final wording.
+The runtime performs mechanical parsing and direct mock-tool execution; it does
+not replace the model's answer with a deterministic banking response.
 
 The application is synthetic. It has no connection to a bank and cannot access
 or modify real accounts.
@@ -180,30 +178,28 @@ The deployable Gradio source is in
 `poc/retail-bank-customer-service-poc/`. It includes:
 
 - two static demonstration accounts configured through a Space secret;
-- a learned CPU domain/intent router used as an advisory classifier;
-- a deterministic capability planner for supported servicing workflows;
-- authorization checks for synthetic writes;
+- a learned CPU domain/intent router with high-confidence OOD gating and
+  top-three intent guidance;
 - CPU session-isolated synthetic SQLite state;
-- stateless ZeroGPU 9B response finalization over sanitized tool results;
-- labeled deterministic repair when a model draft is incomplete or contradicts
-  verified workflow results;
+- ZeroGPU 9B-owned conversation and Qwen tool calling;
+- an 8,192-token input budget retaining complete user/assistant/tool
+  interactions without splitting a turn;
+- diagnostics for route probabilities, intent candidates, generated tool calls,
+  tool results, and response path;
 - preset read, write, multi-turn, sensitive-data, and OOD cases.
 
-The public Space is operational on ZeroGPU. Authenticated end-to-end checks
-exercise deterministic workflow selection, policy validation,
-session-isolated SQLite reads and writes, exact monetary grounding,
-model-authored responses, sanitized multi-turn context, OOD refusal, and the
-credential guard for both demo users. The current synthetic data has limited
-address-history coverage through service-case records; it is not a full
-customer-profile audit log.
+The hidden conversation state stores complete user, assistant, tool-call, and
+tool-result messages. Each inference builds a tokenizer-measured context from
+the newest complete interactions up to 8,192 input tokens and reserves 512
+tokens for generation. The current synthetic data has limited address-history
+coverage through service-case records; it is not a full customer-profile audit
+log.
 
 ZeroGPU compatibility requires the decorated model event to be registered
-directly in the Gradio event graph. The CPU chat dispatcher handles greetings,
-policy responses, and credential guards without a GPU; model-backed workflows
-alone change a pending-turn state and enter the GPU event. Qwen2-MoE expert
-execution uses the eager implementation on the current Blackwell partition.
-If GPU allocation fails, reads use a labeled verified rendering of sanitized
-backend results; writes remain blocked and uncommitted.
+directly in the Gradio event graph. CPU dispatch handles credential-value
+rejection and high-confidence OOD only; greetings and all other allowed or
+uncertain turns enter the model event. If ZeroGPU fails, the UI reports model
+unavailability and does not synthesize a banking response on CPU.
 
 ## Verification
 
@@ -242,8 +238,9 @@ tests/          banking-only regression tests
 
 This is a research demonstration, not financial advice or a production banking
 system. Do not enter passwords, PINs, one-time codes, full account numbers, or
-payment-card details. The model may produce incorrect or unsafe financial
-guidance and must remain behind deterministic validation and human review.
+payment-card details. The model may produce incorrect, inconsistent, or unsafe
+financial guidance. Generated operations run only against isolated synthetic
+state so conversational and tool-use behavior can be observed directly.
 
 ## License
 

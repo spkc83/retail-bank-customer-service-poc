@@ -19,7 +19,6 @@ def app_module(monkeypatch: pytest.MonkeyPatch, tmp_path):
     for name in (
         "app",
         "model_service",
-        "orchestration",
         "state",
         "zero_gpu_runtime",
     ):
@@ -31,12 +30,27 @@ def request(username: str = "alex.demo", session_hash: str = "browser-session"):
     return SimpleNamespace(username=username, session_hash=session_hash)
 
 
-def accepted_route(intent: str) -> dict[str, object]:
+def route(
+    route_name: str = "in_domain",
+    *,
+    banking_probability: float = 0.99,
+    intent: str = "pending_transfer",
+) -> dict[str, object]:
     return {
-        "route": "in_domain",
-        "banking_probability": 0.999,
+        "route": route_name,
+        "banking_probability": banking_probability,
+        "ood_probability": 1 - banking_probability,
+        "confidence": max(banking_probability, 1 - banking_probability),
         "intent": intent,
         "intent_confidence": 0.8,
+        "intent_candidates": [
+            {"intent": intent, "probability": 0.8},
+            {"intent": "cash_withdrawal", "probability": 0.1},
+            {"intent": "card_payment_fee_charged", "probability": 0.05},
+        ],
+        "threshold": 0.98,
+        "ood_threshold": 0.02,
+        "router_revision": "test-router",
     }
 
 
@@ -47,132 +61,193 @@ def test_app_constructs_expected_authenticated_api_surface(app_module) -> None:
     }
 
     assert {"chat", "route", "customer_snapshot", "reset_demo"} <= api_names
-    assert {
-        "model_selection_probe",
-        "gpu_allocation_probe",
-        "model_service_probe",
-    }.isdisjoint(api_names)
     assert {username for username, _ in app_module.AUTH_CREDENTIALS} == {
         "alex.demo",
         "maya.demo",
     }
 
 
-@pytest.mark.parametrize(
-    ("message", "expected"),
-    [
-        ("Hello, how are you?", "customer-service assistant"),
-        ("What is the weather tomorrow?", "synthetic retail-banking"),
-        ("Can you open a mortgage for me?", "not supported"),
-    ],
-)
-def test_direct_paths_bypass_model_finalizer(
-    app_module,
-    monkeypatch: pytest.MonkeyPatch,
-    message: str,
-    expected: str,
-) -> None:
-    def should_not_run(*_args, **_kwargs):
-        raise AssertionError("ZeroGPU finalizer must not run")
-
-    monkeypatch.setattr(app_module, "generate_final_answer", should_not_run)
-
-    response, _, activity = app_module.respond(message, [], request())
-
-    assert expected in response
-    assert "No backend tool" in activity
-
-
 def test_only_registered_model_turn_is_the_zero_gpu_boundary(app_module) -> None:
-    assert not hasattr(app_module.respond, "_zero_gpu_config")
     assert not hasattr(app_module.dispatch_turn, "_zero_gpu_config")
     assert app_module.finalize_turn._zero_gpu_config == {
         "size": "large",
         "duration": 90,
     }
-    assert not hasattr(app_module.generate_final_answer, "_zero_gpu_config")
-    failure_dependencies = [
-        dependency
-        for dependency in app_module.demo.config["dependencies"]
-        if dependency.get("trigger_only_on_failure") is True
-    ]
-    assert len(failure_dependencies) == 1
-    assert "ZeroGPU worker error" in failure_dependencies[0]["js"]
+    assert not hasattr(app_module.generate_text, "_zero_gpu_config")
 
 
-def test_cpu_dispatch_completes_casual_greeting_without_pending_gpu_turn(
-    app_module,
-) -> None:
-    result = app_module.dispatch_turn("yo, sup ?", [], 0, request())
-
-    visible_history = result[1]
-    canonical_history = result[2]
-    pending_turn = result[5]
-    assert visible_history == canonical_history
-    assert visible_history[-1]["role"] == "assistant"
-    assert "customer-service assistant" in visible_history[-1]["content"]
-    assert pending_turn == pytest.importorskip("gradio").skip()
-
-
-def test_cpu_dispatch_schedules_supported_read_without_running_finalizer(
-    app_module,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def should_not_run(*_args, **_kwargs):
-        raise AssertionError("CPU dispatch must not run the ZeroGPU finalizer")
-
-    monkeypatch.setattr(app_module, "generate_final_answer", should_not_run)
-
-    result = app_module.dispatch_turn(
-        "ok ok, what transfers are there on my account ?",
-        [],
-        4,
-        request(),
-    )
-
-    visible_history = result[1]
-    canonical_history = result[2]
-    pending_turn = result[5]
-    assert canonical_history == []
-    assert visible_history[-1]["role"] == "assistant"
-    assert "9B model" in visible_history[-1]["content"]
-    assert pending_turn["message"] == (
-        "ok ok, what transfers are there on my account ?"
-    )
-    assert pending_turn["history"] == []
-    assert pending_turn["epoch"] == 4
-    assert pending_turn["turn_id"]
-    assert "username" not in pending_turn
-    assert "session_hash" not in pending_turn
-
-
-def test_registered_gpu_turn_replaces_pending_answer_with_grounded_response(
+def test_greeting_and_uncertain_turns_schedule_9b_instead_of_cpu_response(
     app_module,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         app_module,
-        "generate_final_answer",
-        lambda *_args: (
-            "Your synthetic transfers are USD 450.00 to River Consulting, pending, "
-            "and USD 125.00 to Jamie Lee, completed."
+        "route_query",
+        lambda *_args: route("uncertain", banking_probability=0.52, intent="small_talk"),
+    )
+
+    result = app_module.dispatch_turn("yo, sup ?", [], [], 4, request())
+
+    assert result[2] == []
+    assert result[1][-1]["role"] == "assistant"
+    assert "9B model" in result[1][-1]["content"]
+    pending = result[6]
+    assert pending["message"] == "yo, sup ?"
+    assert pending["conversation"] == []
+    assert pending["router_result"]["intent"] == "small_talk"
+    assert pending["turn_id"]
+    assert pending["epoch"] == 4
+    assert "username" not in pending
+    assert "session_hash" not in pending
+
+
+def test_high_confidence_ood_uses_stock_response_without_gpu(
+    app_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        app_module,
+        "route_query",
+        lambda *_args: route(
+            "out_of_domain",
+            banking_probability=0.001,
+            intent="cash_withdrawal",
         ),
+    )
+
+    result = app_module.dispatch_turn("Write a Python web scraper.", [], [], 0, request())
+
+    assert "synthetic retail-banking" in result[1][-1]["content"]
+    assert result[1] == result[2]
+    assert result[6] == pytest.importorskip("gradio").skip()
+    assert "out_of_domain" in result[5]
+
+
+def test_router_unavailability_fails_open_to_9b_experiment(app_module) -> None:
+    result = app_module.route_query("hello", [])
+
+    assert result["route"] == "uncertain"
+    assert result["intent"] is None
+    assert result["intent_candidates"] == []
+
+
+def test_registered_gpu_turn_returns_model_authored_greeting(
+    app_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_module, "count_tokens", lambda *_args: 50)
+    monkeypatch.setattr(
+        app_module,
+        "generate_text",
+        lambda *_args: "Hey! How can I help with your banking today?",
     )
     pending = {
         "turn_id": "turn-1",
-        "message": "What transfers are there on my account?",
-        "history": [],
+        "message": "yo, sup?",
+        "conversation": [],
+        "router_result": route("uncertain", banking_probability=0.5, intent="small_talk"),
         "epoch": 2,
     }
 
-    result = app_module.finalize_turn(pending, 2, [], request())
+    result = app_module.finalize_turn(pending, 2, [], [], request())
 
-    visible_history = result[0]
-    canonical_history = result[1]
-    assert visible_history == canonical_history
-    assert "River Consulting" in visible_history[-1]["content"]
-    assert "Jamie Lee" in visible_history[-1]["content"]
-    assert "Model workflow: `list_transfers`" in visible_history[-1]["content"]
+    assert result[0] == result[1]
+    assert result[0][-1]["content"] == "Hey! How can I help with your banking today?"
+    assert "model authored" in result[3]
+    assert "small_talk" in result[4]
+
+
+def test_model_selects_transfer_tool_and_receives_full_tool_history(
+    app_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outputs = iter(
+        [
+            '<tool_call>{"name": "list_transfers", "arguments": {}}</tool_call>',
+            (
+                "River Consulting has a pending USD 450 transfer, and Jamie Lee "
+                "has a completed USD 125 transfer."
+            ),
+        ]
+    )
+    monkeypatch.setattr(app_module, "count_tokens", lambda *_args: 100)
+    monkeypatch.setattr(app_module, "generate_text", lambda *_args: next(outputs))
+    pending = {
+        "turn_id": "turn-2",
+        "message": "What transfers are there on my account?",
+        "conversation": [],
+        "router_result": route(),
+        "epoch": 3,
+    }
+
+    result = app_module.finalize_turn(pending, 3, [], [], request())
+
+    canonical = result[1]
+    assert [item["role"] for item in canonical] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+    assert canonical[1]["tool_calls"][0]["function"]["name"] == "list_transfers"
+    assert "River Consulting" in result[0][-1]["content"]
+    assert "list_transfers" in result[4]
+
+
+def test_gpu_failure_never_generates_cpu_servicing_answer(
+    app_module,
+) -> None:
+    pending = {
+        "turn_id": "failed-read",
+        "message": "What transfers are there on my account?",
+        "conversation": [],
+        "router_result": route(),
+        "epoch": 5,
+    }
+
+    result = app_module.fail_pending_turn(pending, 5, [], [], request())
+
+    response = result[0][-1]["content"]
+    assert response == app_module.MODEL_FAILURE_RESPONSE
+    assert "River Consulting" not in response
+    assert "No CPU-generated banking answer was substituted" in response
+    assert result[0] == result[1]
+    assert [item["role"] for item in result[1]] == ["user", "assistant"]
+    assert "could not allocate" in result[3].lower()
+
+
+def test_second_pass_failure_preserves_executed_write_in_history_and_diagnostics(
+    app_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outputs = iter(
+        [
+            '<tool_call>{"name": "freeze_card", "arguments": {"last4": "4821"}}</tool_call>',
+            "",
+        ]
+    )
+    monkeypatch.setattr(app_module, "count_tokens", lambda *_args: 100)
+    monkeypatch.setattr(app_module, "generate_text", lambda *_args: next(outputs))
+    pending = {
+        "turn_id": "failed-second-pass",
+        "message": "Freeze card 4821.",
+        "conversation": [],
+        "router_result": route(intent="cash_withdrawal"),
+        "epoch": 5,
+    }
+
+    result = app_module.finalize_turn(pending, 5, [], [], request())
+
+    assert [item["role"] for item in result[1]] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+    assert "freeze_card" in result[4]
+    assert "success" in result[4]
+    assert "`frozen`" in result[2]
+    assert result[0][-1]["content"] == app_module.MODEL_FAILURE_RESPONSE
 
 
 def test_stale_gpu_turn_after_reset_executes_nothing(
@@ -180,217 +255,49 @@ def test_stale_gpu_turn_after_reset_executes_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def should_not_run(*_args, **_kwargs):
-        raise AssertionError("stale turn must not route, execute, or finalize")
+        raise AssertionError("stale turn must not run the model or a tool")
 
-    monkeypatch.setattr(app_module, "respond", should_not_run)
-    current_history = [
+    monkeypatch.setattr(app_module, "generate_text", should_not_run)
+    visible = [
         {"role": "user", "content": "Hello"},
         {"role": "assistant", "content": "Fresh reset session"},
     ]
     pending = {
         "turn_id": "old-turn",
         "message": "Cancel my pending transfer.",
-        "history": [],
+        "conversation": [],
+        "router_result": route(),
         "epoch": 3,
     }
 
-    result = app_module.finalize_turn(pending, 4, current_history, request())
+    result = app_module.finalize_turn(pending, 4, visible, visible, request())
 
-    assert result[0] == current_history
-    assert result[1] == current_history
+    assert result[0] == visible
+    assert result[1] == visible
     assert "expired" in result[3].lower()
 
 
-def test_gpu_allocation_failure_replaces_pending_turn_without_mutation(
-    app_module,
-) -> None:
-    pending = {
-        "turn_id": "failed-write",
-        "message": "Cancel my pending transfer.",
-        "history": [],
-        "epoch": 5,
-    }
-
-    result = app_module.fail_pending_turn(pending, 5, [], request())
-
-    visible_history = result[0]
-    canonical_history = result[1]
-    assert visible_history == canonical_history
-    assert "could not produce" in visible_history[-1]["content"]
-    assert "No synthetic write was committed" in result[3]
-    assert "`pending`" in result[2]
-
-
-def test_gpu_allocation_failure_uses_verified_read_only_fallback(
-    app_module,
-) -> None:
-    pending = {
-        "turn_id": "failed-read",
-        "message": "What transfers are there on my account?",
-        "history": [],
-        "epoch": 5,
-    }
-
-    result = app_module.fail_pending_turn(pending, 5, [], request())
-
-    response = result[0][-1]["content"]
-    assert "River Consulting" in response
-    assert "Jamie Lee" in response
-    assert "verified CPU read fallback" in response
-    assert "ZeroGPU was unavailable" in result[3]
-
-
-def test_sensitive_guard_bypasses_router_and_zero_gpu(
+def test_sensitive_value_is_rejected_before_router_or_model(
     app_module,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def should_not_run(*_args, **_kwargs):
-        raise AssertionError("downstream service must not run")
+        raise AssertionError("router must not run")
 
     monkeypatch.setattr(app_module, "route_query", should_not_run)
-    monkeypatch.setattr(app_module, "generate_final_answer", should_not_run)
 
-    response, _, activity = app_module.respond("My PIN is 1234", [], request())
+    result = app_module.dispatch_turn("My PIN is 1234", [], [], 0, request())
 
-    assert "never needs" in response
-    assert "Credential guard" in activity
+    assert "never needs" in result[1][-1]["content"]
+    assert result[1] == result[2]
+    assert result[6] == pytest.importorskip("gradio").skip()
 
 
-def test_wrong_router_cannot_override_deterministic_multi_read_workflow(
+def test_reset_clears_visible_and_canonical_history_and_advances_epoch(
     app_module,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        app_module,
-        "route_query",
-        lambda *_args: {
-            "route": "out_of_domain",
-            "banking_probability": 0.31,
-            "intent": None,
-        },
-    )
-    seen = {}
+    result = app_module.reset_session(7, request())
 
-    def finalizer(messages, grounded_results, max_new_tokens):
-        seen["messages"] = messages
-        seen["grounded_results"] = grounded_results
-        seen["max_new_tokens"] = max_new_tokens
-        return "Here are your synthetic transfers and recent transactions."
-
-    monkeypatch.setattr(app_module, "generate_final_answer", finalizer)
-
-    response, _, activity = app_module.respond(
-        "Show transfers and recent transactions.",
-        [],
-        request(),
-    )
-
-    assert set(seen["grounded_results"]) == {
-        "list_transfers",
-        "list_transactions",
-    }
-    assert "Model workflow: `list_transfers` + `list_transactions`" in response
-    assert "deterministic workflow" in activity
-
-
-def test_cancel_write_uses_exact_session_record_and_model_finalizer(
-    app_module,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        app_module,
-        "route_query",
-        lambda *_args: accepted_route("cancel_transfer"),
-    )
-    monkeypatch.setattr(
-        app_module,
-        "generate_final_answer",
-        lambda *_args: (
-            "I cancelled the USD 450.00 River Consulting transfer in this "
-            "synthetic demo."
-        ),
-    )
-
-    response, dashboard, activity = app_module.respond(
-        "Cancel pending transfer to River Consulting.",
-        [],
-        request(),
-    )
-
-    assert "cancelled" in response
-    assert "River Consulting" in dashboard
-    assert "`cancelled`" in dashboard
-    assert "one explicit write" in activity
-
-
-def test_model_unavailability_rolls_back_write(
-    app_module,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        app_module,
-        "route_query",
-        lambda *_args: accepted_route("freeze_card"),
-    )
-
-    def unavailable(*_args, **_kwargs):
-        raise RuntimeError("No CUDA GPUs are available")
-
-    monkeypatch.setattr(app_module, "generate_final_answer", unavailable)
-
-    response, dashboard, activity = app_module.respond(
-        "Freeze my debit card ending in 4821.",
-        [],
-        request(),
-    )
-
-    assert "could not produce" in response
-    assert "`active`" in dashboard
-    assert "no synthetic action was committed" in activity
-
-
-def test_completed_transfer_gets_specific_safe_response(
-    app_module,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        app_module,
-        "route_query",
-        lambda *_args: accepted_route("cancel_transfer"),
-    )
-
-    response, dashboard, _ = app_module.respond(
-        "Cancel the completed transfer to Jamie Lee.",
-        [],
-        request(),
-    )
-
-    assert "already completed" in response
-    assert "cannot be cancelled" in response
-    assert "`completed`" in dashboard
-
-
-def test_mixed_read_write_request_never_calls_model_or_backend(
-    app_module,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        app_module,
-        "route_query",
-        lambda *_args: accepted_route("cancel_transfer"),
-    )
-
-    def should_not_run(*_args, **_kwargs):
-        raise AssertionError("ZeroGPU finalizer must not run")
-
-    monkeypatch.setattr(app_module, "generate_final_answer", should_not_run)
-
-    response, dashboard, activity = app_module.respond(
-        "Show my transfers and cancel the River Consulting transfer.",
-        [],
-        request(),
-    )
-
-    assert "one account-changing action" in response
-    assert "`pending`" in dashboard
-    assert "No backend tool" in activity
+    assert result[0] == []
+    assert result[1] == []
+    assert result[4] == 8
