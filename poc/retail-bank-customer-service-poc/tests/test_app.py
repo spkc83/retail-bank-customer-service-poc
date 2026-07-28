@@ -31,6 +31,11 @@ def test_app_constructs_expected_authenticated_api_surface(app_module) -> None:
     }
 
     assert {"chat", "route", "customer_snapshot", "reset_demo"} <= api_names
+    assert {
+        "model_selection_probe",
+        "gpu_allocation_probe",
+        "model_service_probe",
+    }.isdisjoint(api_names)
     assert {username for username, _ in app_module.AUTH_CREDENTIALS} == {
         "alex.demo",
         "maya.demo",

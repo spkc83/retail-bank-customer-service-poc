@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -178,47 +179,58 @@ class ModelDrivenBankingService:
             tool_call = parse_and_validate_tool_call(selection)
             _enforce_intent_tool(tool_call, intent_hint)
         except ToolCallError as selection_error:
-            tool_call = repair_tool_call_from_intent(message, intent_hint)
-            if tool_call is None:
+            repaired_tool_call = repair_tool_call_from_intent(message, intent_hint)
+            if repaired_tool_call is None:
                 raise selection_error
+            tool_call = repaired_tool_call
             selection_source = "router_policy_repair"
         authorize_tool_call(message, tool_call)
         tool_call = ground_tool_call_arguments(message, tool_call)
-        tool_result = self.bank.execute(
+        tool_call = resolve_transfer_arguments(
+            message,
+            tool_call,
+            self.bank.snapshot(username, session_hash),
+        )
+
+        def finalize(tool_result: dict[str, Any]) -> str:
+            final_messages: list[dict[str, object]] = [
+                *messages,
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": tool_call.name,
+                                "arguments": tool_call.arguments,
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "content": json.dumps(_grounding_payload(tool_result), sort_keys=True),
+                },
+            ]
+            response = self.generator.generate(
+                final_messages,
+                tools=None,
+                max_new_tokens=192,
+            ).strip()
+            if not response:
+                raise ToolCallError("model returned an empty final response")
+            if generated_response_is_unsafe(response):
+                raise ToolCallError("model requested sensitive credentials")
+            return response
+
+        tool_result, response = self.bank.execute_atomic(
             username,
             session_hash,
             tool_call.name,
             tool_call.arguments,
+            finalize=finalize,
         )
-        final_messages = [
-            *messages,
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": tool_call.name,
-                            "arguments": tool_call.arguments,
-                        },
-                    }
-                ],
-            },
-            {
-                "role": "tool",
-                "content": json.dumps(_grounding_payload(tool_result), sort_keys=True),
-            },
-        ]
-        response = self.generator.generate(
-            final_messages,
-            tools=None,
-            max_new_tokens=192,
-        ).strip()
-        if not response:
-            raise ToolCallError("model returned an empty final response")
-        if generated_response_is_unsafe(response):
-            raise ToolCallError("model requested sensitive credentials")
         return ServiceReply(
             response=response,
             tool_name=tool_call.name,
@@ -333,9 +345,9 @@ def ground_tool_call_arguments(
 ) -> ValidatedToolCall:
     """Discard record selectors the customer did not supply verbatim.
 
-    The model chooses the operation, while the session-scoped backend resolves omitted
-    selectors to the only or most recent actionable synthetic record. This prevents a
-    hallucinated card suffix or record ID from turning a valid request into the wrong action.
+    The model chooses the operation. Deterministic, session-scoped resolution handles
+    omitted selectors after this step. This prevents a hallucinated card suffix or record
+    ID from turning a valid request into the wrong action.
     """
 
     selector_by_tool = {
@@ -355,6 +367,50 @@ def ground_tool_call_arguments(
     return ValidatedToolCall(name=tool_call.name, arguments=arguments)
 
 
+def resolve_transfer_arguments(
+    message: str,
+    tool_call: ValidatedToolCall,
+    snapshot: dict[str, Any],
+) -> ValidatedToolCall:
+    """Resolve a cancellation only to the pending transfer described by the customer."""
+
+    if tool_call.name != "cancel_transfer" or "transfer_id" in tool_call.arguments:
+        return tool_call
+    transfers = snapshot.get("transfers")
+    if not isinstance(transfers, list):
+        raise ToolCallError("transfer data is unavailable")
+
+    recipient_query = _recipient_query(message)
+    amount_query = _amount_query_cents(message)
+    candidates = [item for item in transfers if isinstance(item, dict)]
+    if recipient_query is not None:
+        candidates = [
+            item
+            for item in candidates
+            if _normalized_text(str(item.get("recipient", ""))) == recipient_query
+        ]
+    if amount_query is not None:
+        candidates = [
+            item
+            for item in candidates
+            if item.get("amount_cents") == amount_query
+        ]
+
+    pending = [item for item in candidates if item.get("status") == "pending"]
+    if len(pending) != 1:
+        if (recipient_query is not None or amount_query is not None) and not pending:
+            raise ToolCallError("the described transfer is not pending")
+        raise ToolCallError("identify one pending transfer by recipient or amount")
+
+    transfer_id = pending[0].get("transfer_id")
+    if not isinstance(transfer_id, str) or not transfer_id:
+        raise ToolCallError("the pending transfer has no valid identifier")
+    return ValidatedToolCall(
+        name=tool_call.name,
+        arguments={"transfer_id": transfer_id},
+    )
+
+
 def _bounded_messages(
     message: str,
     history: list[dict[str, Any]],
@@ -363,7 +419,7 @@ def _bounded_messages(
 ) -> list[dict[str, object]]:
     if not isinstance(message, str) or not message.strip():
         raise ValueError("message must be a non-empty string")
-    usable = [
+    usable: list[dict[str, object]] = [
         {"role": "user", "content": str(item["content"])}
         for item in history[-8:]
         if isinstance(item, dict)
@@ -422,6 +478,42 @@ def _normalized_terms(message: str) -> list[str]:
     return "".join(
         character.lower() if character.isalnum() else " " for character in message
     ).split()
+
+
+def _normalized_text(value: str) -> str:
+    return " ".join(_normalized_terms(value))
+
+
+def _recipient_query(message: str) -> str | None:
+    match = re.search(
+        (
+            r"\btransfer\b.*?\bto\s+(.+?)"
+            r"(?=\s+(?:for|of)\s+(?:\$\s*|USD\s+)?[0-9]"
+            r"|\s+USD\s+[0-9]|[.!?]|$)"
+        ),
+        message,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    recipient = _normalized_text(match.group(1))
+    return recipient or None
+
+
+def _amount_query_cents(message: str) -> int | None:
+    match = re.search(
+        r"(?:\$\s*|\bUSD\s+|\b(?:of|for)\s+)([0-9][0-9,]*(?:\.[0-9]{1,2})?)",
+        message,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    amount = match.group(1).replace(",", "")
+    whole, separator, fraction = amount.partition(".")
+    cents = int(whole) * 100
+    if separator:
+        cents += int(fraction.ljust(2, "0"))
+    return cents
 
 
 def _tool_names() -> set[str]:

@@ -82,9 +82,11 @@ Write tools require explicit customer language such as “freeze,” “replace,
 
 If the 9B model emits malformed syntax for an explicit `cancel ... transfer`
 request, the learned `cancel_transfer` intent can repair the operation name.
-The repair never supplies a customer or transfer identifier; the policy and
-authenticated session backend still resolve and validate the pending synthetic
-transfer.
+The repair never supplies a customer or transfer identifier. A deterministic,
+authenticated-session resolver matches the recipient and/or amount stated by
+the customer to exactly one pending synthetic transfer; a named completed,
+unknown, or ambiguous transfer fails safely. Write actions commit only after
+the model's final response passes the credential and output validation gates.
 
 ## Authentication
 

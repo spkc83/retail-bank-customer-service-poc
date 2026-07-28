@@ -139,7 +139,16 @@ def test_ungrounded_selector_is_removed() -> None:
     )
 
 
-def test_cancel_transfer_repairs_malformed_model_selection_from_learned_intent() -> None:
+@pytest.mark.parametrize(
+    "message",
+    [
+        "I want to cancel the transfer of $450 to River Consulting.",
+        "Cancel the transfer to River Consulting for $450.",
+    ],
+)
+def test_cancel_transfer_repairs_malformed_model_selection_from_learned_intent(
+    message: str,
+) -> None:
     generator = ScriptedGenerator(
         [
             "I will cancel the River Consulting transfer.",
@@ -151,7 +160,7 @@ def test_cancel_transfer_repairs_malformed_model_selection_from_learned_intent()
     reply = service.reply(
         username="alex.demo",
         session_hash="session",
-        message="I want to cancel the transfer of $450 to River Consulting.",
+        message=message,
         history=[
             {
                 "role": "user",
@@ -172,6 +181,26 @@ def test_cancel_transfer_repairs_malformed_model_selection_from_learned_intent()
     selected_tools = generator.calls[0]["tools"]
     assert isinstance(selected_tools, list)
     assert [tool["function"]["name"] for tool in selected_tools] == ["cancel_transfer"]
+
+
+def test_cancel_transfer_does_not_substitute_a_different_pending_transfer() -> None:
+    registry = bank()
+    service = ModelDrivenBankingService(
+        bank=registry,
+        generator=ScriptedGenerator(["Malformed selection."]),
+    )
+
+    with pytest.raises(ToolCallError, match="described transfer is not pending"):
+        service.reply(
+            username="alex.demo",
+            session_hash="session",
+            message="Cancel the $125 transfer to Jamie Lee.",
+            history=[],
+            intent_hint="cancel_transfer",
+        )
+
+    transfers = registry.snapshot("alex.demo", "session")["transfers"]
+    assert [transfer["status"] for transfer in transfers] == ["pending", "completed"]
 
 
 def test_cancel_transfer_repair_requires_explicit_action_and_object() -> None:
@@ -313,6 +342,31 @@ def test_unsafe_final_response_is_rejected_after_read_only_tool() -> None:
             message="Show my balances.",
             history=[],
         )
+
+
+def test_unsafe_final_response_rolls_back_write_tool() -> None:
+    registry = bank()
+    service = ModelDrivenBankingService(
+        bank=registry,
+        generator=ScriptedGenerator(
+            [
+                '<tool_call>{"name":"cancel_transfer","arguments":{}}</tool_call>',
+                "Please provide your password so I can continue.",
+            ]
+        ),
+    )
+
+    with pytest.raises(ToolCallError, match="sensitive credentials"):
+        service.reply(
+            username="alex.demo",
+            session_hash="session",
+            message="Cancel the $450 transfer to River Consulting.",
+            history=[],
+            intent_hint="cancel_transfer",
+        )
+
+    transfers = registry.snapshot("alex.demo", "session")["transfers"]
+    assert [transfer["status"] for transfer in transfers] == ["pending", "completed"]
 
 
 @pytest.mark.parametrize(

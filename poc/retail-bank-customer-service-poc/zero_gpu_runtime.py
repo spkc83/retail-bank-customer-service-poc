@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from model_service import SYSTEM_PROMPT, TOOL_SCHEMAS, ModelDrivenBankingService
+from model_service import ModelDrivenBankingService
 from policy import generated_response_is_unsafe
 from state import BANK
 
@@ -63,39 +63,6 @@ class TransformersGenerator:
             )
         new_ids = output_ids[0, inputs["input_ids"].shape[-1] :]
         return str(tokenizer.decode(new_ids, skip_special_tokens=True)).strip()
-
-
-def gpu_allocation_probe() -> dict[str, Any]:
-    """Verify that ZeroGPU entered application code with an initialized CUDA device."""
-
-    return {
-        "cuda_available": bool(torch.cuda.is_available()),
-        "device_count": int(torch.cuda.device_count()),
-        "device_name": str(torch.cuda.get_device_name(0)),
-    }
-
-
-def inspect_model_selection(message: str) -> str:
-    """Return the model's raw first-pass tool selection for authenticated diagnostics."""
-
-    return TransformersGenerator().generate(
-        [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": message},
-        ],
-        tools=TOOL_SCHEMAS,
-        max_new_tokens=128,
-    )
-
-
-def inspect_model_service(message: str) -> str:
-    """Run the full model/tool path in an isolated synthetic diagnostic session."""
-
-    try:
-        result = run_model_service("alex.demo", "model-service-probe", message, [])
-    except Exception as error:
-        return f"{type(error).__name__}: {error}"
-    return str(result)
 
 
 def run_model_service(

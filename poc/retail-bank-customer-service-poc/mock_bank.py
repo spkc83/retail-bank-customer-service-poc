@@ -6,9 +6,10 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 READ_TOOLS = {
     "list_accounts",
@@ -24,6 +25,7 @@ WRITE_TOOLS = {
     "replace_card",
 }
 SUPPORTED_TOOLS = READ_TOOLS | WRITE_TOOLS
+T = TypeVar("T")
 
 
 @dataclass
@@ -92,9 +94,8 @@ class SessionBankRegistry:
                 _reset_seed(entry.connection, self._customers[username])
                 return _snapshot(entry.connection)
         with self._lock:
-            entry = self._sessions.pop(key, None)
-            if entry is not None:
-                entry.connection.close()
+            if key in self._sessions:
+                self._sessions.pop(key).connection.close()
         return self.snapshot(username, session_hash)
 
     def execute(
@@ -104,6 +105,26 @@ class SessionBankRegistry:
         tool_name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
+        result, _ = self.execute_atomic(
+            username,
+            session_hash,
+            tool_name,
+            arguments,
+            finalize=lambda _result: None,
+        )
+        return result
+
+    def execute_atomic(
+        self,
+        username: str,
+        session_hash: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        finalize: Callable[[dict[str, Any]], T],
+    ) -> tuple[dict[str, Any], T]:
+        """Commit only after the caller validates its final response."""
+
         if tool_name not in SUPPORTED_TOOLS:
             raise ValueError(f"unsupported tool: {tool_name}")
         allowed_arguments = {
@@ -122,9 +143,15 @@ class SessionBankRegistry:
             raise ValueError(f"unsupported arguments for {tool_name}: {sorted(extras)}")
         entry = self._entry(username, session_hash)
         with entry.lock:
-            result = _execute(entry.connection, tool_name, arguments)
+            entry.connection.execute("BEGIN IMMEDIATE")
+            try:
+                result = _execute(entry.connection, tool_name, arguments)
+                finalized = finalize(result)
+            except Exception:
+                entry.connection.rollback()
+                raise
             entry.connection.commit()
-            return result
+            return result, finalized
 
     def _validated_key(self, username: str, session_hash: str) -> tuple[str, str]:
         if username not in self._customers:

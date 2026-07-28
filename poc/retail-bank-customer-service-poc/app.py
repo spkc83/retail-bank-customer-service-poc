@@ -6,8 +6,10 @@ import html
 import os
 from typing import Any
 
+# ruff: noqa: E402
+
 if os.environ.get("POC_SKIP_MODEL_LOAD") != "1":
-    import spaces  # noqa: F401
+    import spaces as imported_spaces
 else:
 
     class _Spaces:
@@ -18,7 +20,9 @@ else:
 
             return decorator
 
-    spaces: Any = _Spaces()
+    imported_spaces = _Spaces()  # type: ignore[assignment]
+
+spaces_runtime: Any = imported_spaces
 
 import gradio as gr  # noqa: E402, I001
 
@@ -32,12 +36,7 @@ from policy import (
 )
 from router import ROUTER_REVISION, LearnedBankingRouter
 from state import BANK
-from zero_gpu_runtime import (
-    gpu_allocation_probe as _gpu_allocation_probe,
-    inspect_model_selection as _inspect_model_selection,
-    inspect_model_service as _inspect_model_service,
-    run_model_service as _run_model_service,
-)
+from zero_gpu_runtime import run_model_service as _run_model_service
 
 AUTH_CREDENTIALS = load_demo_auth()
 SKIP_ROUTER_LOAD = os.environ.get("POC_SKIP_ROUTER_LOAD") == "1"
@@ -74,25 +73,7 @@ PRESETS = [
 ]
 
 
-@spaces.GPU(size="large", duration=10)
-def gpu_allocation_probe() -> dict[str, Any]:
-    return _gpu_allocation_probe()
-
-
-@spaces.GPU(size="large", duration=60)
-def inspect_model_selection(message: str) -> str:
-    try:
-        return _inspect_model_selection(message)
-    except Exception as error:
-        return f"{type(error).__name__}: {error}"
-
-
-@spaces.GPU(size="large", duration=90)
-def inspect_model_service(message: str) -> str:
-    return _inspect_model_service(message)
-
-
-@spaces.GPU(size="large", duration=90)
+@spaces_runtime.GPU(size="large", duration=90)
 def run_model_service(
     username: str,
     session_hash: str,
@@ -103,7 +84,7 @@ def run_model_service(
     return _run_model_service(username, session_hash, message, history, intent_hint)
 
 
-@spaces.GPU(size="large", duration=90)
+@spaces_runtime.GPU(size="large", duration=90)
 def respond(
     message: str,
     history: list[dict[str, Any]],
@@ -352,31 +333,6 @@ with gr.Blocks(
         outputs=route_output,
         api_name="route",
         queue=False,
-    )
-    model_probe_message = gr.Textbox(visible=False)
-    model_probe_output = gr.Textbox(visible=False)
-    model_probe_button = gr.Button(visible=False)
-    model_probe_button.click(
-        inspect_model_selection,
-        inputs=model_probe_message,
-        outputs=model_probe_output,
-        api_name="model_selection_probe",
-    )
-    gpu_probe_output = gr.JSON(visible=False)
-    gpu_probe_button = gr.Button(visible=False)
-    gpu_probe_button.click(
-        gpu_allocation_probe,
-        outputs=gpu_probe_output,
-        api_name="gpu_allocation_probe",
-    )
-    model_service_probe_message = gr.Textbox(visible=False)
-    model_service_probe_output = gr.Textbox(visible=False)
-    model_service_probe_button = gr.Button(visible=False)
-    model_service_probe_button.click(
-        inspect_model_service,
-        inputs=model_service_probe_message,
-        outputs=model_service_probe_output,
-        api_name="model_service_probe",
     )
     demo.load(
         load_profile,
