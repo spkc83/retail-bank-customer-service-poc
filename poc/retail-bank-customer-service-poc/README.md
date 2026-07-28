@@ -39,7 +39,7 @@ including model-selected reads and writes for both authenticated demo users.
 - Live application: https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
 - Public source: https://github.com/spkc83/retail-bank-servicing-poc
 - Model-development source:
-  https://github.com/spkc83/retail-bank-model-development
+  https://github.com/spkc83/retail-bank-servicing
 - 9B conversational model:
   https://huggingface.co/spkc83/retail-bank-servicing-moe-9b
 - Domain and intent router:

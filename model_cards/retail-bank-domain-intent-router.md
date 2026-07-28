@@ -17,7 +17,7 @@ DistilBERT shared encoder with a binary supported-banking/OOD head and a
 77-way Banking77 intent head. The intent loss is masked for CLINC rows.
 
 Source and evaluation code:
-https://github.com/spkc83/retail-bank-model-development
+https://github.com/spkc83/retail-bank-servicing
 
 Live model-driven application:
 https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc

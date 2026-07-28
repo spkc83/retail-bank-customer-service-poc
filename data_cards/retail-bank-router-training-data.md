@@ -12,7 +12,7 @@ Governed classifier-only data derived from PolyAI Banking77 and UCI CLINC150.
 It is not included in generative SFT.
 
 Preparation and audit code:
-https://github.com/spkc83/retail-bank-model-development
+https://github.com/spkc83/retail-bank-servicing
 
 Trained dual-head router:
 https://huggingface.co/spkc83/retail-bank-domain-intent-router

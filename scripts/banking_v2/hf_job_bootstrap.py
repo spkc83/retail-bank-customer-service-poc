@@ -25,7 +25,7 @@ from typing import Any
 from huggingface_hub import HfApi
 
 HUB_DEST = "spkc83/retail-bank-servicing-moe-9b"
-ROOT = Path("/tmp/retail-bank-model-development")
+ROOT = Path("/tmp/retail-bank-servicing")
 
 
 def parse_args() -> argparse.Namespace:

@@ -21,7 +21,7 @@ per token.
 - Standalone application source:
   https://github.com/spkc83/retail-bank-servicing-poc
 - Model-development source:
-  https://github.com/spkc83/retail-bank-model-development
+  https://github.com/spkc83/retail-bank-servicing
 
 ## System
 

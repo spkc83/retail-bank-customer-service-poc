@@ -154,7 +154,7 @@ def _download(url: str) -> bytes:
     with tempfile.TemporaryDirectory(prefix="retail-bank-router-"):
         request = urllib.request.Request(
             url,
-            headers={"User-Agent": "retail-bank-model-development/0.1"},
+            headers={"User-Agent": "retail-bank-servicing/0.1"},
         )
         with urllib.request.urlopen(request, timeout=60) as response:
             return response.read()

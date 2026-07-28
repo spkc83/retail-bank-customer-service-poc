@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "retail-bank-model-development"
+name = "retail-bank-servicing"
 version = "0.1.0"
 description = "Retail banking MoE training, routing, evaluation, and demonstration"
 readme = "README.md"

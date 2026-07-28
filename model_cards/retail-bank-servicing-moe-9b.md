@@ -21,7 +21,7 @@ Qwen2-MoE checkpoint and adapts the routed residual experts and routers on a
 restricted banking-support corpus.
 
 Source, training, evaluation, and serving code:
-https://github.com/spkc83/retail-bank-model-development
+https://github.com/spkc83/retail-bank-servicing
 
 This is a research and demonstration checkpoint, not a production banking
 assistant. It cannot access accounts, balances, cards, PINs, transactions, or

@@ -1,7 +1,8 @@
 # Dense-to-MoE conversion and routing
 
 This document explains how the pinned 1.5B Qwen checkpoint is expanded into the
-released 8.94B Qwen2-MoE checkpoint.
+released 8.94B Qwen2-MoE checkpoint. All equations use plain text so they render
+consistently in GitHub, Hugging Face, terminals, and basic Markdown viewers.
 
 “Copying learned language representations” means copying pretrained weights. It
 does not mean copying a separate language database.
@@ -15,8 +16,9 @@ Qwen/Qwen2.5-1.5B-Instruct
 revision 989aa7980e4cf806f80c7fef2b1adb7bc71aa306
 ```
 
-The conversion preserves the base model’s embeddings, attention, normalization,
-and output behavior while replacing each dense feed-forward block.
+The conversion preserves the base model’s embeddings, attention,
+normalization, and initial output behavior while replacing each dense
+feed-forward block.
 
 The released model is domain-adapted. It is not a 9B model trained from random
 initialization.
@@ -27,13 +29,13 @@ For one token in one transformer layer:
 
 | Symbol | Meaning | Shape |
 |---|---|---:|
-| $h$ | token hidden state | $1536$ |
-| $W_g$ | dense gate projection | $8960 \times 1536$ |
-| $W_u$ | dense up projection | $8960 \times 1536$ |
-| $W_d$ | dense down projection | $1536 \times 8960$ |
-| $W_r$ | MoE router matrix | $28 \times 1536$ |
-| $E$ | routed expert count | $28$ |
-| $K$ | experts selected per token | $2$ |
+| `h` | token hidden state | `1536` |
+| `W_gate` | dense gate projection | `8960 × 1536` |
+| `W_up` | dense up projection | `8960 × 1536` |
+| `W_down` | dense down projection | `1536 × 8960` |
+| `W_router` | MoE router matrix | `28 × 1536` |
+| `E` | routed expert count | `28` |
+| `K` | experts selected per token | `2` |
 
 Each routed expert has intermediate width 2,048. The shared expert retains the
 base model’s intermediate width of 8,960.
@@ -42,18 +44,9 @@ base model’s intermediate width of 8,960.
 
 The base Qwen layer uses a SwiGLU feed-forward block:
 
-$$
-D(h)
-=
-W_d
-\left[
-\operatorname{SiLU}(W_g h)
-\odot
-(W_u h)
-\right].
-$$
-
-Here, $\odot$ is element-wise multiplication.
+```text
+D(h) = W_down × [SiLU(W_gate × h) element-wise-multiplied-by (W_up × h)]
+```
 
 The block is only one part of the learned language function. Knowledge is
 distributed across embeddings, attention, normalization, MLP weights, and the
@@ -95,102 +88,82 @@ token hidden state ────────┤                                �
 
 The converted block is:
 
-$$
-M(h)
-=
-g_s(h)\,S(h)
-+
-\sum_{i \in \mathcal{K}(h)}
-\alpha_i(h)\,E_i(h).
-$$
+```text
+M(h) = shared_gate(h) × shared_expert(h)
+     + sum of [routing_weight_i(h) × expert_i(h)]
+       for the two selected experts
+```
 
 Definitions:
 
-- $S(h)$ is the shared expert;
-- $g_s(h)$ is the shared-expert gate;
-- $E_i(h)$ is routed expert $i$;
-- $\mathcal{K}(h)$ is the top-2 expert set;
-- $\alpha_i(h)$ is the normalized routing weight.
+- `shared_expert(h)` is the always-active shared expert;
+- `shared_gate(h)` controls the shared expert’s contribution;
+- `expert_i(h)` is routed expert `i`;
+- `top2(h)` is the set of two experts selected for token `h`;
+- `routing_weight_i(h)` is expert `i`’s normalized routing weight.
 
 ## 6. Behavior-preserving initialization
 
 The shared expert starts from the original dense MLP:
 
 ```text
-shared gate projection = W_g
-shared up projection   = W_u
-shared down projection = 2 W_d
+shared gate projection = W_gate
+shared up projection   = W_up
+shared down projection = 2 × W_down
 shared gate vector     = 0
 ```
 
-The shared gate is:
+The shared gate is a sigmoid:
 
-$$
-g_s(h) = \sigma(w_s^\top h).
-$$
+```text
+shared_gate(h) = sigmoid(shared_gate_vector dot h)
+```
 
-Because $w_s = 0$ at initialization:
+Because the shared gate vector starts at zero:
 
-$$
-g_s(h) = \sigma(0) = \frac{1}{2}.
-$$
+```text
+shared_gate(h) = sigmoid(0) = 0.5
+```
 
 The initialized shared expert is:
 
-$$
-S(h)
-=
-2W_d
-\left[
-\operatorname{SiLU}(W_g h)
-\odot
-(W_u h)
-\right].
-$$
+```text
+shared_expert(h)
+  = 2 × W_down
+    × [SiLU(W_gate × h) element-wise-multiplied-by (W_up × h)]
+```
 
 Therefore:
 
-$$
-g_s(h)\,S(h)
-=
-\frac{1}{2}
-\cdot
-2W_d
-\left[
-\operatorname{SiLU}(W_g h)
-\odot
-(W_u h)
-\right]
-=
-D(h).
-$$
+```text
+shared_gate(h) × shared_expert(h)
+  = 0.5 × 2 × W_down
+    × [SiLU(W_gate × h) element-wise-multiplied-by (W_up × h)]
+  = D(h)
+```
 
 Every routed expert starts with a zero down projection:
 
-$$
-W_{d,i} = 0.
-$$
+```text
+expert_down_i = 0
+```
 
-For routed expert $i$:
+For routed expert `i`:
 
-$$
-E_i(h)
-=
-W_{d,i}
-\left[
-\operatorname{SiLU}(W_{g,i}h)
-\odot
-(W_{u,i}h)
-\right]
-=
-0.
-$$
+```text
+expert_i(h)
+  = expert_down_i
+    × [SiLU(expert_gate_i × h)
+       element-wise-multiplied-by
+       (expert_up_i × h)]
+  = 0
+```
 
 Thus, before training:
 
-$$
-M(h) = D(h).
-$$
+```text
+M(h) = D(h)
+```
 
 This equality is the core upcycling invariant. The new routed capacity begins
 as a zero residual around the pretrained dense function.
@@ -200,27 +173,26 @@ as a zero residual around the pretrained dense function.
 Each routed expert receives a deterministic 2,048-row slice of the original
 dense gate and up projections.
 
-For layer $\ell$, expert $e$, and expert row $k$:
+For layer `layer`, expert `expert`, and expert row `row`:
 
-$$
-j_{\ell,e,k}
-=
-(\ell \cdot 997 + e \cdot 2048 + k)
-\bmod 8960.
-$$
+```text
+source_row
+  = (layer × 997 + expert × 2048 + row) modulo 8960
+```
 
-The selected row is copied into both routed projections:
+The selected source row is copied into both routed projections with small,
+deterministic noise:
 
-$$
-W_{g,e}[k] = W_g[j_{\ell,e,k}] + \epsilon_{g,\ell,e,k},
-$$
+```text
+expert_gate[expert, row]
+  = W_gate[source_row] + gate_noise[layer, expert, row]
 
-$$
-W_{u,e}[k] = W_u[j_{\ell,e,k}] + \epsilon_{u,\ell,e,k}.
-$$
+expert_up[expert, row]
+  = W_up[source_row] + up_noise[layer, expert, row]
+```
 
-The noise terms are small, deterministic, and seed-controlled. They prevent all
-experts from beginning with identical feature detectors.
+The seed-controlled noise prevents all experts from beginning with identical
+feature detectors.
 
 The fused gate/up tensor for one layer has shape:
 
@@ -240,72 +212,55 @@ It starts at zero and learns a residual projection during adaptation.
 
 Routing occurs independently for every token in every transformer layer.
 
-For $T$ non-padding tokens, hidden states form:
+For `T` non-padding tokens, the hidden-state matrix has shape:
 
-$$
-H \in \mathbb{R}^{T \times 1536}.
-$$
+```text
+H shape = T × 1536
+```
 
 The layer router produces 28 logits per token:
 
-$$
-Z = HW_r^\top,
-\qquad
-Z \in \mathbb{R}^{T \times 28}.
-$$
+```text
+Z = H × transpose(W_router)
+Z shape = T × 28
+```
 
-For one token, router probabilities are:
+For one token, expert `i` receives a softmax probability:
 
-$$
-p_i(h)
-=
-\frac{\exp(z_i)}
-{\sum_{j=1}^{28}\exp(z_j)}.
-$$
+```text
+p_i(h) = exp(logit_i)
+         ÷ sum(exp(logit_j) for j from 1 through 28)
+```
 
-The router selects:
+The router selects the two largest probabilities:
 
-$$
-\mathcal{K}(h)
-=
-\operatorname{TopK}\!\left(p(h), 2\right).
-$$
+```text
+top2(h) = the indices of the two largest values in p(h)
+```
 
-Selected probabilities are renormalized:
+The two selected probabilities are renormalized:
 
-$$
-\alpha_i(h)
-=
-\frac{p_i(h)}
-{\sum_{j \in \mathcal{K}(h)} p_j(h)},
-\qquad
-i \in \mathcal{K}(h).
-$$
+```text
+routing_weight_i(h)
+  = p_i(h) ÷ sum(p_j(h) for j in top2(h))
+```
 
-The routed residual is:
+Only selected experts receive a routing weight. Their routed residual is:
 
-$$
-R(h)
-=
-\sum_{i \in \mathcal{K}(h)}
-\alpha_i(h)\,E_i(h).
-$$
+```text
+routed_residual(h)
+  = sum(routing_weight_i(h) × expert_i(h) for i in top2(h))
+```
 
-If experts 7 and 19 are selected with probabilities 0.42 and 0.26:
+Example: experts 7 and 19 are selected with probabilities 0.42 and 0.26.
 
-$$
-\alpha_7 = \frac{0.42}{0.42 + 0.26} \approx 0.618,
-$$
+```text
+routing_weight_7  = 0.42 ÷ (0.42 + 0.26) ≈ 0.618
+routing_weight_19 = 0.26 ÷ (0.42 + 0.26) ≈ 0.382
 
-$$
-\alpha_{19} = \frac{0.26}{0.42 + 0.26} \approx 0.382.
-$$
-
-The routed residual is then:
-
-$$
-R(h) \approx 0.618E_7(h) + 0.382E_{19}(h).
-$$
+routed_residual(h)
+  ≈ 0.618 × expert_7(h) + 0.382 × expert_19(h)
+```
 
 Another token or layer may select different experts. Experts are not manually
 labeled as cards, loans, transfers, or other intents.
@@ -334,30 +289,26 @@ Exact model counts:
 | Router matrices | 1,204,224 |
 | Total trainable | 2,467,454,976 |
 
-At initialization, routed down matrices receive gradients because their input
-features are nonzero:
+At initialization, routed down matrices receive nonzero gradients because
+their input features are nonzero:
 
-$$
-\frac{\partial \mathcal{L}}{\partial W_{d,i}} \neq 0.
-$$
+```text
+gradient(total_loss, expert_down_i) is not zero
+```
 
-The language-model gradient to routed gate/up weights and router choices is zero
-while every routed output is exactly zero.
+The language-model gradient to routed gate/up weights and router choices is
+zero while every routed output is exactly zero.
 
 The auxiliary routing loss can still train the router immediately. Once routed
 down projections become nonzero, the language-model loss also informs routing.
 
 ## 10. Load balancing and expert-health gates
 
-The training objective includes a router load-balancing loss:
+The training objective includes router load balancing:
 
-$$
-\mathcal{L}_{\text{total}}
-=
-\mathcal{L}_{\text{LM}}
-+
-0.01\,\mathcal{L}_{\text{aux}}.
-$$
+```text
+total_loss = language_model_loss + 0.01 × router_auxiliary_loss
+```
 
 Starting at step 250, every layer must satisfy:
 
@@ -406,7 +357,7 @@ The full conversion and 1,000-step adaptation run completed. The released BF16
 checkpoint contains 8,943,713,792 parameters.
 
 The repository tests the dense-equivalence calculation and requires maximum
-absolute logit error no greater than $10^{-5}$ before training.
+absolute logit error no greater than `0.00001` before training.
 
 The expansion does not create 9B parameters of pretrained knowledge. At
 initialization, the model is approximately:
