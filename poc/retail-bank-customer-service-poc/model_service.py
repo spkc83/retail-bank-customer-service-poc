@@ -144,10 +144,7 @@ class GroundedBankingService:
             raise ModelResponseError("model returned an unsafe final response")
         if _contains_internal_identifier(response, raw_results):
             raise ModelResponseError("model exposed an internal identifier")
-        if _contains_ungrounded_money(
-            response,
-            grounded_results,
-        ) or _violates_account_balance_contract(response, grounded_results):
+        if _requires_grounded_repair(response, grounded_results):
             return FinalizedAnswer(
                 response=_deterministic_grounded_response(grounded_results),
                 selection_source="grounded_repair",
@@ -363,6 +360,21 @@ def _contains_ungrounded_money(
     return not displayed <= allowed
 
 
+def _requires_grounded_repair(
+    response: str,
+    grounded_results: dict[str, Any],
+) -> bool:
+    if len(grounded_results) > 1:
+        return True
+    if _contains_ungrounded_money(response, grounded_results):
+        return True
+    if _violates_account_balance_contract(response, grounded_results):
+        return True
+    if "list_service_cases" in grounded_results and "limited" not in response.lower():
+        return True
+    return _violates_write_acknowledgement(response, grounded_results)
+
+
 def _violates_account_balance_contract(
     response: str,
     grounded_results: dict[str, Any],
@@ -386,6 +398,46 @@ def _violates_account_balance_contract(
         or "current" not in normalized
         or not required_values <= set(_DISPLAY_MONEY.findall(response))
     )
+
+
+def _violates_write_acknowledgement(
+    response: str,
+    grounded_results: dict[str, Any],
+) -> bool:
+    normalized = response.lower()
+    forbidden = ("unable", "cannot", "provide me", "to proceed", "initiate")
+    if any(phrase in normalized for phrase in forbidden):
+        return any(
+            tool in grounded_results
+            for tool in (
+                "cancel_transfer",
+                "dispute_transaction",
+                "freeze_card",
+                "replace_card",
+            )
+        )
+    contracts = {
+        "cancel_transfer": ("transfer", "cancelled"),
+        "dispute_transaction": ("transaction", "disput"),
+        "freeze_card": ("card", "frozen"),
+        "replace_card": ("card", "replacement"),
+    }
+    for tool, (record_key, required_word) in contracts.items():
+        payload = grounded_results.get(tool)
+        if not isinstance(payload, dict):
+            continue
+        record = payload.get(record_key)
+        if not isinstance(record, dict):
+            return True
+        required_values = [
+            str(record[key])
+            for key in ("recipient", "description", "amount", "last4")
+            if isinstance(record.get(key), str)
+        ]
+        return required_word not in normalized or not all(
+            value.lower() in normalized for value in required_values
+        )
+    return False
 
 
 def _deterministic_grounded_response(grounded_results: dict[str, Any]) -> str:

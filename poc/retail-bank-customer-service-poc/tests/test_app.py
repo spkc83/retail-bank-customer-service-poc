@@ -200,6 +200,27 @@ def test_model_unavailability_rolls_back_write(
     assert "no synthetic action was committed" in activity
 
 
+def test_completed_transfer_gets_specific_safe_response(
+    app_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        app_module,
+        "route_query",
+        lambda *_args: accepted_route("cancel_transfer"),
+    )
+
+    response, dashboard, _ = app_module.respond(
+        "Cancel the completed transfer to Jamie Lee.",
+        [],
+        request(),
+    )
+
+    assert "already completed" in response
+    assert "cannot be cancelled" in response
+    assert "`completed`" in dashboard
+
+
 def test_mixed_read_write_request_never_calls_model_or_backend(
     app_module,
     monkeypatch: pytest.MonkeyPatch,

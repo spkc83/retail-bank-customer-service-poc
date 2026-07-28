@@ -101,7 +101,7 @@ def respond(
         )
     except ModelResponseError as error:
         return (
-            MODEL_FAILURE_RESPONSE,
+            _workflow_error_response(error),
             render_snapshot(BANK.snapshot(username, session_hash)),
             (
                 "⚠️ The deterministic workflow or grounded model response failed "
@@ -257,6 +257,16 @@ def _identity(request: gr.Request) -> tuple[str, str]:
 
 def _money(cents: Any, currency: Any) -> str:
     return f"{str(currency)} {int(cents) / 100:,.2f}"
+
+
+def _workflow_error_response(error: ModelResponseError) -> str:
+    reason = str(error).lower()
+    if "not pending" in reason:
+        return (
+            "That synthetic transfer is already completed, so it cannot be cancelled. "
+            "No synthetic data was changed."
+        )
+    return MODEL_FAILURE_RESPONSE
 
 
 with gr.Blocks(

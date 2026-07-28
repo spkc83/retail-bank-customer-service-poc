@@ -68,7 +68,7 @@ def test_multi_read_executes_exact_workflow_and_model_finalizes_grounded_bundle(
     )
 
     assert reply.workflow_tools == ("list_transfers", "list_transactions")
-    assert reply.selection_source == "model_finalizer"
+    assert reply.selection_source == "grounded_repair"
     assert len(finalizer.calls) == 1
     grounded = finalizer.calls[0]["grounded_results"]
     assert tuple(grounded) == ("list_transfers", "list_transactions")
@@ -310,3 +310,44 @@ def test_incomplete_account_balance_answer_is_replaced_with_labeled_values() -> 
     assert reply.selection_source == "grounded_repair"
     assert "USD 3,245.67 available" in reply.response
     assert "USD 3,300.12 current" in reply.response
+
+
+def test_misleading_cancel_acknowledgement_is_replaced_before_commit() -> None:
+    finalizer = RecordingFinalizer(
+        ["Please provide the transfer reference so I can initiate cancellation."]
+    )
+    registry = bank()
+    service = GroundedBankingService(bank=registry, finalizer=finalizer)
+    message = "Cancel the pending transfer to River Consulting."
+
+    reply = service.execute(
+        username="alex.demo",
+        session_hash="session",
+        message=message,
+        history=[],
+        plan=plan_workflow(message, [], route(intent="cancel_transfer")),
+    )
+
+    assert reply.selection_source == "grounded_repair"
+    assert "USD 450.00 transfer to River Consulting is cancelled" in reply.response
+    assert registry.snapshot("alex.demo", "session")["transfers"][0]["status"] == "cancelled"
+
+
+def test_address_history_without_limit_qualifier_uses_grounded_repair() -> None:
+    finalizer = RecordingFinalizer(
+        ["Your mailing address was updated on June 18, 2026."]
+    )
+    service = GroundedBankingService(bank=bank(), finalizer=finalizer)
+    message = "When was my mailing address changed?"
+
+    reply = service.execute(
+        username="alex.demo",
+        session_hash="session",
+        message=message,
+        history=[],
+        plan=plan_workflow(message, [], route(intent="edit_personal_details")),
+    )
+
+    assert reply.selection_source == "grounded_repair"
+    assert "Limited service-case history" in reply.response
+    assert "2026-06-18" in reply.response
