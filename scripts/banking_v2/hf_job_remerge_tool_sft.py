@@ -9,7 +9,7 @@
 #   "transformers==5.13.0",
 # ]
 # ///
-"""Rebuild a trained LoRA merge in FP32 and persist FP16 release weights."""
+"""Rebuild a trained LoRA merge with explicit accumulation and release dtypes."""
 
 from __future__ import annotations
 
@@ -35,6 +35,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-subdir", default="merged-fp16")
     parser.add_argument("--base-model", default=BASE_MODEL)
     parser.add_argument("--base-revision", default=BASE_REVISION)
+    parser.add_argument(
+        "--merge-dtype",
+        choices=("float32", "float16", "bfloat16"),
+        default="float32",
+    )
+    parser.add_argument(
+        "--release-dtype",
+        choices=("float16", "bfloat16"),
+        default="float16",
+    )
+    parser.add_argument("--report-name", default="fp16_remerge.json")
     return parser.parse_args()
 
 
@@ -59,11 +70,18 @@ def main() -> int:
         raise RuntimeError(f"trained adapter is unavailable: {adapter_dir}")
 
     started = time.monotonic()
+    dtypes = {
+        "float32": torch.float32,
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+    }
+    merge_dtype = dtypes[args.merge_dtype]
+    release_dtype = dtypes[args.release_dtype]
     tokenizer = AutoTokenizer.from_pretrained(adapter_dir, local_files_only=True)
     base = AutoModelForCausalLM.from_pretrained(
         args.base_model,
         revision=args.base_revision,
-        dtype=torch.float32,
+        dtype=merge_dtype,
         device_map={"": torch.cuda.current_device()},
     )
     adapter_model = PeftModel.from_pretrained(
@@ -73,8 +91,8 @@ def main() -> int:
     )
     adapter_model.eval()
     merged = adapter_model.merge_and_unload(safe_merge=True)
-    merged.to(dtype=torch.float16)
-    merged.config.torch_dtype = torch.float16
+    merged.to(dtype=release_dtype)
+    merged.config.torch_dtype = release_dtype
     merged.save_pretrained(
         merged_dir,
         safe_serialization=True,
@@ -87,13 +105,13 @@ def main() -> int:
         "base_revision": args.base_revision,
         "adapter_dir": str(adapter_dir),
         "merged_dir": str(merged_dir),
-        "merge_accumulation_dtype": "float32",
-        "release_weight_dtype": "float16",
+        "merge_accumulation_dtype": args.merge_dtype,
+        "release_weight_dtype": args.release_dtype,
         "safe_merge": True,
         "cuda_device": torch.cuda.get_device_name(torch.cuda.current_device()),
         "elapsed_seconds": round(time.monotonic() - started, 3),
     }
-    write_json(args.output_root / "fp16_remerge.json", report)
+    write_json(args.output_root / args.report_name, report)
     print(json.dumps(report, sort_keys=True))
     del adapter_model
     del merged
