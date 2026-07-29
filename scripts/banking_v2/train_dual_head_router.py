@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModel, AutoTokenizer, get_linear_schedule_with_warmup
 
 DATASET_ID = "spkc83/retail-bank-router-training-data"
-DATASET_REVISION = "96383306134a9f3331dd47cd936e65a70c585d99"
+DATASET_REVISION = "54ff186a03501d76dc643dbed3d82729267ce811"
 DESTINATION_ID = "spkc83/retail-bank-domain-intent-router"
 BASE_MODEL_ID = "distilbert/distilbert-base-uncased"
 BASE_MODEL_REVISION = "12040accade4e8a0f71eabdb258fecc2e7e948be"
@@ -155,6 +155,13 @@ def evaluate_predictions(
         target_kind="same_intent_followup",
         expected=True,
     )
+    metrics["conversational_false_refusal_rate"] = _subset_error_rate(
+        accepted,
+        domain_labels,
+        example_kinds,
+        target_kind="clinc_conversational_in_domain",
+        expected=True,
+    )
     metrics["transition_ood_false_accept_rate"] = _subset_error_rate(
         accepted,
         domain_labels,
@@ -171,6 +178,7 @@ def release_gate_failures(metrics: dict[str, Any]) -> list[str]:
         ("in_domain_false_refusal_rate", "<=", 0.02),
         ("ood_false_accept_rate", "<=", 0.05),
         ("followup_false_refusal_rate", "<=", 0.05),
+        ("conversational_false_refusal_rate", "<=", 0.05),
         ("transition_ood_false_accept_rate", "<=", 0.05),
     )
     failures = []
@@ -633,6 +641,7 @@ DistilBERT shared encoder with a binary supported-banking/OOD head and a
 - In-domain false-refusal rate: `{test["in_domain_false_refusal_rate"]:.6f}`
 - OOD false-accept rate: `{test["ood_false_accept_rate"]:.6f}`
 - Follow-up false-refusal rate: `{test["followup_false_refusal_rate"]:.6f}`
+- Conversational false-refusal rate: `{test["conversational_false_refusal_rate"]:.6f}`
 - Banking-to-OOD false-accept rate: `{test["transition_ood_false_accept_rate"]:.6f}`
 - Calibrated banking threshold: `{metrics["calibrated_threshold"]:.6f}`
 

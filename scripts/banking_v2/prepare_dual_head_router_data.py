@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from hello_slm.banking_router_data import (
+    CLINC_CONVERSATIONAL_IN_DOMAIN_LABELS,
     CLINC_SUPPORTED_BANKING_LABELS,
     build_router_splits,
 )
@@ -119,6 +120,9 @@ def main() -> int:
             },
         },
         "clinc_supported_banking_labels": sorted(CLINC_SUPPORTED_BANKING_LABELS),
+        "clinc_conversational_in_domain_labels": sorted(
+            CLINC_CONVERSATIONAL_IN_DOMAIN_LABELS
+        ),
         "splits": split_entries,
         "report": report,
         "review_status": "automated-policy-pass",
@@ -197,6 +201,10 @@ def _write_data_card(path: Path, manifest: dict[str, Any]) -> None:
                 f"- Validation rows: {counts['validation']}",
                 f"- Test rows: {counts['test']}",
                 "- Domain labels: OOD=0, supported retail banking=1",
+                (
+                    "- Supported domain includes greetings, thanks, goodbyes, and "
+                    "assistant-identity questions"
+                ),
                 "- Intent labels: 77 Banking77 intents; `-100` means no intent supervision",
                 "- Licenses: CC-BY-4.0",
                 "",

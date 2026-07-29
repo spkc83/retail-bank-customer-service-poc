@@ -42,6 +42,18 @@ CLINC_SUPPORTED_BANKING_LABELS = frozenset(
     }
 )
 
+# Customer-service conversation is part of the supported application domain
+# even when a turn does not express one of the 77 Banking77 intents. These rows
+# supervise only the binary domain head.
+CLINC_CONVERSATIONAL_IN_DOMAIN_LABELS = frozenset(
+    {
+        "are_you_a_bot",
+        "goodbye",
+        "greeting",
+        "thank_you",
+    }
+)
+
 PII_PATTERNS = (
     re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
     re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
@@ -114,7 +126,19 @@ def build_router_splits(
                 if len(pair) != 2:
                     raise ValueError(f"invalid CLINC row in {source_key}: {pair!r}")
                 current, source_label = (str(pair[0]).strip(), str(pair[1]).strip())
-                supported = source_label in CLINC_SUPPORTED_BANKING_LABELS
+                supported_banking = source_label in CLINC_SUPPORTED_BANKING_LABELS
+                supported_conversation = (
+                    source_label in CLINC_CONVERSATIONAL_IN_DOMAIN_LABELS
+                )
+                supported = supported_banking or supported_conversation
+                if supported_banking:
+                    example_kind = "clinc_supported_banking"
+                elif supported_conversation:
+                    example_kind = "clinc_conversational_in_domain"
+                elif source_label == "oos":
+                    example_kind = "clinc_oos"
+                else:
+                    example_kind = "clinc_nonbanking"
                 splits[split].append(
                     _example(
                         current=current,
@@ -122,11 +146,7 @@ def build_router_splits(
                         domain_label=1 if supported else 0,
                         intent_label=-100,
                         intent=None,
-                        example_kind=(
-                            "clinc_supported_banking"
-                            if supported
-                            else ("clinc_oos" if source_label == "oos" else "clinc_nonbanking")
-                        ),
+                        example_kind=example_kind,
                         source="UCI/clinc150",
                         source_split=source_key,
                         source_label=source_label,

@@ -33,13 +33,14 @@ def test_calibration_prioritizes_ood_specificity_under_recall_constraint() -> No
 def test_metrics_and_release_gates_cover_transition_subsets() -> None:
     training = load_training_module()
     metrics = training.evaluate_predictions(
-        domain_probabilities=[0.95, 0.90, 0.05, 0.10],
-        domain_labels=[1, 1, 0, 0],
-        intent_predictions=[0, 1, 0, 1],
-        intent_labels=[0, 1, -100, -100],
+        domain_probabilities=[0.95, 0.90, 0.85, 0.05, 0.10],
+        domain_labels=[1, 1, 1, 0, 0],
+        intent_predictions=[0, 1, 0, 0, 1],
+        intent_labels=[0, 1, -100, -100, -100],
         example_kinds=[
             "banking77_single",
             "same_intent_followup",
+            "clinc_conversational_in_domain",
             "clinc_nonbanking",
             "banking_to_ood_transition",
         ],
@@ -51,6 +52,7 @@ def test_metrics_and_release_gates_cover_transition_subsets() -> None:
     assert metrics["in_domain_false_refusal_rate"] == 0.0
     assert metrics["ood_false_accept_rate"] == 0.0
     assert metrics["followup_false_refusal_rate"] == 0.0
+    assert metrics["conversational_false_refusal_rate"] == 0.0
     assert metrics["transition_ood_false_accept_rate"] == 0.0
     assert training.release_gate_failures(metrics) == []
 
@@ -63,8 +65,9 @@ def test_release_gate_reports_each_failed_contract() -> None:
             "in_domain_false_refusal_rate": 0.04,
             "ood_false_accept_rate": 0.08,
             "followup_false_refusal_rate": 0.07,
+            "conversational_false_refusal_rate": 0.08,
             "transition_ood_false_accept_rate": 0.06,
         }
     )
 
-    assert len(failures) == 5
+    assert len(failures) == 6

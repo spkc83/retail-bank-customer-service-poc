@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 
 from hello_slm.banking_router_data import (
+    CLINC_CONVERSATIONAL_IN_DOMAIN_LABELS,
     CLINC_SUPPORTED_BANKING_LABELS,
     build_router_splits,
     normalize_router_text,
@@ -38,6 +39,7 @@ def clinc_payload() -> dict[str, list[list[str]]]:
     return {
         "train": [
             ["my card was declined", "card_declined"],
+            ["yo, what is up", "greeting"],
             ["tell me a joke", "tell_joke"],
         ],
         "val": [
@@ -98,6 +100,10 @@ def test_build_router_splits_preserves_test_and_labels_clinc_boundaries() -> Non
     assert "card_declined" in CLINC_SUPPORTED_BANKING_LABELS
     assert by_label["card_declined"]["domain_label"] == 1
     assert by_label["card_declined"]["intent_label"] == -100
+    assert "greeting" in CLINC_CONVERSATIONAL_IN_DOMAIN_LABELS
+    assert by_label["greeting"]["domain_label"] == 1
+    assert by_label["greeting"]["intent_label"] == -100
+    assert by_label["greeting"]["example_kind"] == "clinc_conversational_in_domain"
     assert by_label["tell_joke"]["domain_label"] == 0
     assert by_label["oos"]["domain_label"] == 0
 
