@@ -493,6 +493,31 @@ def validate_records(
         if user_key in normalized_users:
             raise BankingToolSftDataError(f"{record_id} duplicates normalized user text")
         normalized_users.add(user_key)
+        final_response = _final_assistant_message(record).get("content")
+        if not isinstance(final_response, str) or len(
+            normalized_user_text(final_response).split()
+        ) < 7:
+            raise BankingToolSftDataError(
+                f"{record_id} final assistant response is missing semantic content"
+            )
+        normalized_final = normalized_user_text(final_response)
+        response_path = record.get("expected", {}).get("path")
+        required_path_markers = {
+            "clarification": ("last four digits",),
+            "no_tool_banking_faq": ("overdraft",),
+            "ood": ("retail banking",),
+            "hard_negative": ("account numbers", "customer ids"),
+        }
+        missing_markers = [
+            marker
+            for marker in required_path_markers.get(str(response_path), ())
+            if normalized_user_text(marker) not in normalized_final
+        ]
+        if missing_markers:
+            raise BankingToolSftDataError(
+                f"{record_id} final assistant response is missing path markers: "
+                f"{missing_markers}"
+            )
         tool_call_ids: list[str] = []
         canonical_calls: list[dict[str, Any]] = []
         tool_result_ids: list[str] = []
@@ -900,7 +925,7 @@ def _materialize_scenario(template: Scenario, occurrence: int) -> Scenario:
         customer_id=material.customer_id,
         state_seed=material.state_seed,
         user=_realize_user(material, occurrence),
-        final_response=_materialized_final_response(material, slot, occurrence),
+        final_response=_materialized_final_response(template, slot, occurrence),
         path=material.path,
         tool_plan=material.tool_plan,
         pre_messages=material.pre_messages,

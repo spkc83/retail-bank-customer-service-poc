@@ -205,6 +205,31 @@ def test_pilot_realizer_uses_natural_text_and_varied_state_slots() -> None:
 
     assert all(len(values) >= 20 for values in write_values.values())
 
+    final_responses = [
+        str(record["messages"][-1]["content"]).strip() for record in records
+    ]
+    assert all(len(normalized_user_text(response).split()) >= 7 for response in final_responses)
+    by_path = {
+        path: [
+            response
+            for record, response in zip(records, final_responses, strict=True)
+            if record["expected"]["path"] == path
+        ]
+        for path in {
+            "clarification",
+            "no_tool_banking_faq",
+            "ood",
+            "hard_negative",
+        }
+    }
+    assert all("last four digits" in response.lower() for response in by_path["clarification"])
+    assert all("overdraft" in response.lower() for response in by_path["no_tool_banking_faq"])
+    assert all("retail banking" in response.lower() for response in by_path["ood"])
+    assert all(
+        "account number" in response.lower() and "customer id" in response.lower()
+        for response in by_path["hard_negative"]
+    )
+
 
 def test_teacher_realization_round_trip_allows_only_wording_changes(tmp_path: Path) -> None:
     records = generate_records(pilot_count=18, split_seed=711)
@@ -307,4 +332,12 @@ def test_validator_rejects_private_or_unknown_tool_arguments() -> None:
     assistant["tool_calls"][0]["function"]["arguments"]["customer_id"] = "cust_alex"
 
     with pytest.raises(BankingToolSftDataError, match="unsupported arguments"):
+        validate_records([record])
+
+
+def test_validator_rejects_semantically_empty_final_response() -> None:
+    record = generate_records(pilot_count=18)[0]
+    record["messages"][-1]["content"] = "Done."
+
+    with pytest.raises(BankingToolSftDataError, match="missing semantic content"):
         validate_records([record])
