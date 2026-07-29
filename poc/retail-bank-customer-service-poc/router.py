@@ -105,10 +105,10 @@ class LearnedBankingRouter:
         if current["route"] == "in_domain":
             return current
 
-        exchange = _latest_exchange(history)
-        if exchange is None:
+        exchanges = _recent_exchanges(history)
+        if not exchanges:
             return current
-        previous_user, previous_assistant = exchange
+        previous_user, previous_assistant = exchanges[-1]
         if _has_contextual_reference(normalized_message):
             context_reason = "contextual_reference"
         elif _is_short_follow_up(normalized_message) and _invites_follow_up(
@@ -120,7 +120,21 @@ class LearnedBankingRouter:
 
         previous = self._predict(f"[CURRENT]\n{previous_user}")
         if previous["route"] == "out_of_domain":
-            return current
+            if len(exchanges) < 2:
+                return current
+            earlier_user, earlier_assistant = exchanges[-2]
+            previous_was_follow_up = (
+                _has_contextual_reference(previous_user)
+                or (
+                    _is_short_follow_up(previous_user)
+                    and _invites_follow_up(earlier_assistant)
+                )
+            )
+            if not previous_was_follow_up:
+                return current
+            earlier = self._predict(f"[CURRENT]\n{earlier_user}")
+            if earlier["route"] == "out_of_domain":
+                return current
 
         contextual = self._predict(
             f"[CURRENT]\n{normalized_message}\n"
@@ -134,6 +148,9 @@ class LearnedBankingRouter:
             )
         contextual["context_applied"] = True
         contextual["context_reason"] = context_reason
+        contextual["context_chain_depth"] = (
+            2 if previous["route"] == "out_of_domain" else 1
+        )
         return contextual
 
     def _predict(self, rendered: str) -> dict[str, Any]:
@@ -231,9 +248,9 @@ def _has_contextual_reference(text: str) -> bool:
     )
 
 
-def _latest_exchange(
+def _recent_exchanges(
     history: list[dict[str, Any]] | None,
-) -> tuple[str, str] | None:
+) -> list[tuple[str, str]]:
     messages = [
         (str(item.get("role")), str(item.get("content")).strip())
         for item in (history or [])
@@ -242,13 +259,20 @@ def _latest_exchange(
         and isinstance(item.get("content"), str)
         and str(item["content"]).strip()
     ]
-    if not messages or messages[-1][0] != "assistant":
-        return None
-    previous_assistant = messages[-1][1]
-    for role, content in reversed(messages[:-1]):
+    exchanges: list[tuple[str, str]] = []
+    active_user: str | None = None
+    active_assistant: str | None = None
+    for role, content in messages:
         if role == "user":
-            return content, previous_assistant
-    return None
+            if active_user is not None and active_assistant is not None:
+                exchanges.append((active_user, active_assistant))
+            active_user = content
+            active_assistant = None
+        elif active_user is not None:
+            active_assistant = content
+    if active_user is not None and active_assistant is not None:
+        exchanges.append((active_user, active_assistant))
+    return exchanges
 
 
 def _is_short_follow_up(text: str) -> bool:

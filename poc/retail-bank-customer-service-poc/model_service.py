@@ -166,6 +166,8 @@ class ModelPassTrace:
     output_chars: int
     output_sha256: str
     raw_output: str
+    runtime_device: str
+    cuda_device_name: str
 
 
 class AgentProtocolError(ValueError):
@@ -412,6 +414,8 @@ class ConversationalBankingAgent:
             tools,
             MAX_NEW_TOKENS,
         ).strip()
+        metadata_provider = getattr(self.model, "runtime_metadata", None)
+        metadata = metadata_provider() if callable(metadata_provider) else {}
         return output, ModelPassTrace(
             label=label,
             input_tokens=input_tokens,
@@ -421,6 +425,8 @@ class ConversationalBankingAgent:
             output_chars=len(output),
             output_sha256=hashlib.sha256(output.encode("utf-8")).hexdigest(),
             raw_output=output,
+            runtime_device=str(metadata.get("runtime_device", "unavailable")),
+            cuda_device_name=str(metadata.get("cuda_device_name", "unavailable")),
         )
 
     def _execute_tool(

@@ -206,8 +206,13 @@ def test_reflection_tool_recovery_is_labeled_with_per_pass_provenance(
     assert "`base`" in result[5]
     assert "`reflection`" in result[5]
     assert "`grounded_final`" in result[5]
+    assert "Generation calls: `3`" in result[5]
     assert "prompt SHA-256" in result[5]
     assert "raw output SHA-256" in result[5]
+    assert "Please provide your account number." in result[5]
+    assert "&lt;tool_call&gt;" in result[5]
+    assert "Runtime device:" in result[5]
+    assert "CUDA device name:" in result[5]
     assert app_module.MODEL_ID in result[5]
     assert app_module.MODEL_REVISION in result[5]
 

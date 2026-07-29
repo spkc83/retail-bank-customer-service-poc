@@ -161,7 +161,8 @@ this checkpoint is the conversational and tool-calling agent:
 The application retains complete session history and selects newest complete
 conversation/tool interactions within an 8,192-token input budget. It does not
 replace model responses with deterministic grounded templates. Per-pass prompt
-and output hashes distinguish base, reflection, and grounded-final generations.
+and output hashes, raw outputs, call counts, and runtime device metadata
+distinguish base, reflection, and grounded-final generations.
 
 ## Limitations
 

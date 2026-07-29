@@ -64,7 +64,8 @@ budget controls ZeroGPU latency and memory.
 The UI reports domain probabilities, top-three intent predictions, generated
 tool calls and arguments, tool status, response path, current synthetic backend
 state, and per-pass prompt/output hashes for base, reflection, and grounded-final
-9B generations.
+9B generations. It also exposes expandable raw outputs, the generation-call
+count, and the runtime/CUDA device reported after each model invocation.
 
 UI presets and prior screenshots are regression examples only. The held-out
 evaluation must cover paraphrases, conversational follow-ups, intent-head

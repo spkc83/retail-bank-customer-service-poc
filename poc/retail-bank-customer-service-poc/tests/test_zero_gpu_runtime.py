@@ -15,6 +15,10 @@ def test_zero_gpu_runtime_exposes_generic_generation_and_exact_counting_contract
 
     assert not hasattr(runtime, "BANK")
     assert not hasattr(runtime.generate_text, "_zero_gpu_config")
+    assert runtime.runtime_metadata() == {
+        "runtime_device": "unavailable",
+        "cuda_device_name": "unavailable",
+    }
     with pytest.raises(RuntimeError, match="unavailable"):
         runtime.generate_text(
             [{"role": "user", "content": "Show my balance."}],

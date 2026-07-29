@@ -190,7 +190,8 @@ The deployable Gradio source is in
 - an 8,192-token input budget retaining complete user/assistant/tool
   interactions without splitting a turn;
 - diagnostics for route probabilities, intent candidates, generated tool calls,
-  tool results, response path, and per-generation prompt/output hashes;
+  tool results, response path, raw pass outputs, prompt/output hashes, and
+  actual runtime device metadata;
 - preset read, write, multi-turn, sensitive-data, and OOD cases.
 
 The hidden conversation state stores complete user, assistant, tool-call, and

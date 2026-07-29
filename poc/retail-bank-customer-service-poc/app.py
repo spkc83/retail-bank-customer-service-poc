@@ -17,12 +17,19 @@ if os.environ.get("POC_SKIP_MODEL_LOAD") == "1":
         MODEL_ID,
         count_tokens,
         generate_text,
+        runtime_metadata,
         spaces_runtime as spaces,
     )
 else:
     import spaces
 
-    from zero_gpu_runtime import MODEL_ID, MODEL_REVISION, count_tokens, generate_text
+    from zero_gpu_runtime import (
+        MODEL_ID,
+        MODEL_REVISION,
+        count_tokens,
+        generate_text,
+        runtime_metadata,
+    )
 
 import gradio as gr
 
@@ -105,6 +112,9 @@ class _RuntimeModel(ModelRuntime):
         tools: list[dict[str, Any]] | None,
     ) -> int:
         return count_tokens(messages, tools)
+
+    def runtime_metadata(self) -> dict[str, str]:
+        return runtime_metadata()
 
 
 @spaces.GPU(size="large", duration=90)
@@ -521,7 +531,11 @@ def _render_diagnostics(
             (
                 f"- `{item.label}` — input tokens `{item.input_tokens}`, "
                 f"prompt SHA-256 `{item.prompt_sha256}`, output characters "
-                f"`{item.output_chars}`, raw output SHA-256 `{item.output_sha256}`"
+                f"`{item.output_chars}`, raw output SHA-256 `{item.output_sha256}`; "
+                f"Runtime device: `{item.runtime_device}`; CUDA device name: "
+                f"`{item.cuda_device_name}`\n"
+                f"<details><summary>Show {item.label} raw output</summary>"
+                f"<pre><code>{html.escape(item.raw_output)}</code></pre></details>"
             )
             for item in model_passes
         )
@@ -545,6 +559,7 @@ def _render_diagnostics(
         f"**9B tool calls**\n{call_text}\n\n"
         f"**Tool results**\n{result_text}\n\n"
         f"**9B generation provenance**\n{pass_text}\n\n"
+        f"- Generation calls: `{len(model_passes)}`\n"
         f"- Model: `{MODEL_ID}`\n"
         f"- Exact model revision: `{MODEL_REVISION}`\n"
         f"- Space commit: `{space_commit}`\n"

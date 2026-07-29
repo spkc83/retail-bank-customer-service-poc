@@ -108,8 +108,10 @@ is unavailable. It does not substitute a Python-generated banking answer.
 The diagnostics panel exposes domain probabilities, top intent predictions,
 generated tool names and arguments, tool status, response path, exact model
 revision, and separate prompt/output hashes for the `base`, `reflection`, and
-`grounded_final` model calls. Presets are evaluation prompts, not production
-routing rules or proof of generalization.
+`grounded_final` model calls. Expandable raw outputs, the generation-call count,
+and actual runtime/CUDA device metadata make the reflection behavior directly
+inspectable. Presets are evaluation prompts, not production routing rules or
+proof of generalization.
 
 ## Authentication
 
