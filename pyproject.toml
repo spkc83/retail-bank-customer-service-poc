@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "retail-bank-servicing"
 version = "0.1.0"
-description = "Retail banking MoE training, routing, evaluation, and demonstration"
+description = "Granite PEFT training, dual-head routing, evaluation, and ZeroGPU demonstration"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -14,9 +14,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-app = [
-  "shiny>=1.5,<2",
-]
 scale = [
   "accelerate>=1.12,<2",
   "bitsandbytes==0.50.0",
@@ -34,7 +31,6 @@ dev = [
   "pytest>=8",
   "ruff>=0.5",
   "safetensors>=0.6,<1",
-  "shiny>=1.5,<2",
   "transformers>=5.13,<5.14",
 ]
 
@@ -48,10 +44,6 @@ pythonpath = ["src", "poc/retail-bank-customer-service-poc"]
 
 [tool.mypy]
 files = ["src", "scripts", "tests"]
-
-[[tool.mypy.overrides]]
-module = ["shiny", "shiny.*"]
-follow_imports = "skip"
 
 [[tool.mypy.overrides]]
 module = [

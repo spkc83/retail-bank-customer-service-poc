@@ -1,200 +1,145 @@
 # Retail Bank Agent
 
-Training, evaluation, and public demonstration code for a model-driven
-retail-bank customer-service agent.
+This repository contains one end-to-end experiment:
 
-The active generative model is a merged FP16 LoRA adaptation of
-`ibm-granite/granite-4.1-8b` at a pinned base revision. It has 8.79 billion
-parameters, uses Granite's native tagged-JSON tool-call format, and is trained
-on 9,000 governed synthetic conversations. The earlier custom Qwen2-MoE model
-is retained only as an evaluation control.
+- a PEFT-finetuned IBM Granite conversational agent with 8,791,592,960
+  parameters;
+- a DistilBERT dual-head classifier for banking-domain/OOD detection and
+  Banking77 intent diagnostics;
+- governed data generation, training, continuation, recovery, merge, and
+  frozen-evaluation code;
+- a public Gradio application that runs the Granite model on Hugging Face
+  ZeroGPU and executes model-generated calls against a synthetic bank.
 
-## Public artifacts
+There are no real customers or banking connections. Every account, card,
+transaction, transfer, and service case is fictional.
 
-- Model: https://huggingface.co/spkc83/retail-bank-agent-9b
-- Tool-use SFT dataset:
-  https://huggingface.co/datasets/spkc83/retail-bank-agent-sft
-- Domain and intent router:
-  https://huggingface.co/spkc83/retail-bank-domain-intent-router
-- Router training dataset:
-  https://huggingface.co/datasets/spkc83/retail-bank-router-training-data
-- Public ZeroGPU application:
-  https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
-- Standalone application source:
-  https://github.com/spkc83/retail-bank-servicing-poc
-- Model-development source:
-  https://github.com/spkc83/retail-bank-servicing
+## Released system
 
-## Runtime
+| Component | Public artifact | Immutable revision |
+|---|---|---|
+| Granite agent | [spkc83/retail-bank-agent-9b](https://huggingface.co/spkc83/retail-bank-agent-9b) | `085df3d089cfadd77424b548542da0390a54a23e` |
+| Tool-use SFT data | [spkc83/retail-bank-agent-sft](https://huggingface.co/datasets/spkc83/retail-bank-agent-sft) | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` |
+| Dual-head classifier | [spkc83/retail-bank-domain-intent-router](https://huggingface.co/spkc83/retail-bank-domain-intent-router) | `136ee159d19cda7f585dd122907bbeb1ef4ec4db` |
+| Classifier data | [spkc83/retail-bank-router-training-data](https://huggingface.co/datasets/spkc83/retail-bank-router-training-data) | `54ff186a03501d76dc643dbed3d82729267ce811` |
+| ZeroGPU application | [retail-bank-servicing-poc](https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc) | See the Space diagnostics panel |
+
+The standalone application source is also published at
+[spkc83/retail-bank-servicing-poc](https://github.com/spkc83/retail-bank-servicing-poc).
+
+## Request flow
 
 ```text
-Authenticated synthetic customer
-  → CPU dual-head classifier identifies OOD and predicts advisory intents
-  → in-domain or uncertain request enters the ZeroGPU 8.79B agent
-  → model responds directly or emits tagged-JSON tool calls
-  → generated calls execute against session-isolated synthetic SQLite
-  → tool results return to the model for a grounded final response
+authenticated synthetic customer
+  -> CPU dual-head classifier
+     -> high-confidence OOD: fixed scope response
+     -> in-domain or uncertain: Granite 8.79B on ZeroGPU
+        -> direct conversational response, or
+        -> Granite tagged-JSON tool call
+           -> synthetic SQLite tool execution
+           -> correlated result returned to Granite
+           -> Granite-authored grounded response
 ```
 
-The classifier does not select tools. The generative model owns the
-conversation, clarification, tool choice, public arguments, and final wording.
-The runtime performs mechanical schema validation, mock-tool execution, context
-budgeting, and diagnostics. High-confidence OOD requests receive the governed
-financial-services scope response without invoking the 8.79B model.
+The intent head is diagnostic. Its predictions do not enter the generation
+prompt, select tools, or provide arguments. The model receives complete,
+token-budgeted interaction groups and owns conversation, clarification, tool
+selection, public arguments, and final wording.
 
-This is a research demonstration. It has no connection to a bank and cannot
-access or modify real accounts.
+## Start here
 
-## Model and training
+The documentation is ordered so a junior developer can reproduce the system
+without reading the implementation first:
 
-- Base: `ibm-granite/granite-4.1-8b`
-- Base revision:
-  `1504002f650e656a0a3789d99574df12e3e94ed0`
-- Architecture: dense decoder-only causal transformer
-- Parameters: 8,791,592,960
-- Adaptation: BF16 LoRA over attention and MLP projections
-- Tool wire: native tagged JSON
-- Maximum training sequence: 2,048 tokens
-- Deployment artifact: FP16-native merged checkpoint plus a separate BF16
-  adapter copy
+1. [System overview](docs/01-system-overview.md)
+2. [Data generation](docs/02-data-generation.md)
+3. [Granite architecture and PEFT](docs/03-model-and-peft.md)
+4. [Training, continuation, and recovery](docs/04-training-and-recovery.md)
+5. [Dual-head router](docs/05-dual-head-router.md)
+6. [Frozen evaluation](docs/06-evaluation.md)
+7. [Inference and ZeroGPU POC](docs/07-inference-and-poc.md)
+8. [End-to-end runbook](docs/08-end-to-end-runbook.md)
+9. [Code/file map](docs/reference/file-map.md) and
+   [artifact ledger](docs/reference/artifacts.md)
 
-The governed corpus contains 6,304 training, 1,349 validation, and 1,347 frozen
-test conversations. It covers all nine mock-bank tools, tool errors,
-clarification, banking FAQ, hard-negative private-field requests, OOD,
-multi-turn context, and ordered multi-tool calls. Every tool trajectory is
-replayed against deterministic synthetic state before inclusion.
+## Local quick start
 
-All generative rows are self-authored synthetic data under MIT. Banking77 and
-CLINC remain classifier/evaluation-only. The quarantined Bitext corpus
-contributes no rows to this release.
-
-See the [tool-use dataset card](data_cards/retail-bank-agent-sft.md) for split,
-coverage, provenance, and privacy details.
-
-Generate and validate the corpus:
+Install the root development and training dependencies:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/prepare_tool_sft_data.py \
-  --output-dir data/banking-v3-tool-sft \
-  --pilot-count 9000
+uv sync --extra dev --extra scale
 ```
 
-Inspect the guarded training plan without starting remote work:
+Generate a small, fully validated synthetic tool-use corpus:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
+PYTHONPATH=src uv run python scripts/banking_v2/prepare_tool_sft_data.py \
+  --output-dir /tmp/retail-bank-tool-sft-smoke \
+  --pilot-count 120
+```
+
+Regenerate the released dual-head classifier splits from checksum-pinned
+Banking77 and CLINC sources. The command fails if any released split digest
+changes:
+
+```bash
+PYTHONPATH=src uv run python scripts/banking_v2/prepare_dual_head_router_data.py
+```
+
+Inspect the Granite training plan without allocating a GPU or submitting a
+job:
+
+```bash
+PYTHONPATH=src uv run python scripts/banking_v2/cloud_train_tool_sft.py \
   --manifest data/banking-v3-tool-sft/manifest.json
 ```
 
-The full Hugging Face Jobs entry point is
-`scripts/banking_v2/hf_job_tool_sft.py`. It requires exact source, dataset, and
-base revisions; a five-hour outer timeout; a four-hour optimizer callback; and
-fresh-base adapter merge/reload parity before Hub upload.
-
-Launch through the durable-storage wrapper:
+Run the local quality gates:
 
 ```bash
-scripts/banking_v2/run_remote_training_job.sh \
-  "$(git rev-parse HEAD)" \
-  183e7e1ed1aba9c3d7155e7b83b64dc854935055
-```
-
-The complete implementation and acceptance contract is
-[the banking v3 specification](specs/banking-v3/01-tool-use-sft-plan.md).
-
-After the merged checkpoint is published, run the frozen 1,347-record,
-two-phase tool/final-response evaluation with exact revisions:
-
-```bash
-bash scripts/banking_v2/run_remote_tool_eval_job.sh \
-  "$(git rev-parse HEAD)" \
-  MODEL_REVISION \
-  183e7e1ed1aba9c3d7155e7b83b64dc854935055
-```
-
-The evaluation job performs deterministic decoding only. It executes no tools
-and applies no output repair; grounded-final scoring uses the dataset's
-replay-validated canonical tool results. Predictions, metadata, and the scored
-report are persisted to the mounted bucket and published under the model
-repository's `evaluation/` directory.
-
-The released checkpoint passed the complete 1,347-record frozen split:
-774/774 tool names and arguments, 678/678 executable trajectories, 96/96
-dependent multi-tool sequences, 63/63 clarifications, 258/258 FAQs, 30/30 OOD
-paths, and 1,119/1,119 grounded facts, with zero malformed/private calls,
-credential requests, false refusals, or OOD false accepts.
-
-The earlier dense-to-MoE design remains documented only as the control
-architecture in
-[the historical routing note](specs/banking-v2/04-dense-to-moe-routing.md).
-
-## Dual-head classifier
-
-The CPU classifier shares a DistilBERT encoder between:
-
-- a binary supported-banking/OOD head;
-- a 77-way Banking77 intent head.
-
-Its intent predictions are diagnostics, not model context or orchestration
-commands.
-The released artifact reports intent macro F1 `0.948425`, in-domain
-false-refusal rate `0.005099`, and OOD false-accept rate `0.020109`. The
-calibrated lower boundary is `0.165`; the POC treats scores from `0.165` to
-`0.50` as uncertain and asks the 9B model to adjudicate them.
-
-## Public POC
-
-The Gradio application under `poc/retail-bank-customer-service-poc/` includes:
-
-- two static demonstration identities selected through Space authentication;
-- the CPU dual-head classifier;
-- an 8,192-token, complete-interaction conversation budget;
-- model-authored direct answers, clarification, tools, and grounded finals;
-- session-isolated synthetic SQLite state;
-- diagnostics with the exact model ID, revision, runtime device, raw model
-  passes, generated calls, results, and prompt/output hashes;
-- preset read, write, multi-turn, FAQ, and OOD scenarios.
-
-ZeroGPU owns the model generation boundary. If GPU inference fails, the
-application reports the failure and does not synthesize a Python banking
-answer.
-
-## Verification
-
-```bash
-python -m pytest -q tests
-ruff check .
-MYPYPATH=src mypy src scripts tests
+PYTHONPATH=src uv run pytest -q tests
+uv run ruff check .
+MYPYPATH=src uv run mypy src scripts tests
 uv lock --check
 ```
 
-POC verification also requires its application dependencies and a live
-ZeroGPU round trip:
+The paid Hugging Face Jobs commands, checkpoint persistence requirements, and
+recovery paths are documented in
+[training and recovery](docs/04-training-and-recovery.md). They are
+intentionally separate from the safe local quick start.
 
-```bash
-POC_SKIP_MODEL_LOAD=1 POC_SKIP_ROUTER_LOAD=1 \
-  pytest -q poc/retail-bank-customer-service-poc/tests
-```
+## Release facts
+
+The generative corpus contains 9,000 self-authored synthetic conversations:
+6,304 train, 1,349 validation, and 1,347 frozen test. It covers all nine public
+mock-bank tools, success and error results, clarification, FAQ, OOD,
+hard-negative private-field requests, multi-turn context, and dependent
+multi-tool sequences.
+
+The released model is a merged FP16 adaptation of
+`ibm-granite/granite-4.1-8b` at base revision
+`1504002f650e656a0a3789d99574df12e3e94ed0`. Training uses BF16 LoRA with rank
+32, alpha 64, dropout 0.05, a 2,048-token maximum sequence, and attention plus
+MLP projection targets. The retained adapter is published separately under the
+model repository's `adapter/` directory.
+
+The frozen 1,347-record evaluation passed 774/774 tool names and arguments,
+678/678 executable trajectories, 96/96 dependent multi-tool sequences, 63/63
+clarifications, 258/258 FAQs, 30/30 OOD paths, and 1,119/1,119 grounded facts.
 
 ## Repository map
 
 ```text
-configs/        pinned model candidates and training configurations
-data_cards/     classifier-dataset documentation
-data/sources/   governed source locks; generated data is ignored
-model_cards/    released model and classifier documentation
-poc/            authenticated Gradio/ZeroGPU application
-scripts/        corpus, training, evaluation, and Hub job entry points
-specs/          data, architecture, evaluation, and serving contracts
-src/hello_slm/  dataset, tool-wire, evaluator, router, and local UI modules
-tests/          banking regression tests
+configs/        Granite PEFT configuration
+data/sources/   pinned classifier source and release-digest lock
+data_cards/     published dataset-card sources
+docs/           canonical implementation and reproduction guide
+model_cards/    published model-card sources
+poc/            standalone authenticated Gradio/ZeroGPU application
+scripts/        data, training, recovery, evaluation, and Hub job entry points
+src/hello_slm/  reusable corpus, tool-wire, evaluator, and router modules
+tests/          root regression and documentation-contract tests
 ```
 
-## Safety and license
-
-Do not enter passwords, PINs, one-time codes, full account numbers, or
-payment-card details. The model may produce incorrect or inconsistent banking
-guidance. All operations affect only isolated synthetic state.
-
-Repository code and the released synthetic tool-use dataset are MIT licensed.
-Upstream base-model and classifier artifacts retain their own licenses.
+Repository code and the synthetic generative corpus are MIT licensed. Upstream
+models and classifier datasets retain their own licenses.

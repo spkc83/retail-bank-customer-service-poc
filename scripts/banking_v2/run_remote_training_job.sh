@@ -15,6 +15,10 @@ if [[ ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
   echo "SOURCE_COMMIT must be the exact 40-character lowercase Git commit." >&2
   exit 2
 fi
+if [[ ! "$dataset_revision" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "DATASET_REVISION must be the exact 40-character lowercase Git commit." >&2
+  exit 2
+fi
 
 curl --fail --silent --show-error --head "$script_url" >/dev/null
 

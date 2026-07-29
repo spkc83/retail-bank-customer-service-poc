@@ -10,12 +10,12 @@ import torch
 from torch import nn
 
 from hello_slm.banking_dual_head_router import (
+    ChatMessage,
     DualHeadRouterModel,
     LearnedBankingRouter,
     render_conversation_input,
     verify_router_artifact,
 )
-from hello_slm.banking_policy import ChatMessage
 
 
 class RecordingTokenizer:

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import io
 import json
@@ -24,20 +25,46 @@ CLINC_URL = "https://archive.ics.uci.edu/static/public/570/clinc150.zip"
 CLINC_ZIP_SHA256 = "0d8ecc3e1edd7b25cabde0177544ce536ddf773844bc80ef1a75f36e7f030ea2"
 CLINC_MEMBER = "clinc150_uci/data_oos_plus.json"
 CLINC_MEMBER_SHA256 = "bfcca9ae515623541dc1983c94c4ed7cae9d26b42ae47d74b972e51bb6f7a21f"
-DEFAULT_BANKING_SNAPSHOT = Path(
-    "data/sources/banking-v2-polyai-banking77-eval-source.jsonl"
+BANKING77_DATASET_ID = "PolyAI/banking77"
+BANKING77_RELEASE_REVISION = "90d4e2ee5521c04fc1488f065b8b083658768c57"
+BANKING77_SOURCE_REVISION = "57ec275d8078af65b7731c2a98be812d844a6d6b"
+BANKING77_URLS = {
+    split: (
+        "https://raw.githubusercontent.com/PolyAI-LDN/task-specific-datasets/"
+        f"{BANKING77_SOURCE_REVISION}/banking_data/{split}.csv"
+    )
+    for split in ("train", "test")
+}
+BANKING77_SHA256 = {
+    "train": "b06e26ac675513959a63135f11b94ea7786ed02da65db93a5650d8838cbc664b",
+    "test": "d12d6e3bc4c3103966ae786dc435913c0c563dfa328f5a3646d0e62cfeeb474d",
+}
+BANKING77_SNAPSHOT_SHA256 = (
+    "22ce056724069f431b477aa8478f1a42ce31286ad595cb7e53a838173052b340"
 )
-DEFAULT_BANKING_LOCK = Path("data/sources/banking-v2.lock.json")
 DEFAULT_OUTPUT_DIR = Path("data/banking-router-v1")
-DEFAULT_SOURCE_LOCK = Path("data/sources/banking-router-v1.lock.json")
+DEFAULT_RELEASE_LOCK = Path("data/sources/banking-router-v1.lock.json")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--banking-snapshot", type=Path, default=DEFAULT_BANKING_SNAPSHOT)
-    parser.add_argument("--banking-lock", type=Path, default=DEFAULT_BANKING_LOCK)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--source-lock", type=Path, default=DEFAULT_SOURCE_LOCK)
+    parser.add_argument(
+        "--source-lock",
+        type=Path,
+        help="Output lock path; defaults to SOURCE_LOCK.json inside --output-dir.",
+    )
+    parser.add_argument(
+        "--expected-release-lock",
+        type=Path,
+        default=DEFAULT_RELEASE_LOCK,
+        help="Tracked release lock whose split digests must be reproduced.",
+    )
+    parser.add_argument(
+        "--skip-release-digest-check",
+        action="store_true",
+        help="Allow intentional experimental splits that differ from the released dataset.",
+    )
     parser.add_argument("--validation-fraction", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=7101)
     return parser.parse_args()
@@ -45,17 +72,25 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    banking_lock = _read_json(args.banking_lock)
-    banking_source = banking_lock["sources"]["PolyAI/banking77"]
-    expected_banking_sha = str(banking_source["snapshot_sha256"])
-    actual_banking_sha = _file_sha256(args.banking_snapshot)
-    if actual_banking_sha != expected_banking_sha:
+    banking_payloads = {
+        split: _download(url) for split, url in BANKING77_URLS.items()
+    }
+    for split, payload in banking_payloads.items():
+        actual_sha = _bytes_sha256(payload)
+        expected_sha = BANKING77_SHA256[split]
+        if actual_sha != expected_sha:
+            raise ValueError(
+                f"Banking77 {split} CSV digest mismatch: "
+                f"expected {expected_sha}, got {actual_sha}"
+            )
+    banking_rows = parse_banking77_csvs(banking_payloads)
+    actual_banking_sha = _bytes_sha256(_jsonl_bytes(banking_rows))
+    if actual_banking_sha != BANKING77_SNAPSHOT_SHA256:
         raise ValueError(
-            "Banking77 snapshot digest mismatch: "
-            f"expected {expected_banking_sha}, got {actual_banking_sha}"
+            "Banking77 normalized snapshot digest mismatch: "
+            f"expected {BANKING77_SNAPSHOT_SHA256}, got {actual_banking_sha}"
         )
 
-    banking_rows = _read_jsonl(args.banking_snapshot)
     clinc_zip = _download(CLINC_URL)
     if _bytes_sha256(clinc_zip) != CLINC_ZIP_SHA256:
         raise ValueError("CLINC150 archive digest mismatch")
@@ -103,7 +138,10 @@ def main() -> int:
         "validation_fraction": args.validation_fraction,
         "sources": {
             "PolyAI/banking77": {
-                "revision": banking_source["revision"],
+                "revision": BANKING77_RELEASE_REVISION,
+                "source_repository_revision": BANKING77_SOURCE_REVISION,
+                "source_urls": BANKING77_URLS,
+                "source_sha256": BANKING77_SHA256,
                 "snapshot_sha256": actual_banking_sha,
                 "license": "CC-BY-4.0",
                 "allowed_use": ["dual-head-router-training", "evaluation"],
@@ -135,6 +173,12 @@ def main() -> int:
     )
     _write_data_card(args.output_dir / "README.md", manifest)
 
+    if not args.skip_release_digest_check:
+        verify_release_split_digests(
+            split_entries,
+            _read_json(args.expected_release_lock),
+        )
+
     source_lock = {
         "contract": "banking-dual-head-router-source-lock",
         "format_version": 1,
@@ -145,8 +189,9 @@ def main() -> int:
             entry["name"]: entry["sha256"] for entry in split_entries
         },
     }
-    args.source_lock.parent.mkdir(parents=True, exist_ok=True)
-    args.source_lock.write_text(
+    source_lock_path = args.source_lock or (args.output_dir / "SOURCE_LOCK.json")
+    source_lock_path.parent.mkdir(parents=True, exist_ok=True)
+    source_lock_path.write_text(
         json.dumps(source_lock, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -164,13 +209,61 @@ def _download(url: str) -> bytes:
             return response.read()
 
 
+def parse_banking77_csvs(payloads: dict[str, bytes]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for split in ("train", "test"):
+        payload = payloads.get(split)
+        if payload is None:
+            raise ValueError(f"Banking77 payload is missing the {split} split")
+        # Keep the released snapshot normalization: the original audited
+        # Banking77 importer passed split lines to DictReader, which removes
+        # decorative newlines inside a small number of quoted cells.
+        reader = csv.DictReader(payload.decode("utf-8-sig").splitlines())
+        for index, row in enumerate(reader):
+            text = str(row.get("text", ""))
+            label = str(row.get("label") or row.get("category") or "")
+            if not text or not label:
+                raise ValueError(f"Banking77 {split} row {index} is incomplete")
+            rows.append(
+                {
+                    "source_row_id": index,
+                    "split": split,
+                    "text": text,
+                    "label": label,
+                    "source_dataset": BANKING77_DATASET_ID,
+                    "source_revision": BANKING77_RELEASE_REVISION,
+                    "license": "CC-BY-4.0",
+                    "trainable": False,
+                }
+            )
+    return rows
+
+
+def verify_release_split_digests(
+    split_entries: list[dict[str, Any]],
+    release_lock: dict[str, Any],
+) -> None:
+    expected = release_lock.get("prepared_split_sha256")
+    if not isinstance(expected, dict):
+        raise ValueError("release lock is missing prepared_split_sha256")
+    actual = {str(entry["name"]): str(entry["sha256"]) for entry in split_entries}
+    for split in ("train", "validation", "test"):
+        if actual.get(split) != expected.get(split):
+            raise ValueError(
+                f"{split} split digest drift: expected {expected.get(split)}, "
+                f"got {actual.get(split)}"
+            )
+
+
+def _jsonl_bytes(rows: list[dict[str, Any]]) -> bytes:
+    return "".join(
+        json.dumps(row, sort_keys=True) + "\n"
+        for row in rows
+    ).encode("utf-8")
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    with path.open(encoding="utf-8") as handle:
-        return [json.loads(line) for line in handle if line.strip()]
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:

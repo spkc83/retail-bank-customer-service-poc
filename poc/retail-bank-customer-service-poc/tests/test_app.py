@@ -262,18 +262,32 @@ def test_second_pass_failure_preserves_executed_write_in_history_and_diagnostics
     assert result[1][-1]["content"] == app_module.MODEL_FAILURE_RESPONSE
 
 
-def test_sensitive_value_is_rejected_before_router_or_model(
+def test_credential_like_text_reaches_router_and_model(
     app_module,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def should_not_run(*_args, **_kwargs):
-        raise AssertionError("router must not run")
-
-    monkeypatch.setattr(app_module, "route_query", should_not_run)
+    routed: list[str] = []
+    generated: list[str] = []
+    monkeypatch.setattr(
+        app_module,
+        "route_query",
+        lambda message, _history: routed.append(message) or route(),
+    )
+    monkeypatch.setattr(app_module, "count_tokens", lambda *_args: 100)
+    monkeypatch.setattr(
+        app_module,
+        "generate_text",
+        lambda messages, *_args: (
+            generated.append(messages[-1]["content"])
+            or "I can discuss banking support without using that credential."
+        ),
+    )
 
     result = app_module.run_model_turn("My PIN is 1234", [], [], request())
 
-    assert "never needs" in result[1][-1]["content"]
+    assert routed == ["My PIN is 1234"]
+    assert generated == ["My PIN is 1234"]
+    assert "9B direct_answer" in result[5]
     assert result[1] == result[2]
 
 

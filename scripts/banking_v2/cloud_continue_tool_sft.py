@@ -122,7 +122,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source-model-revision", default=DEFAULT_SOURCE_MODEL_REVISION)
     parser.add_argument("--base-model", default=BASE_MODEL)
     parser.add_argument("--base-revision", default=BASE_REVISION)
-    parser.add_argument("--family", default="granite")
+    parser.add_argument("--family", choices=("granite",), default="granite")
     parser.add_argument("--hub-dest", default=MODEL_REPO)
     parser.add_argument("--max-steps", type=int, default=600)
     parser.add_argument("--max-train-seconds", type=int, default=9_000)

@@ -8,11 +8,6 @@ __pycache__/
 build/
 dist/
 artifacts/
-data/raw/
-data/banking-v2/
 data/banking-v3-tool-sft/
 data/banking-router-v1/
-data/sources/banking-v2-bitext-source.csv
-data/sources/banking-v2-bitext-source.jsonl
-data/sources/banking-v2-polyai-banking77-eval-source.jsonl
 *.egg-info/

@@ -100,6 +100,13 @@ def test_tool_calls_have_stable_ids_typed_args_and_replay_hashes() -> None:
             assert record["expected"]["final_state_hash"].startswith("sha256:")
 
 
+def test_default_split_seed_matches_the_published_release() -> None:
+    assert generate_records(pilot_count=27) == generate_records(
+        pilot_count=27,
+        split_seed=711,
+    )
+
+
 def test_multi_call_plan_is_serialized_as_causal_tool_steps() -> None:
     record = next(
         record
@@ -293,14 +300,17 @@ def test_prepare_writes_manifest_report_and_is_split_isolated(tmp_path: Path) ->
     assert report["checks"]["tool_names_covered"] == sorted(
         tool["function"]["name"] for tool in public_tool_manifest()
     )
-    assert report["checks"]["banking77_generative_sft_rows"] == 0
-    assert report["checks"]["bitext_rows"] == 0
-    assert report["quarantine"]["bitext"]["trainable"] is False
+    assert report["source"] == {
+        "name": "self-authored-synthetic",
+        "license": "MIT",
+        "trainable": True,
+    }
     data_card = (tmp_path / "tool-sft" / "README.md").read_text(encoding="utf-8")
     assert "Retail Bank Agent Tool-Use SFT" in data_card
     assert "120 deterministic" in data_card
-    assert "Banking77" in data_card
-    assert "classifier/evaluation-only" in data_card
+    assert "self-authored synthetic data" in data_card
+    assert "never enter" in data_card
+    assert "generative splits" in data_card
 
     manifest = validate_banking_tool_sft_manifest(tmp_path / "tool-sft" / "manifest.json")
     assert manifest["contract"] == "banking-tool-sft-manifest"

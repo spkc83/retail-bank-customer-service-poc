@@ -278,10 +278,6 @@ class GraniteToolSyntaxAdapter(TaggedJsonToolSyntaxAdapter):
     family = "granite"
 
 
-class QwenToolSyntaxAdapter(TaggedJsonToolSyntaxAdapter):
-    family = "qwen"
-
-
 @dataclass(frozen=True)
 class AgentTurnResult:
     response: str

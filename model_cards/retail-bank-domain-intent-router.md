@@ -37,8 +37,9 @@ https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
 
 The hosted POC uses two serving boundaries: banking probability below `0.165`
 is OOD, probability at least `0.50` is in-domain, and the middle region is
-uncertain. Uncertain turns continue to the 9B agent with the top three intent
-predictions as advisory context.
+uncertain. Uncertain turns continue to the 9B agent. The top three intent
+predictions are displayed only as diagnostics; they do not enter the prompt,
+select a tool, or provide tool arguments.
 
 ## Data and licenses
 

@@ -1,6 +1,6 @@
 [run]
 name = "banking-tool-sft-granite"
-description = "Guarded banking-v3 tool-use SFT candidate for Granite 4.1 8B."
+description = "Released Granite 4.1 8B PEFT tool-use SFT configuration."
 format = "banking_v3_tool_sft_config"
 hub_dest = "spkc83/retail-bank-agent-9b"
 private_hub_repo = false

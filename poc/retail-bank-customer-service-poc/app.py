@@ -43,11 +43,9 @@ from model_service import (
     ToolCall,
     canonical_conversation,
 )
-from policy import (
+from responses import (
     MODEL_FAILURE_RESPONSE,
     OOD_RESPONSE,
-    SENSITIVE_RESPONSE,
-    contains_sensitive_value,
 )
 from router import ROUTER_REVISION, LearnedBankingRouter
 from state import BANK
@@ -139,17 +137,6 @@ def run_model_turn(
     username, session_hash = _identity(request)
     visible = _visible_history(visible_history)
     conversation = canonical_conversation(conversation_history)
-
-    if contains_sensitive_value(message):
-        return _direct_turn(
-            message=message,
-            response=SENSITIVE_RESPONSE,
-            visible=visible,
-            conversation=conversation,
-            snapshot=render_snapshot(BANK.snapshot(username, session_hash)),
-            activity="Credential-value input was rejected before routing or model inference.",
-            diagnostics="### Experiment diagnostics\n\nInput guard: credential value detected.",
-        )
 
     route = route_query(message, conversation)
     if route.get("route") == "out_of_domain":

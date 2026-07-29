@@ -17,6 +17,15 @@
       "generative_sft": false,
       "license": "CC-BY-4.0",
       "revision": "90d4e2ee5521c04fc1488f065b8b083658768c57",
+      "source_repository_revision": "57ec275d8078af65b7731c2a98be812d844a6d6b",
+      "source_sha256": {
+        "test": "d12d6e3bc4c3103966ae786dc435913c0c563dfa328f5a3646d0e62cfeeb474d",
+        "train": "b06e26ac675513959a63135f11b94ea7786ed02da65db93a5650d8838cbc664b"
+      },
+      "source_urls": {
+        "test": "https://raw.githubusercontent.com/PolyAI-LDN/task-specific-datasets/57ec275d8078af65b7731c2a98be812d844a6d6b/banking_data/test.csv",
+        "train": "https://raw.githubusercontent.com/PolyAI-LDN/task-specific-datasets/57ec275d8078af65b7731c2a98be812d844a6d6b/banking_data/train.csv"
+      },
       "snapshot_sha256": "22ce056724069f431b477aa8478f1a42ce31286ad595cb7e53a838173052b340"
     },
     "UCI/clinc150": {

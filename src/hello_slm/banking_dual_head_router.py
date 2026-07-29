@@ -3,17 +3,35 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import torch
 from safetensors.torch import load_file
 from torch import nn
 
-from hello_slm.banking_policy import ChatMessage, DomainRouteResult
-
 ROUTER_REPO_ID = "spkc83/retail-bank-domain-intent-router"
 ROUTER_REVISION = "136ee159d19cda7f585dd122907bbeb1ef4ec4db"
+
+MessageRole = Literal["system", "user", "assistant"]
+RouteDecision = Literal["in_domain", "out_of_domain"]
+
+
+@dataclass(frozen=True)
+class ChatMessage:
+    role: MessageRole
+    content: str
+
+
+@dataclass(frozen=True)
+class DomainRouteResult:
+    route: RouteDecision
+    confidence: float
+    intent: str | None
+    reason: str
+    banking_probability: float | None = None
+    intent_confidence: float | None = None
 
 
 class DualHeadRouterModel(nn.Module):

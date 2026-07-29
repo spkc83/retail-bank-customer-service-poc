@@ -91,6 +91,24 @@ def test_dry_run_writes_valid_teacher_responses_without_model_download(tmp_path:
         teacher.validate_response_row(request, response)
 
 
+def test_live_realization_requires_explicit_model_and_revision(tmp_path: Path) -> None:
+    teacher = _load_teacher_module()
+    request_path = tmp_path / "teacher-requests.jsonl"
+    response_path = tmp_path / "teacher-responses.jsonl"
+    _write_jsonl(request_path, _request_rows(1))
+
+    with pytest.raises(
+        teacher.TeacherRealizationError,
+        match="--model and --revision are required",
+    ):
+        teacher.realize_teacher_requests(
+            teacher.RealizerConfig(
+                input_requests=request_path,
+                output_responses=response_path,
+            )
+        )
+
+
 def test_resume_skips_existing_rows_and_appends_only_missing(tmp_path: Path) -> None:
     teacher = _load_teacher_module()
     request_path = tmp_path / "teacher-requests.jsonl"

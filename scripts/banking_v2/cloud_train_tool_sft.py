@@ -156,7 +156,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--base-model", default=DEFAULT_BASE_MODEL)
     parser.add_argument("--base-revision", default=DEFAULT_BASE_REVISION)
-    parser.add_argument("--family", default=DEFAULT_FAMILY)
+    parser.add_argument("--family", choices=("granite",), default=DEFAULT_FAMILY)
     parser.add_argument("--max-steps", type=int, default=1_000)
     parser.add_argument(
         "--max-train-seconds",

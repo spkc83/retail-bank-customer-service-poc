@@ -146,7 +146,7 @@ def test_assistant_only_labels_include_tool_calls_and_final_but_not_tool_results
     assert all(span.role == "assistant" and span.label for span in rendered.span_map)
 
 
-def test_repeated_tool_calls_keep_stable_distinct_call_ids() -> None:
+def test_granite_repeated_tool_calls_keep_stable_distinct_call_ids() -> None:
     messages = tool_chain_messages()
     messages[1]["tool_calls"] = [
         {
@@ -166,7 +166,7 @@ def test_repeated_tool_calls_keep_stable_distinct_call_ids() -> None:
     messages[2]["name"] = "freeze_card"
     messages[3]["tool_call_id"] = "call_repeat_1"
     messages[3]["name"] = "freeze_card"
-    adapter = ToolWireAdapter(TemplateTokenizer(), family="qwen3", public_tool_manifest=MANIFEST)
+    adapter = ToolWireAdapter(TemplateTokenizer(), family="granite", public_tool_manifest=MANIFEST)
 
     rendered = adapter.render_training(messages, max_seq_len=2048)
 
@@ -182,7 +182,7 @@ def test_whole_chain_truncation_drops_older_chain_without_splitting_latest() -> 
         {"role": "assistant", "content": "old answer", "loss": True},
     ]
     latest = tool_chain_messages()
-    adapter = ToolWireAdapter(TemplateTokenizer(), family="qwen", public_tool_manifest=MANIFEST)
+    adapter = ToolWireAdapter(TemplateTokenizer(), family="granite", public_tool_manifest=MANIFEST)
     latest_len = len(adapter.render_training(system + latest, max_seq_len=2048).rendered_text)
 
     rendered = adapter.render_training(system + old_chain + latest, max_seq_len=latest_len + 8)
@@ -238,7 +238,7 @@ def test_parse_tool_call_blocks_validates_without_repair_or_argument_inference()
 
 
 def test_argument_type_and_range_validation_fail_closed() -> None:
-    adapter = ToolWireAdapter(TemplateTokenizer(), family="qwen3", public_tool_manifest=MANIFEST)
+    adapter = ToolWireAdapter(TemplateTokenizer(), family="granite", public_tool_manifest=MANIFEST)
 
     with pytest.raises(ValueError, match="invalid type"):
         adapter.parse_assistant(
@@ -261,17 +261,24 @@ def test_tool_result_correlation_is_validated_before_tokenization() -> None:
         adapter.render_training(messages, max_seq_len=2048)
 
 
-def test_all_family_aliases_render_tools_through_same_contract() -> None:
-    for family in ["granite", "qwen", "qwen3"]:
-        adapter = ToolWireAdapter(TemplateTokenizer(), family=family, public_tool_manifest=MANIFEST)
-        rendered_tools = adapter.render_tools()
+def test_granite_renders_the_public_tool_contract() -> None:
+    adapter = ToolWireAdapter(
+        TemplateTokenizer(),
+        family="granite",
+        public_tool_manifest=MANIFEST,
+    )
 
-        assert rendered_tools[0]["type"] == "function"
-        assert rendered_tools[0]["function"]["name"] == "list_cards"
-        assert adapter.render_generation(tool_chain_messages()[:1])["tools"] == rendered_tools
+    rendered_tools = adapter.render_tools()
+
+    assert rendered_tools[0]["type"] == "function"
+    assert rendered_tools[0]["function"]["name"] == "list_cards"
+    assert adapter.render_generation(tool_chain_messages()[:1])["tools"] == rendered_tools
 
 
-def test_qwen35_and_ministral_are_explicitly_pending_bakeoff() -> None:
-    for family in ["qwen3.5", "ministral"]:
-        with pytest.raises(NotImplementedError, match="pending bakeoff"):
-            ToolWireAdapter(TemplateTokenizer(), family=family, public_tool_manifest=MANIFEST)
+def test_non_granite_tool_wire_is_rejected() -> None:
+    with pytest.raises(ValueError, match="only supports the Granite family"):
+        ToolWireAdapter(
+            TemplateTokenizer(),
+            family="other",
+            public_tool_manifest=MANIFEST,
+        )

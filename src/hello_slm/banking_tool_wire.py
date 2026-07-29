@@ -17,11 +17,9 @@ from typing import Any, Literal
 import torch
 from torch import Tensor
 
-ToolFamily = Literal["granite", "qwen", "qwen3", "qwen35", "ministral"]
+ToolFamily = Literal["granite"]
 
 IGNORED_LABEL = -100
-SUPPORTED_FAMILIES: frozenset[str] = frozenset({"granite", "qwen", "qwen3"})
-PENDING_BAKEOFF_FAMILIES: frozenset[str] = frozenset({"qwen35", "ministral"})
 TOOL_CALL_PATTERN = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 
 
@@ -64,21 +62,11 @@ def _stable_json(value: Any) -> str:
 
 def _normalize_family(family: str) -> ToolFamily:
     normalized = family.lower().replace("-", "").replace("_", "")
-    aliases = {
-        "granite": "granite",
-        "ibmgranite": "granite",
-        "qwen": "qwen",
-        "qwen3": "qwen3",
-        "qwen35": "qwen35",
-        "qwen3.5": "qwen35",
-        "qwen3_5": "qwen35",
-        "ministral": "ministral",
-        "mistral": "ministral",
-    }
-    selected = aliases.get(normalized)
-    if selected not in SUPPORTED_FAMILIES and selected not in PENDING_BAKEOFF_FAMILIES:
-        raise ValueError(f"unsupported tool-wire family: {family!r}")
-    return selected  # type: ignore[return-value]
+    if normalized not in {"granite", "ibmgranite"}:
+        raise ValueError(
+            f"the active tool wire only supports the Granite family, got {family!r}"
+        )
+    return "granite"
 
 
 def _copy_message(message: Mapping[str, Any]) -> dict[str, Any]:
@@ -116,10 +104,6 @@ class ToolWireAdapter:
     ) -> None:
         self.tokenizer = tokenizer
         self.family: ToolFamily = _normalize_family(family)
-        if self.family in PENDING_BAKEOFF_FAMILIES:
-            raise NotImplementedError(
-                f"{self.family} tool-wire syntax is pending bakeoff; use granite/qwen/qwen3"
-            )
         self.public_tool_manifest = tuple(
             _normalize_manifest_tool(tool) for tool in public_tool_manifest
         )

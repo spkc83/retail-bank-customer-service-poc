@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prepare banking-v3 tool-use SFT data.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--pilot-count", type=int, default=1200)
-    parser.add_argument("--split-seed", type=int, default=7303)
+    parser.add_argument("--split-seed", type=int, default=711)
     parser.add_argument("--synthetic-bank", type=Path, default=DEFAULT_SYNTHETIC_BANK_PATH)
     parser.add_argument(
         "--export-teacher-requests",
@@ -307,7 +307,7 @@ def public_tool_manifest() -> list[dict[str, Any]]:
 def generate_records(
     *,
     pilot_count: int = 1200,
-    split_seed: int = 7303,
+    split_seed: int = 711,
     synthetic_bank_path: Path = DEFAULT_SYNTHETIC_BANK_PATH,
 ) -> list[dict[str, Any]]:
     if pilot_count < len(_base_scenarios()):
@@ -326,7 +326,7 @@ def prepare(
     *,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     pilot_count: int = 1200,
-    split_seed: int = 7303,
+    split_seed: int = 711,
     synthetic_bank_path: Path = DEFAULT_SYNTHETIC_BANK_PATH,
     export_teacher_requests: Path | None = None,
     teacher_responses: Path | None = None,
@@ -373,14 +373,6 @@ def prepare(
                 "role": "tool-use-sft",
                 "license": "MIT",
                 "trainable": True,
-            },
-            "PolyAI/banking77": {
-                "role": "classifier-eval-only",
-                "trainable": False,
-            },
-            "bitext/Bitext-retail-banking-llm-chatbot-training-dataset": {
-                "role": "quarantine-or-rewrite-only",
-                "trainable": False,
             },
         },
     }
@@ -1739,19 +1731,11 @@ def _build_report(
                 if message["role"] == "tool" and message["content"]["ok"] is False
             ),
             "paths": dict(paths),
-            "banking77_generative_sft_rows": 0,
-            "bitext_rows": 0,
         },
-        "quarantine": {
-            "bitext": {
-                "trainable": False,
-                "reason": "Bitext rows require audit/rewrite before any v3 tool-use inclusion.",
-            }
-        },
-        "source_roles": {
-            "Banking77/CLINC": "classifier-evaluation-only",
-            "Bitext": "audit-quarantine-only",
-            "self-authored-synthetic": "tool-use-sft",
+        "source": {
+            "name": "self-authored-synthetic",
+            "license": "MIT",
+            "trainable": True,
         },
     }
 
@@ -1856,9 +1840,9 @@ system, user, and tool-result tokens are context only.
 
 ## Source policy
 
-All included rows are self-authored synthetic data under MIT. Banking77 and
-CLINC are classifier/evaluation-only and contribute no generative SFT rows.
-Bitext data remains quarantined and contributes no rows.
+All included rows are self-authored synthetic data under MIT. External
+classifier corpora are prepared by a separate pipeline and never enter these
+generative splits.
 
 This dataset contains no real customers, credentials, accounts, or financial
 events. It is for a research demonstration, not production banking.

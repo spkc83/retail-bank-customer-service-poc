@@ -17,9 +17,9 @@ https://github.com/spkc83/retail-bank-servicing
 Trained dual-head router:
 https://huggingface.co/spkc83/retail-bank-domain-intent-router
 
-- Train rows: 44,832
-- Validation rows: 8,669
-- Test rows: 16,380
+- Train rows: 44,432
+- Validation rows: 8,589
+- Test rows: 16,260
 - Domain labels: OOD=0, supported retail banking=1
 - Intent labels: 77 Banking77 intents; `-100` means no intent supervision
 - Licenses: CC-BY-4.0

@@ -16,8 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from hello_slm.config import canonical_json_bytes
 
-DEFAULT_TEACHER_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
-DEFAULT_TEACHER_REVISION = "cdbee75f17c01a7cc42f958dc650907174af0554"
 TEACHER_PROMPT_VERSION = "banking-tool-sft-teacher/v1"
 PRIVATE_VALUE_RE = re.compile(r"\b(?:\d[ -]?){9,}\b")
 DIGIT_RE = re.compile(r"\d{2,}")
@@ -36,8 +34,8 @@ class TeacherRealizationError(ValueError):
 class RealizerConfig:
     input_requests: Path
     output_responses: Path
-    model: str = DEFAULT_TEACHER_MODEL
-    revision: str = DEFAULT_TEACHER_REVISION
+    model: str = ""
+    revision: str = ""
     device: str = "cuda"
     batch_size: int = 4
     max_new_tokens: int = 220
@@ -56,8 +54,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--input-requests", type=Path, required=True)
     parser.add_argument("--output-responses", type=Path, required=True)
-    parser.add_argument("--model", default=DEFAULT_TEACHER_MODEL)
-    parser.add_argument("--revision", default=DEFAULT_TEACHER_REVISION)
+    parser.add_argument(
+        "--model",
+        help="Exact teacher model ID. Required unless --dry-run is used.",
+    )
+    parser.add_argument(
+        "--revision",
+        help="Exact immutable teacher model revision. Required unless --dry-run is used.",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--max-tokens", type=int, default=220)
@@ -69,8 +73,8 @@ def main(argv: list[str] | None = None) -> int:
         config = RealizerConfig(
             input_requests=args.input_requests,
             output_responses=args.output_responses,
-            model=str(args.model),
-            revision=str(args.revision),
+            model=str(args.model or ""),
+            revision=str(args.revision or ""),
             device=str(args.device),
             batch_size=int(args.batch_size),
             max_new_tokens=int(args.max_tokens),
@@ -91,6 +95,10 @@ def realize_teacher_requests(config: RealizerConfig) -> dict[str, Any]:
         raise TeacherRealizationError("--batch-size must be at least 1")
     if config.max_new_tokens < 1:
         raise TeacherRealizationError("--max-tokens must be at least 1")
+    if not config.dry_run and (not config.model or not config.revision):
+        raise TeacherRealizationError(
+            "--model and --revision are required unless --dry-run is used"
+        )
 
     requests = _read_jsonl(config.input_requests)
     for row in requests:

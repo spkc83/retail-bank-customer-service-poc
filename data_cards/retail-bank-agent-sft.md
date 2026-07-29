@@ -60,9 +60,9 @@ path-specific content for clarification, FAQ, OOD, and hard-negative rows.
 
 ## Source and privacy policy
 
-All included rows are self-authored synthetic data under MIT. Banking77 and
-CLINC are classifier/evaluation-only and contribute no generative SFT rows.
-Bitext remains quarantined and contributes no rows.
+All included rows are self-authored synthetic data under MIT. External
+classifier corpora are prepared by a separate pipeline and never enter the
+generative SFT splits.
 
 The dataset contains no real customers, credentials, accounts, or financial
 events. It is for research demonstrations, not production banking.

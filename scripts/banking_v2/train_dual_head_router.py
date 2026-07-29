@@ -729,11 +729,12 @@ dataset contains {data_manifest["report"]["split_counts"]["train"]} train,
 {data_manifest["report"]["split_counts"]["validation"]} validation, and
 {data_manifest["report"]["split_counts"]["test"]} test rows.
 
-## Safety boundary
+## Serving behavior
 
-If the artifact is unavailable or corrupt, serving must fail closed to the
-standard OOD response. This model does not replace credential-input or
-unsafe-output guards.
+The experimental POC fails startup if the pinned artifact cannot be loaded or
+verified. A per-turn classification failure is visible as an uncertain route
+and delegates the turn to the 9B model. Intent predictions are diagnostics and
+are not generation context or orchestration commands.
 """
 
 

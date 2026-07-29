@@ -98,7 +98,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--predictions-jsonl", type=Path)
     parser.add_argument("--metadata-json", type=Path)
     parser.add_argument("--split", default="test")
-    parser.add_argument("--family", default=DEFAULT_FAMILY)
+    parser.add_argument("--family", choices=("granite",), default=DEFAULT_FAMILY)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("bf16", "fp16", "fp32"), default="fp16")
     parser.add_argument("--max-new-tokens-first", type=int, default=192)
