@@ -109,10 +109,15 @@ class LearnedBankingRouter:
         if not exchanges:
             return current
         previous_user, previous_assistant = exchanges[-1]
-        if _has_contextual_reference(normalized_message):
+        if (
+            _has_contextual_reference(normalized_message)
+            and _is_ambiguous_contextual_fragment(normalized_message)
+        ):
             context_reason = "contextual_reference"
-        elif _is_short_follow_up(normalized_message) and _invites_follow_up(
-            previous_assistant
+        elif (
+            _is_short_follow_up(normalized_message)
+            and _is_ambiguous_contextual_fragment(normalized_message)
+            and _invites_follow_up(previous_assistant)
         ):
             context_reason = "short_follow_up"
         else:
@@ -278,6 +283,83 @@ def _recent_exchanges(
 def _is_short_follow_up(text: str) -> bool:
     words = re.findall(r"[A-Za-z0-9]+", text)
     return 0 < len(words) <= 6 and len(text) <= 64
+
+
+def _is_ambiguous_contextual_fragment(text: str) -> bool:
+    words = {word.casefold() for word in re.findall(r"[A-Za-z0-9]+", text)}
+    if not words:
+        return False
+    fragment_vocabulary = {
+        "a",
+        "about",
+        "again",
+        "also",
+        "an",
+        "and",
+        "another",
+        "are",
+        "be",
+        "block",
+        "can",
+        "cancel",
+        "care",
+        "check",
+        "could",
+        "did",
+        "dispute",
+        "do",
+        "does",
+        "else",
+        "for",
+        "freeze",
+        "happen",
+        "happened",
+        "is",
+        "it",
+        "list",
+        "make",
+        "me",
+        "my",
+        "need",
+        "next",
+        "no",
+        "now",
+        "of",
+        "ok",
+        "okay",
+        "one",
+        "ones",
+        "or",
+        "other",
+        "please",
+        "replace",
+        "same",
+        "show",
+        "stop",
+        "sure",
+        "take",
+        "tell",
+        "that",
+        "the",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "those",
+        "to",
+        "too",
+        "want",
+        "was",
+        "were",
+        "what",
+        "which",
+        "will",
+        "would",
+        "yes",
+    }
+    return all(word.isdigit() or word in fragment_vocabulary for word in words)
 
 
 def _invites_follow_up(text: str) -> bool:

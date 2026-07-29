@@ -173,3 +173,35 @@ def test_context_remains_active_after_a_fragment_was_resolved(
     assert result["route"] == "uncertain"
     assert result["context_applied"] is True
     assert result["context_reason"] == "contextual_reference"
+
+
+def test_explicit_ood_subject_is_not_rescued_by_a_reference_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = LearnedBankingRouter(
+        tokenizer=FakeTokenizer(),
+        model=FakeModel([8.0, -8.0], [3.0, 1.0]),
+        intent_labels=("card", "other"),
+        threshold=0.98,
+        max_length=32,
+    )
+    predictions = iter(
+        [
+            {"route": "out_of_domain", "intent": "other"},
+        ]
+    )
+    monkeypatch.setattr(router, "_predict", lambda _rendered: next(predictions))
+
+    result = router.classify(
+        "what about the weather there?",
+        [
+            {"role": "user", "content": "Show my account balances."},
+            {
+                "role": "assistant",
+                "content": "You have two synthetic accounts.",
+            },
+        ],
+    )
+
+    assert result["route"] == "out_of_domain"
+    assert result["context_applied"] is False
