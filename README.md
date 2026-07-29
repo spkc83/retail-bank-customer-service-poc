@@ -28,7 +28,7 @@ per token.
 ```text
 Authenticated request
   → credential guard
-  → CPU dual-head router gates high-confidence OOD requests
+  → CPU-resident dual-head router gates OOD requests
   → intent probabilities guide the ZeroGPU 9B MoE agent
   → 9B model responds directly or emits Qwen tool calls
   → session-isolated synthetic SQLite executes generated calls
@@ -36,7 +36,7 @@ Authenticated request
 ```
 
 The POC is a behavioral experiment. The dual-head router exposes a three-way
-domain decision plus its top three intent predictions. Only high-confidence OOD
+domain decision plus its top three intent predictions. Only OOD
 bypasses the 9B model. For allowed and uncertain turns, the 9B model owns
 conversation, clarification, tool selection, tool arguments, and final wording.
 The runtime performs mechanical parsing and direct mock-tool execution; it does
@@ -178,7 +178,7 @@ The deployable Gradio source is in
 `poc/retail-bank-customer-service-poc/`. It includes:
 
 - two static demonstration accounts configured through a Space secret;
-- a learned CPU domain/intent router with high-confidence OOD gating and
+- a learned CPU domain/intent router with OOD gating and
   top-three intent guidance;
 - CPU session-isolated synthetic SQLite state;
 - ZeroGPU 9B-owned conversation and Qwen tool calling;
@@ -195,10 +195,11 @@ tokens for generation. The current synthetic data has limited address-history
 coverage through service-case records; it is not a full customer-profile audit
 log.
 
-ZeroGPU compatibility requires the decorated model event to be registered
-directly in the Gradio event graph. CPU dispatch handles credential-value
-rejection and high-confidence OOD only; greetings and all other allowed or
-uncertain turns enter the model event. If ZeroGPU fails, the UI reports model
+ZeroGPU compatibility requires the complete chat turn to be registered directly
+in the Gradio event graph. Every submitted turn enters that one managed event;
+the CPU-resident dual-head router runs inside its worker, OOD
+returns the stock response without invoking the 9B generator, and all other
+turns continue to model inference. If ZeroGPU fails, the UI reports model
 unavailability and does not synthesize a banking response on CPU.
 
 ## Verification

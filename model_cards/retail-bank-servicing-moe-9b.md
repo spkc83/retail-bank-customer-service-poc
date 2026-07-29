@@ -148,9 +148,10 @@ In the public
 this checkpoint is the conversational and tool-calling agent:
 
 1. Static Gradio authentication identifies one of two synthetic demo users.
-2. A CPU dual-head router gates only high-confidence OOD and supplies ranked
-   intent guidance.
-3. The ZeroGPU 9B model responds directly or emits one or more Qwen tool calls.
+2. One directly registered ZeroGPU event owns the complete turn.
+3. Its CPU-resident dual-head router gates OOD and supplies
+   ranked intent guidance; accepted and uncertain turns continue to the 9B
+   model, which responds directly or emits one or more Qwen tool calls.
 4. A session-isolated SQLite backend executes generated calls against synthetic
    records.
 5. Tool results return to the model for a second customer-facing generation.
@@ -172,9 +173,11 @@ replace model responses with deterministic grounded templates.
 
 The public
 [Retail Bank Servicing POC](https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc)
-authenticates two static demo users, runs the learned CPU dual-head router, and
-executes this checkpoint on ZeroGPU for conversation, tool calling, and final
-response generation. Generated calls operate only on isolated synthetic state.
+authenticates two static demo users and runs each complete chat turn as one
+direct ZeroGPU event. The event applies the learned CPU-resident dual-head
+router, then uses this checkpoint for accepted/uncertain conversation, tool
+calling, and final response generation. Generated calls operate only on
+isolated synthetic state.
 
 The deployment uses eager expert execution for compatibility with the current
 ZeroGPU partition. If ZeroGPU is unavailable, the POC reports model

@@ -5,9 +5,10 @@
 The public POC evaluates a model-driven dual-head-router plus 9B-agent design:
 
 ```text
-credential-value guard
-  → dual-head CPU classifier
-  → high-confidence OOD stock response, or
+direct registered ZeroGPU chat event
+  → credential-value guard
+  → CPU-resident dual-head classifier inside the managed worker
+  → OOD stock response, or
   → 9B model with intent guidance and token-budgeted history
   → direct response or one generated batch of Qwen tool calls
   → synthetic backend tool results
@@ -15,9 +16,10 @@ credential-value guard
 ```
 
 The domain head produces `in_domain`, `uncertain`, or `out_of_domain`.
-`p(in_domain) >= 0.98` is in-domain, `p(in_domain) <= 0.02` is high-confidence
-OOD, and the middle region is uncertain. Only high-confidence OOD bypasses the
-9B model. The intent head always exposes its top three predictions; they are
+`p(in_domain) >= 0.98` is confidently in-domain, `p(in_domain) < 0.50` is OOD
+by the binary head's decision boundary, and the middle region is uncertain.
+OOD bypasses the 9B generator, although every turn enters the managed ZeroGPU
+event. The intent head always exposes its top three predictions; they are
 included as advisory model context rather than mapped to backend workflows.
 
 ## Model and tool ownership
@@ -74,7 +76,7 @@ visible if second-pass generation later fails.
 
 - Banking77 intent macro F1 at least 0.90;
 - in-domain false-refusal rate at most 2%;
-- held-out high-confidence OOD false-accept rate at most 1%;
+- held-out OOD false-accept rate at most 1%;
 - greetings and customer-service small talk reach the 9B model;
 - tool-name accuracy at least 0.95 on supported held-out scenarios;
 - tool-argument accuracy at least 0.90;
