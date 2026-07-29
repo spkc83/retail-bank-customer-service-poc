@@ -187,6 +187,11 @@ def test_reflection_can_recover_a_missing_tool_call_without_hiding_base_output()
         "assistant",
     ]
     assert len(model.calls) == 3
+    reflection_messages = model.calls[1]["messages"]
+    assert reflection_messages[-1]["role"] == "user"
+    assert "TOOL_USE_REVIEW_REQUEST" in reflection_messages[-1]["content"]
+    assert "How many accounts do I have?" in reflection_messages[-1]["content"]
+    assert "Please provide your account number" in reflection_messages[-1]["content"]
 
 
 def test_invalid_reflection_output_preserves_the_unmodified_base_answer() -> None:
