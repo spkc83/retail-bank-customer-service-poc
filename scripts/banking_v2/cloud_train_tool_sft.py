@@ -930,6 +930,15 @@ def run_remote_training(config: WorkerConfig) -> dict[str, Any]:
     train_output = trainer.train(
         resume_from_checkpoint=str(config.resume_from) if config.resume_from else None
     )
+    if config.trackio_project:
+        # Trackio's Trainer callback closes its run in on_train_end. A separate
+        # post-training evaluate() still emits an on_log event, which otherwise
+        # tries to write to that closed run.
+        from transformers.integrations import (  # type: ignore[import-not-found]
+            TrackioCallback,
+        )
+
+        trainer.remove_callback(TrackioCallback)
     eval_metrics = trainer.evaluate()
     trainer.save_model(str(config.output_dir / "adapter"))
     tokenizer.save_pretrained(config.output_dir / "adapter")

@@ -54,9 +54,21 @@ def test_job_command_preserves_five_hour_internal_budget() -> None:
     source = JOB_PATH.read_text(encoding="utf-8")
 
     assert 'default=14_400' in source
+    assert 'default="/data/retail-bank-agent-9b"' in source
     assert "snapshot_download(" in source
     assert 'repo_type="dataset"' in source
     assert "dataset manifest is unavailable" in source
     assert '"--precision",' in source
     assert '"bf16-lora",' in source
     assert '"--push-to-hub",' in source
+
+
+def test_post_training_evaluation_detaches_closed_trackio_callback() -> None:
+    worker_source = Path(
+        "scripts/banking_v2/cloud_train_tool_sft.py"
+    ).read_text(encoding="utf-8")
+
+    assert "trainer.remove_callback(TrackioCallback)" in worker_source
+    assert worker_source.index("trainer.remove_callback(TrackioCallback)") < (
+        worker_source.index("eval_metrics = trainer.evaluate()")
+    )

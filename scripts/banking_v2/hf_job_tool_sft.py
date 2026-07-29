@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--dataset-revision", required=True)
     parser.add_argument("--manifest")
-    parser.add_argument("--output-dir", default="/tmp/retail-bank-agent-9b")
+    parser.add_argument("--output-dir", default="/data/retail-bank-agent-9b")
     parser.add_argument("--max-steps", type=int, default=3_000)
     parser.add_argument("--max-train-seconds", type=int, default=14_400)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=2)
