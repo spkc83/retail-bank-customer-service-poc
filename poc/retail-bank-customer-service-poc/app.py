@@ -239,8 +239,7 @@ def run_model_turn(
             )
             if result.tool_calls
             else (
-                "The 9B model authored the base answer, which was retained after "
-                "the labeled reflection pass."
+                "The 9B model authored the conversational answer directly."
             )
         ),
         _render_diagnostics(

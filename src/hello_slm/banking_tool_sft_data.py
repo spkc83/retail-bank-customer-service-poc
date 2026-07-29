@@ -17,7 +17,7 @@ from hello_slm.config import canonical_json_bytes, file_sha256
 BANKING_TOOL_SFT_CONTRACT = "banking-tool-sft/v1"
 BANKING_TOOL_SFT_MANIFEST_CONTRACT = "banking-tool-sft-manifest"
 CREATED_AT = "2026-07-29T00:00:00Z"
-GENERATOR_VERSION = "banking-tool-sft/v1.1-sequential"
+GENERATOR_VERSION = "banking-tool-sft/v1.2-realworld"
 DEFAULT_OUTPUT_DIR = Path("data/banking-v3-tool-sft")
 DEFAULT_SYNTHETIC_BANK_PATH = Path("poc/retail-bank-customer-service-poc/synthetic_bank.json")
 SPLITS = ("train", "validation", "test")
@@ -193,13 +193,19 @@ RECIPIENT_TYPES = (
     "Catering",
 )
 REALIZER_FINAL_PREFIXES = (
-    "Done.",
-    "Here is the update.",
-    "I checked that.",
-    "For this request,",
-    "Based on the banking result,",
-    "I can help with that.",
+    "",
+    "Done —",
+    "Here’s what I found:",
+    "Here is the current status:",
+    "I completed that —",
+    "Here’s the update:",
 )
+FAQ_REQUIRED_MARKERS = {
+    "faq-overdraft-v1": ("overdraft",),
+    "faq-mortgage-opening-v1": ("mortgage", "cannot open"),
+    "faq-deposit-opening-v1": ("account", "cannot open"),
+    "faq-savings-interest-v1": ("interest",),
+}
 
 
 class BankingToolSftDataError(ValueError):
@@ -501,14 +507,23 @@ def validate_records(
             raise BankingToolSftDataError(
                 f"{record_id} final assistant response is missing semantic content"
             )
+        if _final_assistant_message(record).get("loss") is not True:
+            raise BankingToolSftDataError(
+                f"{record_id} final assistant response must be trainable"
+            )
         normalized_final = normalized_user_text(final_response)
         response_path = record.get("expected", {}).get("path")
         required_path_markers = {
             "clarification": ("last four digits",),
-            "no_tool_banking_faq": ("overdraft",),
             "ood": ("retail banking",),
             "hard_negative": ("account numbers", "customer ids"),
         }
+        if response_path == "no_tool_banking_faq":
+            template_id = str(split_keys["template_id"])
+            required_path_markers["no_tool_banking_faq"] = FAQ_REQUIRED_MARKERS.get(
+                template_id,
+                (),
+            )
         missing_markers = [
             marker
             for marker in required_path_markers.get(str(response_path), ())
@@ -520,9 +535,12 @@ def validate_records(
                 f"{missing_markers}"
             )
         tool_call_ids: list[str] = []
+        context_tool_call_ids: list[str] = []
+        all_tool_call_ids: set[str] = set()
         canonical_calls: list[dict[str, Any]] = []
         tool_result_ids: list[str] = []
         pending_tool_call_id: str | None = None
+        pending_tool_call_is_target = False
         for message in record.get("messages", []):
             role = message.get("role")
             if role == "assistant" and message.get("tool_calls"):
@@ -534,19 +552,36 @@ def validate_records(
                     )
                 if message.get("content") is not None:
                     raise BankingToolSftDataError(f"{record_id} tool-call assistant has content")
-                if message.get("loss") is not True:
-                    raise BankingToolSftDataError(f"{record_id} assistant call is not labeled")
+                assistant_loss = message.get("loss")
+                if assistant_loss not in {True, False}:
+                    raise BankingToolSftDataError(
+                        f"{record_id} assistant call has invalid loss label"
+                    )
                 for call in message["tool_calls"]:
                     call_id = _required_str(call, "id")
+                    if call_id in all_tool_call_ids:
+                        raise BankingToolSftDataError(
+                            f"{record_id} has duplicate tool call id"
+                        )
+                    all_tool_call_ids.add(call_id)
                     index = call.get("index")
                     if index != 0:
                         raise BankingToolSftDataError(
                             f"{record_id} tool call index must restart at zero per "
                             "assistant message"
                         )
-                    global_call_index = len(tool_call_ids)
-                    if call_id != f"call_{record_id}_{global_call_index}":
-                        raise BankingToolSftDataError(f"{record_id} has unstable tool call id")
+                    if assistant_loss is True:
+                        global_call_index = len(tool_call_ids)
+                        if call_id != f"call_{record_id}_{global_call_index}":
+                            raise BankingToolSftDataError(
+                                f"{record_id} has unstable tool call id"
+                            )
+                    else:
+                        context_call_index = len(context_tool_call_ids)
+                        if call_id != f"context_{record_id}_{context_call_index}":
+                            raise BankingToolSftDataError(
+                                f"{record_id} has unstable context tool call id"
+                            )
                     function = call.get("function", {})
                     name = function.get("name")
                     arguments = function.get("arguments")
@@ -559,14 +594,18 @@ def validate_records(
                         raise BankingToolSftDataError(
                             f"{record_id} unsupported arguments for {name}: {sorted(extras)}"
                         )
-                    tool_call_ids.append(call_id)
                     pending_tool_call_id = call_id
-                    canonical_calls.append(
-                        {
-                            "name": str(name),
-                            "arguments": dict(arguments),
-                        }
-                    )
+                    pending_tool_call_is_target = assistant_loss is True
+                    if assistant_loss is True:
+                        tool_call_ids.append(call_id)
+                        canonical_calls.append(
+                            {
+                                "name": str(name),
+                                "arguments": dict(arguments),
+                            }
+                        )
+                    else:
+                        context_tool_call_ids.append(call_id)
             elif role == "tool":
                 if message.get("loss") is not False:
                     raise BankingToolSftDataError(f"{record_id} tool result is labeled")
@@ -582,13 +621,17 @@ def validate_records(
                 tool_call_id = _required_str(message, "tool_call_id")
                 if pending_tool_call_id != tool_call_id:
                     raise BankingToolSftDataError(f"{record_id} tool result correlation mismatch")
-                tool_result_ids.append(tool_call_id)
+                if pending_tool_call_is_target:
+                    tool_result_ids.append(tool_call_id)
                 pending_tool_call_id = None
+                pending_tool_call_is_target = False
             elif role == "assistant":
                 if pending_tool_call_id is not None:
                     raise BankingToolSftDataError(f"{record_id} tool result correlation mismatch")
-                if message.get("loss") is not True:
-                    raise BankingToolSftDataError(f"{record_id} final assistant is not labeled")
+                if message.get("loss") not in {True, False}:
+                    raise BankingToolSftDataError(
+                        f"{record_id} assistant message has invalid loss label"
+                    )
             elif role in {"system", "user"}:
                 if pending_tool_call_id is not None:
                     raise BankingToolSftDataError(f"{record_id} tool result correlation mismatch")
@@ -798,6 +841,45 @@ def _base_scenarios() -> tuple[Scenario, ...]:
             grounding_facts=("card.last4=4821", "card.status=frozen"),
         ),
         Scenario(
+            "emergency_card_freeze",
+            "emergency_card_freeze",
+            "stolen-list-then-freeze-v1",
+            "realization-000",
+            "alex.demo",
+            "synthetic-customer-alex",
+            "state-alex-001",
+            "My card was stolen. Freeze it.",
+            "I found your active debit card ending in 4821 and froze it.",
+            "multi_turn",
+            (ToolPlan("list_cards", {}), ToolPlan("freeze_card", {"last4": "4821"})),
+            grounding_facts=("card.last4=4821", "card.status=frozen"),
+        ),
+        Scenario(
+            "action_summary_followup",
+            "action_summary_followup",
+            "summarize-card-freeze-v1",
+            "realization-000",
+            "alex.demo",
+            "synthetic-customer-alex",
+            "state-alex-001",
+            "What did you just do?",
+            "I found the active debit card ending in 4821 and froze it.",
+            "multi_turn",
+            grounding_facts=("card.last4=4821", "card.status=frozen"),
+        ),
+        Scenario(
+            "no_action_followup",
+            "no_action_followup",
+            "summarize-clarification-v1",
+            "realization-000",
+            "alex.demo",
+            "synthetic-customer-alex",
+            "state-alex-001",
+            "Did you replace it already?",
+            "No. I only asked which card you want replaced; no card change was made.",
+            "multi_turn",
+        ),
+        Scenario(
             "clarify_card_missing",
             "clarification_card",
             "clarify-card-v1",
@@ -824,6 +906,90 @@ def _base_scenarios() -> tuple[Scenario, ...]:
             "balance; review your account disclosures or settings for exact terms.",
             "no_tool_banking_faq",
             grounding_facts=("faq=overdraft",),
+        ),
+        Scenario(
+            "mortgage_opening_faq",
+            "faq_mortgage",
+            "faq-mortgage-opening-v1",
+            "realization-000",
+            "alex.demo",
+            "synthetic-customer-alex",
+            "state-alex-001",
+            "Can you help me open a mortgage account?",
+            "I can explain mortgage basics and typical application steps, but this "
+            "demo cannot open or approve a mortgage. A real lender would review an "
+            "application and disclose its terms through an approved channel.",
+            "no_tool_banking_faq",
+            grounding_facts=("faq=mortgage",),
+        ),
+        Scenario(
+            "deposit_account_opening_faq",
+            "faq_deposit_opening",
+            "faq-deposit-opening-v1",
+            "realization-000",
+            "maya.demo",
+            "synthetic-customer-maya",
+            "state-maya-001",
+            "How would I open a new savings account?",
+            "This demo cannot open a real account. Banks typically ask you to choose "
+            "an account type, review disclosures, verify identity through an approved "
+            "channel, and provide opening funds when required.",
+            "no_tool_banking_faq",
+            grounding_facts=("faq=account",),
+        ),
+        Scenario(
+            "savings_interest_faq",
+            "faq_savings_interest",
+            "faq-savings-interest-v1",
+            "realization-000",
+            "maya.demo",
+            "synthetic-customer-maya",
+            "state-maya-001",
+            "How does interest on a savings account work?",
+            "Savings interest is generally calculated from the balance and stated "
+            "annual percentage yield, then credited on the bank’s schedule. Exact "
+            "rates and compounding rules depend on the account disclosures.",
+            "no_tool_banking_faq",
+            grounding_facts=("faq=savings_interest",),
+        ),
+        Scenario(
+            "small_talk_greeting",
+            "small_talk_greeting",
+            "small-talk-greeting-v1",
+            "realization-000",
+            "alex.demo",
+            "synthetic-customer-alex",
+            "state-alex-001",
+            "Yo, sup?",
+            "Hi! I’m ready to help with your banking questions or the synthetic "
+            "accounts in this demo.",
+            "conversation",
+        ),
+        Scenario(
+            "small_talk_checkin",
+            "small_talk_checkin",
+            "small-talk-checkin-v1",
+            "realization-000",
+            "maya.demo",
+            "synthetic-customer-maya",
+            "state-maya-001",
+            "How are you doing?",
+            "I’m ready to help. What banking question or account task would you like "
+            "to work on?",
+            "conversation",
+        ),
+        Scenario(
+            "conversational_thanks",
+            "conversational_thanks",
+            "conversation-thanks-v1",
+            "realization-000",
+            "alex.demo",
+            "synthetic-customer-alex",
+            "state-alex-001",
+            "Thanks for the help.",
+            "You’re welcome. I can help with another banking question whenever you’re "
+            "ready.",
+            "conversation",
         ),
         Scenario(
             "ood_weather",
@@ -938,7 +1104,7 @@ def _materialize_scenario(template: Scenario, occurrence: int) -> Scenario:
         final_response="",
         path=template.path,
         tool_plan=_materialized_tool_plan(template, slot),
-        pre_messages=_materialized_pre_messages(template, slot),
+        pre_messages=_materialized_pre_messages(template, slot, scenario_id),
         grounding_facts=_materialized_grounding_facts(template, slot),
         bank_payload=_synthetic_bank_payload(slot),
     )
@@ -1042,14 +1208,104 @@ def _materialized_tool_plan(template: Scenario, slot: dict[str, Any]) -> tuple[T
 
 
 def _materialized_pre_messages(
-    template: Scenario, slot: dict[str, Any]
+    template: Scenario,
+    slot: dict[str, Any],
+    record_id: str,
 ) -> tuple[dict[str, Any], ...]:
-    if template.scenario_family != "multi_turn_dispute":
-        return template.pre_messages
-    return (
-        _message("user", "I need to dispute a debit card charge.", loss=False),
-        _message("assistant", "Which merchant or transaction should I dispute?", loss=True),
-    )
+    family = template.scenario_family
+    if family == "multi_turn_dispute":
+        return (
+            _message("user", "I need to dispute a debit card charge.", loss=False),
+            _message("assistant", "Which merchant or transaction should I dispute?", loss=True),
+        )
+    if family == "action_summary_followup":
+        card_before = _context_card(slot, status="active")
+        card_after = _context_card(slot, status="frozen")
+        list_call_id = f"context_{record_id}_0"
+        freeze_call_id = f"context_{record_id}_1"
+        return (
+            _message(
+                "user",
+                "My wallet was stolen. Find my active debit card and freeze it.",
+                loss=False,
+            ),
+            {
+                "role": "assistant",
+                "content": None,
+                "loss": False,
+                "tool_calls": [
+                    {
+                        "id": list_call_id,
+                        "index": 0,
+                        "type": "function",
+                        "function": {"name": "list_cards", "arguments": {}},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": list_call_id,
+                "name": "list_cards",
+                "content": {"ok": True, "result": {"cards": [card_before]}},
+                "loss": False,
+            },
+            {
+                "role": "assistant",
+                "content": None,
+                "loss": False,
+                "tool_calls": [
+                    {
+                        "id": freeze_call_id,
+                        "index": 0,
+                        "type": "function",
+                        "function": {
+                            "name": "freeze_card",
+                            "arguments": {"last4": slot["card_last4"]},
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": freeze_call_id,
+                "name": "freeze_card",
+                "content": {
+                    "ok": True,
+                    "result": {"card": card_after, "simulated": True},
+                },
+                "loss": False,
+            },
+            _message(
+                "assistant",
+                f"I found your active debit card ending in {slot['card_last4']} and "
+                "froze it.",
+                loss=False,
+            ),
+        )
+    if family == "no_action_followup":
+        return (
+            _message("user", "Replace my card.", loss=False),
+            _message(
+                "assistant",
+                "Which card should I replace? Please provide only the last four digits "
+                "shown in the app; no other identifier is needed.",
+                loss=False,
+            ),
+        )
+    return template.pre_messages
+
+
+def _context_card(slot: dict[str, Any], *, status: str) -> dict[str, Any]:
+    customer_id = str(slot["customer_id"])
+    return {
+        "account_id": f"acct_{customer_id}_checking",
+        "card_id": f"card_{customer_id}_debit",
+        "customer_id": customer_id,
+        "last4": slot["card_last4"],
+        "name": slot["card_name"],
+        "status": status,
+        "wallet_status": "added",
+    }
 
 
 def _materialized_grounding_facts(
@@ -1070,7 +1326,12 @@ def _materialized_grounding_facts(
         return (f"transaction.description={slot['merchant']}", "transactions.limit=3")
     if family == "read_transfers":
         return (f"transfer.recipient={slot['pending_recipient']}", "transfer.status=pending")
-    if family in {"card_freeze", "multi_tool_card_action"}:
+    if family in {
+        "card_freeze",
+        "multi_tool_card_action",
+        "emergency_card_freeze",
+        "action_summary_followup",
+    }:
         return (f"card.last4={slot['card_last4']}", "card.status=frozen")
     if family == "card_replace":
         return (f"card.last4={slot['card_last4']}", "card.status=replacement_pending")
@@ -1115,9 +1376,17 @@ def _materialized_final_response(
         final = f"I opened a dispute for the {slot['merchant']} transaction."
     elif family == "transfer_cancel":
         final = f"The pending transfer to {slot['pending_recipient']} is now cancelled."
-    elif family == "multi_tool_card_action":
+    elif family in {"multi_tool_card_action", "emergency_card_freeze"}:
         final = (
             f"I found your active debit card ending in {slot['card_last4']} and froze it."
+        )
+    elif family == "action_summary_followup":
+        final = (
+            f"I found the active debit card ending in {slot['card_last4']} and froze it."
+        )
+    elif family == "no_action_followup":
+        final = (
+            "No. I only asked which card you want replaced; no card change was made."
         )
     elif family == "backend_error" and template.template_id == "cancel-completed-v1":
         final = (
@@ -1581,6 +1850,42 @@ def _message(role: str, content: str, *, loss: bool) -> dict[str, Any]:
 def _realize_user(template: Scenario, occurrence: int) -> str:
     stems = _user_stems(template)
     stem = _pick(stems, occurrence)
+    if template.scenario_family in {
+        "action_summary_followup",
+        "no_action_followup",
+        "small_talk_greeting",
+        "small_talk_checkin",
+        "conversational_thanks",
+    }:
+        qualifier = _pick(
+            (
+                "",
+                "I want to be sure.",
+                "Just so I understand.",
+                "Please be clear.",
+                "I’m checking the conversation.",
+                "Before we continue.",
+                "In this chat.",
+                "For my records.",
+                "One quick question.",
+                "I want to confirm.",
+            ),
+            occurrence // len(stems),
+        )
+        closer = _pick(
+            (
+                "",
+                "Thanks.",
+                "Keep it concise.",
+                "That is all I need.",
+                "I am following along.",
+                "I just want to confirm.",
+                "Please answer naturally.",
+                "Then we can continue.",
+            ),
+            occurrence // (len(stems) * 10),
+        )
+        return " ".join(part for part in (stem, qualifier, closer) if part).strip()
     opener = _pick(REALIZER_OPENERS, occurrence // len(stems))
     closer = _pick(REALIZER_CLOSERS, occurrence // (len(stems) * len(REALIZER_OPENERS)))
     context = _natural_context(template, occurrence)
@@ -1592,10 +1897,10 @@ def _realize_user(template: Scenario, occurrence: int) -> str:
 
 
 def _realize_final(template: Scenario, occurrence: int) -> str:
+    if not template.tool_plan:
+        return template.final_response.strip()
     prefix = _pick(REALIZER_FINAL_PREFIXES, occurrence)
-    if template.path in {"clarification", "ood", "hard_negative", "no_tool_banking_faq"}:
-        return f"{prefix} {template.final_response}"
-    return f"{prefix} {template.final_response}"
+    return f"{prefix} {template.final_response}".strip()
 
 
 def _user_stems(template: Scenario) -> tuple[str, ...]:
@@ -1713,6 +2018,43 @@ def _user_stems(template: Scenario) -> tuple[str, ...]:
             "list my cards first, then freeze the debit card",
             f"verify the card ending digits before freezing card {card_last4}",
         )
+    if family == "emergency_card_freeze":
+        return (
+            "my card was stolen freeze it",
+            "I lost my debit card lock it now",
+            "someone took my card freeze the active one",
+            "my wallet is gone secure my debit card",
+            "I cannot find my card please freeze it",
+            "my debit card is missing lock it",
+            "the card was stolen please secure it",
+            "freeze whichever debit card is active because I lost mine",
+            "my wallet was stolen find the active card and freeze it",
+            "I left my card somewhere lock it before it is used",
+            "secure my active debit card I think it was taken",
+            "my card is gone please find it and freeze it",
+        )
+    if family == "action_summary_followup":
+        return (
+            "what did you just do",
+            "what action did you take",
+            "can you summarize what you changed",
+            "did you actually freeze the card",
+            "which card did you freeze",
+            "remind me what you completed",
+            "what happened in the previous step",
+            "tell me exactly what was done",
+        )
+    if family == "no_action_followup":
+        return (
+            "did you replace it already",
+            "was any card changed",
+            "what did you do so far",
+            "did that request complete",
+            "have you taken any action yet",
+            "did you order the replacement",
+            "was the card status changed",
+            "summarize what happened",
+        )
     if family == "clarification_card":
         return (
             "replace my card",
@@ -1734,6 +2076,72 @@ def _user_stems(template: Scenario) -> tuple[str, ...]:
             "help me understand overdraft fee basics",
             "answer a general overdraft policy question",
             "summarize how overdraft charges are usually handled",
+        )
+    if family == "faq_mortgage":
+        return (
+            "can you help me open a mortgage account",
+            "how do I apply for a mortgage",
+            "explain the usual mortgage application steps",
+            "can this demo approve a home loan",
+            "what is involved in getting a mortgage",
+            "tell me how mortgage applications generally work",
+            "can you start a mortgage for me",
+            "what should I expect when applying for a home loan",
+        )
+    if family == "faq_deposit_opening":
+        return (
+            "how would I open a new savings account",
+            "can you open another checking account for me",
+            "what are the usual steps to open a bank account",
+            "can this demo create a new deposit account",
+            "explain how account opening generally works",
+            "what do banks usually require for a new account",
+            "help me understand opening a savings account",
+            "can I add a new checking account in this chat",
+        )
+    if family == "faq_savings_interest":
+        return (
+            "how does interest on a savings account work",
+            "explain savings interest in general",
+            "what does annual percentage yield mean for savings",
+            "how do banks calculate savings interest",
+            "when is savings interest usually credited",
+            "help me understand interest and compounding",
+            "what affects the interest earned on savings",
+            "give me a general explanation of savings rates",
+        )
+    if family == "small_talk_greeting":
+        return (
+            "yo sup",
+            "hello there",
+            "hey",
+            "good morning",
+            "hi how is it going",
+            "hey bank bot",
+            "hello can you help",
+            "hi I just logged in",
+        )
+    if family == "small_talk_checkin":
+        return (
+            "how are you doing",
+            "are you ready to help",
+            "what can you help me with",
+            "can we talk about my banking",
+            "are you the banking assistant",
+            "what do you do here",
+            "is anyone there",
+            "can you assist me today",
+        )
+    if family == "conversational_thanks":
+        return (
+            "thanks for the help",
+            "thank you",
+            "that was helpful",
+            "great thanks",
+            "I appreciate it",
+            "thanks that answers my question",
+            "perfect thank you",
+            "okay thanks",
         )
     if family == "ood":
         return (
@@ -1801,7 +2209,12 @@ def _natural_context(template: Scenario, seed: int) -> str:
         return f"{context} for an upcoming bill"
     if template.scenario_family in {"transaction_dispute", "multi_turn_dispute"}:
         return f"{context} after reviewing recent purchases"
-    if template.scenario_family in {"card_freeze", "card_replace", "multi_tool_card_action"}:
+    if template.scenario_family in {
+        "card_freeze",
+        "card_replace",
+        "multi_tool_card_action",
+        "emergency_card_freeze",
+    }:
         return f"{context} after checking my wallet"
     return context
 

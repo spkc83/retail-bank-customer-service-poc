@@ -6,7 +6,7 @@ from typing import Any
 MODEL_ID = os.environ.get("RETAIL_BANK_MODEL_ID", "spkc83/retail-bank-agent-9b")
 MODEL_REVISION = os.environ.get(
     "RETAIL_BANK_MODEL_REVISION",
-    "PIN_AFTER_TRAINING",
+    "b47e2028c8cf573eb50ef7fe1c48d67e2a08e865",
 )
 SKIP_MODEL_LOAD = os.environ.get("POC_SKIP_MODEL_LOAD") == "1"
 
@@ -30,10 +30,6 @@ else:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     spaces_runtime = spaces
-    if MODEL_REVISION == "PIN_AFTER_TRAINING":
-        raise RuntimeError(
-            "Set RETAIL_BANK_MODEL_REVISION to the verified merged model commit."
-        )
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token

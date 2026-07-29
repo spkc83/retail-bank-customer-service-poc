@@ -305,7 +305,11 @@ def first_phase_messages(record: Mapping[str, Any]) -> list[dict[str, Any]]:
     messages = messages_list(record)
     if expected_requires_tool(record):
         for index, message in enumerate(messages):
-            if message.get("role") == "assistant" and message.get("tool_calls"):
+            if (
+                message.get("role") == "assistant"
+                and message.get("tool_calls")
+                and message.get("loss", True) is not False
+            ):
                 return [dict(item) for item in messages[:index]]
     else:
         return [dict(item) for item in messages[: final_assistant_index(record)]]
@@ -523,10 +527,20 @@ def expected_tool_calls(record: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def canonical_tool_results(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    target_ids = {
+        str(call["id"])
+        for message in messages_list(record)
+        if message.get("role") == "assistant"
+        and message.get("tool_calls")
+        and message.get("loss", True) is not False
+        for call in message.get("tool_calls", [])
+        if isinstance(call, Mapping) and isinstance(call.get("id"), str)
+    }
     return [
         dict(message)
         for message in messages_list(record)
         if message.get("role") == "tool"
+        and str(message.get("tool_call_id", "")) in target_ids
     ]
 
 

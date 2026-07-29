@@ -426,6 +426,103 @@ def test_tool_phase_targets_tool_call_after_prior_multiturn_clarification() -> N
     assert selected[-1]["content"] == "What accounts do I have?"
 
 
+def test_followup_evaluation_retains_context_only_tool_history() -> None:
+    record = {
+        "record_id": "followup_record",
+        "messages": [
+            {"role": "system", "content": "banking system", "loss": False},
+            {"role": "user", "content": "Freeze my active card.", "loss": False},
+            {
+                "role": "assistant",
+                "content": None,
+                "loss": False,
+                "tool_calls": [
+                    {
+                        "id": "context_followup_record_0",
+                        "index": 0,
+                        "type": "function",
+                        "function": {"name": "list_cards", "arguments": {}},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "context_followup_record_0",
+                "name": "list_cards",
+                "content": {"ok": True, "result": {"cards": [{"last4": "4821"}]}},
+                "loss": False,
+            },
+            {
+                "role": "assistant",
+                "content": "I froze the active card ending in 4821.",
+                "loss": False,
+            },
+            {"role": "user", "content": "What did you just do?", "loss": False},
+            {
+                "role": "assistant",
+                "content": "I froze the active card ending in 4821.",
+                "loss": True,
+            },
+        ],
+        "expected": {
+            "requires_tool": False,
+            "path": "multi_turn",
+            "tool_calls": [],
+            "grounding_facts": ["card.last4=4821", "card.status=frozen"],
+        },
+    }
+
+    selected = runner.first_phase_messages(record)
+
+    assert [message["role"] for message in selected] == [
+        "system",
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+        "user",
+    ]
+    assert runner.canonical_tool_results(record) == []
+
+
+def test_tool_evaluation_ignores_prior_context_tool_results_for_current_calls() -> None:
+    record = _tool_record()
+    record["messages"][1:1] = [
+        {"role": "user", "content": "Show my cards first.", "loss": False},
+        {
+            "role": "assistant",
+            "content": None,
+            "loss": False,
+            "tool_calls": [
+                {
+                    "id": "context_tool_record_0",
+                    "index": 0,
+                    "type": "function",
+                    "function": {"name": "list_cards", "arguments": {}},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "context_tool_record_0",
+            "name": "list_cards",
+            "content": {"ok": True, "result": {"cards": [{"last4": "4821"}]}},
+            "loss": False,
+        },
+        {
+            "role": "assistant",
+            "content": "Your card ending in 4821 is active.",
+            "loss": False,
+        },
+    ]
+
+    selected = runner.first_phase_messages(record)
+    results = runner.canonical_tool_results(record)
+
+    assert selected[-1]["content"] == "What accounts do I have?"
+    assert [result["name"] for result in results] == ["list_accounts"]
+
+
 def test_exact_revision_guard_rejects_branch_names(tmp_path: Path) -> None:
     config = runner.EvalConfig(**{**_config(tmp_path).__dict__, "model_revision": "main"})
 

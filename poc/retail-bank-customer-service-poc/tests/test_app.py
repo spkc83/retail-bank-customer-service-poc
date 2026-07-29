@@ -99,16 +99,10 @@ def test_greeting_and_uncertain_turns_are_answered_by_9b(
         lambda *_args: route("uncertain", banking_probability=0.52, intent="small_talk"),
     )
     monkeypatch.setattr(app_module, "count_tokens", lambda *_args: 50)
-    outputs = iter(
-        [
-            "Hey! How can I help with your banking today?",
-            "<use_original/>",
-        ]
-    )
     monkeypatch.setattr(
         app_module,
         "generate_text",
-        lambda *_args: next(outputs),
+        lambda *_args: "Hey! How can I help with your banking today?",
     )
 
     result = app_module.run_model_turn("yo, sup ?", [], [], request())
@@ -185,38 +179,33 @@ def test_model_selects_transfer_tool_and_receives_full_tool_history(
     assert "list_transfers" in result[5]
 
 
-def test_reflection_tool_recovery_is_labeled_with_per_pass_provenance(
+def test_direct_answer_is_labeled_with_per_pass_provenance(
     app_module,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    outputs = iter(
-        [
-            "Please provide your account number.",
-            '<tool_call>{"name": "list_accounts", "arguments": {}}</tool_call>',
-            "You have two accounts.",
-        ]
-    )
     monkeypatch.setattr(app_module, "count_tokens", lambda *_args: 100)
-    monkeypatch.setattr(app_module, "generate_text", lambda *_args: next(outputs))
+    monkeypatch.setattr(
+        app_module,
+        "generate_text",
+        lambda *_args: "I can explain how savings interest works.",
+    )
     monkeypatch.setattr(app_module, "route_query", lambda *_args: route())
 
     result = app_module.run_model_turn(
-        "How many accounts do I have?",
+        "How does savings interest work?",
         [],
         [],
         request(),
     )
 
-    assert result[1][-1]["content"] == "You have two accounts."
-    assert "9B reflection_tool" in result[5]
+    assert result[1][-1]["content"] == "I can explain how savings interest works."
+    assert "9B direct_answer" in result[5]
     assert "`base`" in result[5]
-    assert "`reflection`" in result[5]
-    assert "`grounded_final`" in result[5]
-    assert "Generation calls: `3`" in result[5]
+    assert "`reflection`" not in result[5]
+    assert "Generation calls: `1`" in result[5]
     assert "prompt SHA-256" in result[5]
     assert "raw output SHA-256" in result[5]
-    assert "Please provide your account number." in result[5]
-    assert "&lt;tool_call&gt;" in result[5]
+    assert "I can explain how savings interest works." in result[5]
     assert "Runtime device:" in result[5]
     assert "CUDA device name:" in result[5]
     assert app_module.MODEL_ID in result[5]

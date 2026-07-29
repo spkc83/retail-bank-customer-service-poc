@@ -198,9 +198,7 @@ def final_assistant_text(record: Mapping[str, Any]) -> str:
 
 def is_sequential_focus_record(record: Mapping[str, Any]) -> bool:
     path = expected_path(record)
-    return assistant_tool_call_count(record) >= 2 or (
-        path == "multi_turn" and bool(record.get("expected", {}).get("requires_tool"))
-    )
+    return assistant_tool_call_count(record) >= 2 or path == "multi_turn"
 
 
 def is_credential_safe_clarification_record(record: Mapping[str, Any]) -> bool:

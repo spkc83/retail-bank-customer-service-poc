@@ -11,47 +11,14 @@ from mock_bank import SessionBankRegistry
 INPUT_TOKEN_BUDGET = 8192
 MAX_NEW_TOKENS = 512
 MAX_TOOL_CALLS = 8
-USE_ORIGINAL_MARKER = "<use_original/>"
 
-AGENT_SYSTEM_PROMPT = """You are the conversational customer-service agent for a
-fictional retail-bank demonstration. All customer records and actions are synthetic.
-The customer is already authenticated, and every tool is automatically scoped to
-that signed-in customer. Never ask for an account number, customer ID, password,
-PIN, or additional identity verification. Respond naturally to greetings, thanks,
-clarifications, and general banking questions. Before answering any request about
-the customer's accounts, balances, cards, transactions, transfers, service cases,
-or an account action, you must call the appropriate supplied tool. Do not answer
-customer-specific questions from memory or assumptions. You own the tool choice and
-arguments. The classifier information below is advisory: reason from the full
-conversation and override its predicted intent when appropriate. If a requested
-banking capability has no tool, explain that limitation naturally. After tool
-results, answer the customer using those results. When a later action depends on
-an earlier lookup result, call the lookup tool first, wait for its result, then
-call the dependent action tool with the discovered customer-facing argument. Do not
-invent tool results or claim an action occurred unless a successful tool result
-says it did."""
-
-REFLECTION_PROMPT = """You are a second-pass tool-use reviewer for the same
-authenticated synthetic-bank conversation. Audit the base draft in the final
-TOOL_USE_REVIEW_REQUEST against its customer request and the supplied tool schemas.
-This is a decision pass, not the customer-facing answer.
-
-Return exactly one of:
-1. <use_original/> when the base draft is appropriate without customer-specific
-   backend data or action, including greetings, thanks, general explanations, and
-   necessary clarifying questions.
-2. One or more tagged-JSON <tool_call> blocks when the base draft should have used a
-   supplied tool. Do not add prose around tool calls.
-
-Examples:
-- Greeting, with a friendly base draft: <use_original/>
-- "How many accounts do I have?", with a draft asking for an account number:
-  <tool_call>{"name":"list_accounts","arguments":{}}</tool_call>
-- General question about how savings interest works: <use_original/>
-
-Do not copy an example merely because it is present. Decide from the complete
-conversation. Never invent a tool and never ask the customer for an account number,
-customer ID, password, PIN, or identity verification."""
+AGENT_SYSTEM_PROMPT = (
+    "You are the conversational customer-service agent for a fictional retail-bank "
+    "demonstration. The customer is already authenticated. Use the supplied tools for "
+    "customer-specific banking records or actions, use tool results for final answers, "
+    "call dependent tools one at a time so each later call can use the earlier result, "
+    "and never ask for account numbers, customer IDs, passwords, PINs, or private IDs."
+)
 
 MODEL_TOOLS: list[dict[str, Any]] = [
     {
@@ -375,52 +342,15 @@ class ConversationalBankingAgent:
             turn_key=first_trace.prompt_sha256,
         )
         if not calls:
-            reflection_messages = [
-                *current,
-                {"role": "assistant", "content": first_output},
-                {
-                    "role": "user",
-                    "content": _reflection_request(message, first_output),
-                },
-            ]
-            reflection_context = select_token_budgeted_context(
-                _reflection_system_message(router_result),
-                reflection_messages,
-                tools=self.tool_adapter.render_tools(MODEL_TOOLS),
-                token_counter=self.model.count_tokens,
-                input_budget=self.input_budget,
+            return self._complete_without_tools(
+                username=username,
+                session_hash=session_hash,
+                current=current,
+                first_output=first_output,
+                response_path="direct_answer",
+                model_passes=model_passes,
             )
-            reflection_output, reflection_trace = self._generate_pass(
-                "reflection",
-                reflection_context,
-                self.tool_adapter.render_tools(MODEL_TOOLS),
-            )
-            model_passes.append(reflection_trace)
-            if reflection_output == USE_ORIGINAL_MARKER:
-                return self._complete_without_tools(
-                    username=username,
-                    session_hash=session_hash,
-                    current=current,
-                    first_output=first_output,
-                    response_path="reflection_use_original",
-                    model_passes=model_passes,
-                )
-            try:
-                calls = self.tool_adapter.parse_assistant(
-                    reflection_output,
-                    turn_key=reflection_trace.prompt_sha256,
-                )
-            except AgentProtocolError as error:
-                raise AgentProtocolError(
-                    "reflection response used malformed tool-call syntax"
-                ) from error
-            if not calls:
-                raise AgentProtocolError(
-                    "reflection response must be <use_original/> or a valid tool call"
-                )
-            response_path = "reflection_tool"
-        else:
-            response_path = "base_tool"
+        response_path = "base_tool"
 
         _validate_tool_calls(calls)
         with_tools = [*current]
@@ -849,45 +779,8 @@ def _conversation_groups(
     return groups
 
 
-def _system_message(router_result: dict[str, Any]) -> dict[str, str]:
-    guidance = {
-        "route": router_result.get("route"),
-        "banking_probability": router_result.get("banking_probability"),
-        "ood_probability": router_result.get("ood_probability"),
-        "intent": router_result.get("intent"),
-        "intent_confidence": router_result.get("intent_confidence"),
-        "intent_candidates": router_result.get("intent_candidates", []),
-    }
+def _system_message(_router_result: dict[str, Any]) -> dict[str, str]:
     return {
         "role": "system",
-        "content": (
-            f"{AGENT_SYSTEM_PROMPT}\n\n"
-            "CURRENT DUAL-HEAD CLASSIFIER GUIDANCE:\n"
-            f"{json.dumps(guidance, sort_keys=True)}"
-        ),
+        "content": AGENT_SYSTEM_PROMPT,
     }
-
-
-def _reflection_system_message(
-    router_result: dict[str, Any],
-) -> dict[str, str]:
-    base_system = _system_message(router_result)["content"]
-    return {
-        "role": "system",
-        "content": (
-            f"{base_system}\n\n"
-            f"{REFLECTION_PROMPT}"
-        ),
-    }
-
-
-def _reflection_request(message: str, first_output: str) -> str:
-    payload = {
-        "customer_request": message.strip(),
-        "base_draft": first_output,
-    }
-    return (
-        "TOOL_USE_REVIEW_REQUEST\n"
-        f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}\n"
-        "Return only <use_original/> or valid tagged-JSON <tool_call> blocks."
-    )

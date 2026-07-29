@@ -74,8 +74,8 @@ def test_generate_records_cover_tool_and_non_tool_contracts() -> None:
 
 
 def test_tool_calls_have_stable_ids_typed_args_and_replay_hashes() -> None:
-    first = generate_records(pilot_count=18, split_seed=711)
-    second = generate_records(pilot_count=18, split_seed=711)
+    first = generate_records(pilot_count=26, split_seed=711)
+    second = generate_records(pilot_count=26, split_seed=711)
 
     assert second == first
     for record in first:
@@ -83,6 +83,7 @@ def test_tool_calls_have_stable_ids_typed_args_and_replay_hashes() -> None:
         call_ids = [
             call["id"]
             for message in record["messages"]
+            if message.get("loss") is True
             for call in message.get("tool_calls", [])
         ]
         assert call_ids == ordered_calls
@@ -102,7 +103,7 @@ def test_tool_calls_have_stable_ids_typed_args_and_replay_hashes() -> None:
 def test_multi_call_plan_is_serialized_as_causal_tool_steps() -> None:
     record = next(
         record
-        for record in generate_records(pilot_count=18, split_seed=711)
+        for record in generate_records(pilot_count=26, split_seed=711)
         if record["record_id"] == "multi_tool_freeze"
     )
 
@@ -146,7 +147,7 @@ def test_multi_call_plan_is_serialized_as_causal_tool_steps() -> None:
 def test_second_tool_call_arguments_are_observable_from_prior_tool_result() -> None:
     record = next(
         record
-        for record in generate_records(pilot_count=18, split_seed=711)
+        for record in generate_records(pilot_count=26, split_seed=711)
         if record["record_id"] == "multi_tool_freeze"
     )
     first_tool_result = record["messages"][3]["content"]
@@ -158,10 +159,76 @@ def test_second_tool_call_arguments_are_observable_from_prior_tool_result() -> N
     assert second_last4 in json.dumps(first_tool_result, sort_keys=True)
 
 
+def test_emergency_freeze_and_followups_cover_real_conversation_shapes() -> None:
+    records = generate_records(pilot_count=64, split_seed=711)
+    by_id = {record["record_id"]: record for record in records}
+
+    emergency = by_id["emergency_card_freeze"]
+    assert "stolen" in emergency["messages"][1]["content"].lower()
+    assert [call["name"] for call in emergency["expected"]["tool_calls"]] == [
+        "list_cards",
+        "freeze_card",
+    ]
+    discovered_last4 = emergency["messages"][4]["tool_calls"][0]["function"][
+        "arguments"
+    ]["last4"]
+    assert discovered_last4 in json.dumps(emergency["messages"][3]["content"])
+
+    summary = by_id["action_summary_followup"]
+    assert [message["role"] for message in summary["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+        "tool",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert summary["messages"][2]["loss"] is False
+    assert summary["messages"][2]["tool_calls"][0]["function"]["name"] == "list_cards"
+    assert summary["messages"][4]["loss"] is False
+    assert summary["messages"][4]["tool_calls"][0]["function"]["name"] == "freeze_card"
+    assert summary["messages"][4]["tool_calls"][0]["function"]["arguments"]["last4"] in (
+        json.dumps(summary["messages"][3]["content"])
+    )
+    assert summary["messages"][6]["loss"] is False
+    assert summary["messages"][-1]["loss"] is True
+    assert summary["expected"]["requires_tool"] is False
+    assert "what did you just do" in summary["messages"][-2]["content"].lower()
+    assert "froze" in summary["messages"][-1]["content"].lower()
+
+    no_action = by_id["no_action_followup"]
+    assert no_action["expected"]["requires_tool"] is False
+    assert "no card change was made" in no_action["messages"][-1]["content"].lower()
+
+
+def test_faq_and_conversation_templates_cover_out_of_template_live_prompts() -> None:
+    records = generate_records(pilot_count=64, split_seed=711)
+    text = "\n".join(
+        str(message["content"])
+        for record in records
+        for message in record["messages"]
+        if isinstance(message.get("content"), str)
+    ).lower()
+
+    for marker in (
+        "mortgage",
+        "open a new savings account",
+        "savings interest",
+        "yo sup",
+        "thanks for the help",
+    ):
+        assert marker in text
+    assert "based on the banking result" not in text
+    assert "i checked that" not in text
+
+
 def test_each_sequential_assistant_emission_restarts_tool_index_at_zero() -> None:
     record = next(
         record
-        for record in generate_records(pilot_count=18, split_seed=711)
+        for record in generate_records(pilot_count=26, split_seed=711)
         if record["record_id"] == "multi_tool_freeze"
     )
     invalid = json.loads(json.dumps(record))
@@ -239,7 +306,7 @@ def test_prepare_writes_manifest_report_and_is_split_isolated(tmp_path: Path) ->
 
 
 def test_pilot_realizer_uses_natural_text_and_varied_state_slots() -> None:
-    records = generate_records(pilot_count=1200, split_seed=4321)
+    records = generate_records(pilot_count=1600, split_seed=4321)
     user_keys = [
         normalized_user_text(
             next(
@@ -251,8 +318,8 @@ def test_pilot_realizer_uses_natural_text_and_varied_state_slots() -> None:
         for record in records
     ]
 
-    assert len(user_keys) == 1200
-    assert len(set(user_keys)) == 1200
+    assert len(user_keys) == 1600
+    assert len(set(user_keys)) == 1600
     serialized_users = "\n".join(
         message["content"]
         for record in records
@@ -305,7 +372,18 @@ def test_pilot_realizer_uses_natural_text_and_varied_state_slots() -> None:
         )
         for response in by_path["clarification"]
     )
-    assert all("overdraft" in response.lower() for response in by_path["no_tool_banking_faq"])
+    faq_template_markers = {
+        "faq-overdraft-v1": "overdraft",
+        "faq-mortgage-opening-v1": "mortgage",
+        "faq-deposit-opening-v1": "account",
+        "faq-savings-interest-v1": "interest",
+    }
+    for record, response in zip(records, final_responses, strict=True):
+        if record["expected"]["path"] == "no_tool_banking_faq":
+            assert (
+                faq_template_markers[record["split_keys"]["template_id"]]
+                in response.lower()
+            )
     assert all("retail banking" in response.lower() for response in by_path["ood"])
     assert all(
         "account number" in response.lower() and "customer id" in response.lower()
@@ -314,7 +392,7 @@ def test_pilot_realizer_uses_natural_text_and_varied_state_slots() -> None:
 
 
 def test_teacher_realization_round_trip_allows_only_wording_changes(tmp_path: Path) -> None:
-    records = generate_records(pilot_count=18, split_seed=711)
+    records = generate_records(pilot_count=26, split_seed=711)
     request_path = tmp_path / "teacher-requests.jsonl"
     response_path = tmp_path / "teacher-responses.jsonl"
 
@@ -364,7 +442,7 @@ def test_cli_exports_and_applies_teacher_realizations(tmp_path: Path) -> None:
                 "--output-dir",
                 str(output_dir),
                 "--pilot-count",
-                "18",
+                "26",
                 "--export-teacher-requests",
                 str(request_path),
             ]
@@ -384,7 +462,7 @@ def test_cli_exports_and_applies_teacher_realizations(tmp_path: Path) -> None:
                 "--output-dir",
                 str(output_dir),
                 "--pilot-count",
-                "18",
+                "26",
                 "--teacher-responses",
                 str(response_path),
                 "--teacher-model",
@@ -409,7 +487,7 @@ def test_cli_exports_and_applies_teacher_realizations(tmp_path: Path) -> None:
 
 
 def test_validator_rejects_private_or_unknown_tool_arguments() -> None:
-    record = generate_records(pilot_count=18)[0]
+    record = generate_records(pilot_count=26)[0]
     assistant = next(message for message in record["messages"] if message.get("tool_calls"))
     assistant["tool_calls"][0]["function"]["arguments"]["customer_id"] = "cust_alex"
 
@@ -418,8 +496,16 @@ def test_validator_rejects_private_or_unknown_tool_arguments() -> None:
 
 
 def test_validator_rejects_semantically_empty_final_response() -> None:
-    record = generate_records(pilot_count=18)[0]
+    record = generate_records(pilot_count=26)[0]
     record["messages"][-1]["content"] = "Done."
 
     with pytest.raises(BankingToolSftDataError, match="missing semantic content"):
+        validate_records([record])
+
+
+def test_validator_rejects_untrainable_final_assistant_response() -> None:
+    record = generate_records(pilot_count=26)[0]
+    record["messages"][-1]["loss"] = False
+
+    with pytest.raises(BankingToolSftDataError, match="must be trainable"):
         validate_records([record])

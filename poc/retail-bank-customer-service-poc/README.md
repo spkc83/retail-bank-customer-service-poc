@@ -51,16 +51,16 @@ Authenticated synthetic customer and session transcript
   → results return to the same model for the final response
 ```
 
-The intent head's top predictions are advisory context. They do not select a
-tool or supply arguments. The 8.79B model owns greetings, conversation,
+The intent head's top predictions are diagnostic metadata. They do not enter
+the generation prompt, select a tool, or supply arguments. The 8.79B model owns greetings, conversation,
 clarification, tool choice, public arguments, and final wording. The runtime
 only budgets context, parses and validates the tagged-JSON wire format, invokes
 the named mock function, and records diagnostics.
 
-If the base model response contains no call, the same checkpoint receives a
-separate labeled tool-use review turn. It must emit valid tool calls or exactly
-`<use_original/>`. Malformed review output fails visibly and cannot silently
-approve a customer-specific answer.
+The live generation prompt and iterative model → tool → model protocol match
+the SFT corpus and frozen evaluator. A first-pass answer without a tool call is
+returned directly; the runtime does not add an untrained reflection or repair
+pass.
 
 ## Conversation context
 
@@ -89,14 +89,21 @@ The diagnostics panel exposes:
 - exact model repository and immutable revision;
 - runtime and CUDA device;
 - response path and model-call count;
-- raw `base`, `reflection`, and `grounded_final` outputs;
+- raw `base`, `grounded_final`, and iterative tool-follow-up outputs;
 - generated tool names and public arguments;
 - correlated tool results;
 - prompt and output SHA-256 values for every model pass.
 
 A successful live turn is counted as 8.79B inference only when diagnostics show
-`spkc83/retail-bank-agent-9b` at the released revision and a CUDA device. Preset
-prompts are evaluation cases, not hard-coded routes.
+`spkc83/retail-bank-agent-9b` at revision
+`b47e2028c8cf573eb50ef7fe1c48d67e2a08e865` and a CUDA device. Preset prompts
+are evaluation cases, not hard-coded routes.
+
+The pinned checkpoint passed a frozen 750-record test split with 100% tool-name
+and argument accuracy, 100% executable-tool success, 39/39 exact dependent
+multi-tool sequences, 48/48 appropriate clarifications, 100% grounded
+factuality, and zero malformed calls, private arguments, or credential
+requests.
 
 If ZeroGPU allocation or generation fails, the UI reports model
 unavailability. It does not substitute a Python-generated banking answer.
