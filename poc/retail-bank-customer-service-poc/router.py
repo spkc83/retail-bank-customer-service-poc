@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from transformers import AutoModel, AutoTokenizer
 
 ROUTER_REPO_ID = "spkc83/retail-bank-domain-intent-router"
 ROUTER_REVISION = "e7d928e5cf8c8be0883625f276c4e6c85c35eaf1"
+OOD_BANKING_PROBABILITY_THRESHOLD = 0.5
 
 
 class DualHeadRouterModel(nn.Module):
@@ -97,21 +99,64 @@ class LearnedBankingRouter:
     ) -> dict[str, Any]:
         if not isinstance(message, str) or not message.strip():
             raise ValueError("message must be a non-empty string")
-        prior_users = [
-            str(item["content"]).strip()
-            for item in (history or [])
-            if isinstance(item, dict)
-            and item.get("role") == "user"
-            and isinstance(item.get("content"), str)
-        ]
-        current = self._predict(f"[CURRENT]\n{message.strip()}")
+        normalized_message = message.strip()
+        current = self._predict(f"[CURRENT]\n{normalized_message}")
+        current["context_applied"] = False
         if current["route"] == "in_domain":
             return current
-        if not prior_users or not _has_contextual_reference(message):
+
+        exchanges = _recent_exchanges(history)
+        if not exchanges:
             return current
-        return self._predict(
-            f"[CURRENT]\n{message.strip()}\n[PREVIOUS_USER]\n{prior_users[-1]}"
+        previous_user, previous_assistant = exchanges[-1]
+        if (
+            _has_contextual_reference(normalized_message)
+            and _is_ambiguous_contextual_fragment(normalized_message)
+        ):
+            context_reason = "contextual_reference"
+        elif (
+            _is_short_follow_up(normalized_message)
+            and _is_ambiguous_contextual_fragment(normalized_message)
+            and _invites_follow_up(previous_assistant)
+        ):
+            context_reason = "short_follow_up"
+        else:
+            return current
+
+        previous = self._predict(f"[CURRENT]\n{previous_user}")
+        if previous["route"] == "out_of_domain":
+            if len(exchanges) < 2:
+                return current
+            earlier_user, earlier_assistant = exchanges[-2]
+            previous_was_follow_up = (
+                _has_contextual_reference(previous_user)
+                or (
+                    _is_short_follow_up(previous_user)
+                    and _invites_follow_up(earlier_assistant)
+                )
+            )
+            if not previous_was_follow_up:
+                return current
+            earlier = self._predict(f"[CURRENT]\n{earlier_user}")
+            if earlier["route"] == "out_of_domain":
+                return current
+
+        contextual = self._predict(
+            f"[CURRENT]\n{normalized_message}\n"
+            f"[PREVIOUS_ASSISTANT]\n{previous_assistant}\n"
+            f"[PREVIOUS_USER]\n{previous_user}"
         )
+        if contextual["route"] == "out_of_domain":
+            contextual["route"] = "uncertain"
+            contextual["context_route_override"] = (
+                "Active banking follow-up was retained for 9B adjudication."
+            )
+        contextual["context_applied"] = True
+        contextual["context_reason"] = context_reason
+        contextual["context_chain_depth"] = (
+            2 if previous["route"] == "out_of_domain" else 1
+        )
+        return contextual
 
     def _predict(self, rendered: str) -> dict[str, Any]:
         encoded = self.tokenizer(
@@ -144,10 +189,10 @@ class LearnedBankingRouter:
             )
         ]
         ood_probability = 1.0 - banking_probability
-        ood_threshold = 1.0 - self.threshold
+        ood_threshold = OOD_BANKING_PROBABILITY_THRESHOLD
         if banking_probability >= self.threshold:
             route = "in_domain"
-        elif banking_probability <= ood_threshold:
+        elif banking_probability < ood_threshold:
             route = "out_of_domain"
         else:
             route = "uncertain"
@@ -205,6 +250,131 @@ def _has_contextual_reference(text: str) -> bool:
             "this",
             "those",
         }
+    )
+
+
+def _recent_exchanges(
+    history: list[dict[str, Any]] | None,
+) -> list[tuple[str, str]]:
+    messages = [
+        (str(item.get("role")), str(item.get("content")).strip())
+        for item in (history or [])
+        if isinstance(item, dict)
+        and item.get("role") in {"user", "assistant"}
+        and isinstance(item.get("content"), str)
+        and str(item["content"]).strip()
+    ]
+    exchanges: list[tuple[str, str]] = []
+    active_user: str | None = None
+    active_assistant: str | None = None
+    for role, content in messages:
+        if role == "user":
+            if active_user is not None and active_assistant is not None:
+                exchanges.append((active_user, active_assistant))
+            active_user = content
+            active_assistant = None
+        elif active_user is not None:
+            active_assistant = content
+    if active_user is not None and active_assistant is not None:
+        exchanges.append((active_user, active_assistant))
+    return exchanges
+
+
+def _is_short_follow_up(text: str) -> bool:
+    words = re.findall(r"[A-Za-z0-9]+", text)
+    return 0 < len(words) <= 6 and len(text) <= 64
+
+
+def _is_ambiguous_contextual_fragment(text: str) -> bool:
+    words = {word.casefold() for word in re.findall(r"[A-Za-z0-9]+", text)}
+    if not words:
+        return False
+    fragment_vocabulary = {
+        "a",
+        "about",
+        "again",
+        "also",
+        "an",
+        "and",
+        "another",
+        "are",
+        "be",
+        "block",
+        "can",
+        "cancel",
+        "care",
+        "check",
+        "could",
+        "did",
+        "dispute",
+        "do",
+        "does",
+        "else",
+        "for",
+        "freeze",
+        "happen",
+        "happened",
+        "is",
+        "it",
+        "list",
+        "make",
+        "me",
+        "my",
+        "need",
+        "next",
+        "no",
+        "now",
+        "of",
+        "ok",
+        "okay",
+        "one",
+        "ones",
+        "or",
+        "other",
+        "please",
+        "replace",
+        "same",
+        "show",
+        "stop",
+        "sure",
+        "take",
+        "tell",
+        "that",
+        "the",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "those",
+        "to",
+        "too",
+        "want",
+        "was",
+        "were",
+        "what",
+        "which",
+        "will",
+        "would",
+        "yes",
+    }
+    return all(word.isdigit() or word in fragment_vocabulary for word in words)
+
+
+def _invites_follow_up(text: str) -> bool:
+    normalized = text.casefold()
+    return "?" in text or any(
+        phrase in normalized
+        for phrase in (
+            "please provide",
+            "please tell me",
+            "which one",
+            "what are",
+            "could you provide",
+            "can you provide",
+            "need the",
+        )
     )
 
 

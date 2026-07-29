@@ -10,7 +10,8 @@ direct registered ZeroGPU chat event
   → CPU-resident dual-head classifier inside the managed worker
   → OOD stock response, or
   → 9B model with intent guidance and token-budgeted history
-  → direct response or one generated batch of Qwen tool calls
+  → generated Qwen tool calls, or a labeled 9B tool-use reflection pass
+  → reflection chooses a tool call or retains the untouched base response
   → synthetic backend tool results
   → second 9B generation for the final response
 ```
@@ -21,6 +22,9 @@ by the binary head's decision boundary, and the middle region is uncertain.
 OOD bypasses the 9B generator, although every turn enters the managed ZeroGPU
 event. The intent head always exposes its top three predictions; they are
 included as advisory model context rather than mapped to backend workflows.
+Short or referential replies may use only the immediately preceding non-OOD
+exchange as classifier context; unresolved active follow-ups enter the uncertain
+path rather than receiving an OOD stock response.
 
 ## Model and tool ownership
 
@@ -36,7 +40,9 @@ CPU-generated servicing fallback.
 One first-pass generation may contain up to eight ordered calls. Malformed tool
 protocol fails the model turn. Unknown tool names, unsupported arguments, and
 backend errors are returned as structured tool results for the second
-generation. A plain first-pass response completes without tool execution.
+generation. A plain first-pass response receives a separate 9B reflection
+generation. A valid reflection tool call proceeds to execution; `<use_original/>`
+or invalid non-tool reflection output retains the base response unchanged.
 
 ## Context contract
 
@@ -56,8 +62,10 @@ budget controls ZeroGPU latency and memory.
 ## Observability and evaluation
 
 The UI reports domain probabilities, top-three intent predictions, generated
-tool calls and arguments, tool status, response path, and current synthetic
-backend state.
+tool calls and arguments, tool status, response path, current synthetic backend
+state, and per-pass prompt/output hashes for base, reflection, and grounded-final
+9B generations. It also exposes expandable raw outputs, the generation-call
+count, and the runtime/CUDA device reported after each model invocation.
 
 UI presets and prior screenshots are regression examples only. The held-out
 evaluation must cover paraphrases, conversational follow-ups, intent-head

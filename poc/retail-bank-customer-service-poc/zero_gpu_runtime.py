@@ -58,6 +58,25 @@ def count_tokens(
     return len(input_ids)
 
 
+def runtime_metadata() -> dict[str, str]:
+    if model is None:
+        return {
+            "runtime_device": "unavailable",
+            "cuda_device_name": "unavailable",
+        }
+    device = str(model.device)
+    cuda_device_name = "unavailable"
+    try:
+        if model.device.type == "cuda" and torch.cuda.is_available():
+            cuda_device_name = str(torch.cuda.get_device_name(model.device))
+    except (AssertionError, RuntimeError):
+        cuda_device_name = "unavailable"
+    return {
+        "runtime_device": device,
+        "cuda_device_name": cuda_device_name,
+    }
+
+
 def generate_text(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,

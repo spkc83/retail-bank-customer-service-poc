@@ -152,13 +152,17 @@ this checkpoint is the conversational and tool-calling agent:
 3. Its CPU-resident dual-head router gates OOD and supplies
    ranked intent guidance; accepted and uncertain turns continue to the 9B
    model, which responds directly or emits one or more Qwen tool calls.
-4. A session-isolated SQLite backend executes generated calls against synthetic
+4. A no-tool base draft receives a separately labeled 9B reflection pass that
+   either emits a tool call or retains the untouched draft.
+5. A session-isolated SQLite backend executes generated calls against synthetic
    records.
-5. Tool results return to the model for a second customer-facing generation.
+6. Tool results return to the model for a customer-facing grounded generation.
 
 The application retains complete session history and selects newest complete
 conversation/tool interactions within an 8,192-token input budget. It does not
-replace model responses with deterministic grounded templates.
+replace model responses with deterministic grounded templates. Per-pass prompt
+and output hashes, raw outputs, call counts, and runtime device metadata
+distinguish base, reflection, and grounded-final generations.
 
 ## Limitations
 
@@ -176,8 +180,8 @@ The public
 authenticates two static demo users and runs each complete chat turn as one
 direct ZeroGPU event. The event applies the learned CPU-resident dual-head
 router, then uses this checkpoint for accepted/uncertain conversation, tool
-calling, and final response generation. Generated calls operate only on
-isolated synthetic state.
+calling, reflection, and final response generation. Generated calls operate
+only on isolated synthetic state.
 
 The deployment uses eager expert execution for compatibility with the current
 ZeroGPU partition. If ZeroGPU is unavailable, the POC reports model

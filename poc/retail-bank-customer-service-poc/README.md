@@ -40,25 +40,37 @@ cannot access real accounts or perform real transactions.
 
 ```text
 Authenticated user and stored session transcript
-  → dual-head CPU classifier
-  → high-confidence OOD: stock response
-  → allowed or uncertain: registered ZeroGPU 9B event
-  → 9B direct response, or Qwen <tool_call> JSON
+  → one directly registered ZeroGPU chat event
+  → CPU-resident dual-head classifier inside the managed worker
+  → OOD: stock response without 9B generation
+  → allowed or uncertain: 9B generation
+  → generated Qwen <tool_call> JSON, or labeled 9B reflection
+  → reflection emits a tool call or retains the untouched base draft
   → direct execution against session-isolated synthetic SQLite
   → tool results appended to model history
   → second 9B generation produces the final answer
 ```
 
 The domain head has three operating regions: `in_domain`, `uncertain`, and
-`out_of_domain`. Only high-confidence OOD bypasses the model. The intent head's
-top three predictions and probabilities are advisory context for the 9B model;
-they do not select a tool.
+`out_of_domain`. Every turn enters the managed GPU event so ZeroGPU owns the
+complete execution boundary. High-confidence OOD bypasses 9B generation after
+classification. The intent head's top three predictions and probabilities are
+advisory context for the 9B model; they do not select a tool.
+An isolated short or referential reply is reclassified with only the immediately
+preceding exchange when that exchange was not OOD. If context still cannot
+establish the domain, the turn enters the uncertain path for 9B adjudication.
 
 The 9B model owns greetings, conversational responses, contextual reasoning,
 clarification, tool selection, tool arguments, and final wording. The runtime
 only parses Qwen's tool-call format and invokes the named mock function. There
 is no deterministic workflow planner, authorization policy, grounded-response
 repair, or template-generated read fallback.
+
+When the base generation contains no tool call, the same 9B checkpoint receives
+a separate tool-use review prompt. It must emit a valid Qwen tool call or
+`<use_original/>`. Invalid review output also leaves the base draft untouched.
+This temporary test-time-scaling experiment is labeled separately so its
+success cannot be mistaken for base-checkpoint tool-call success.
 
 ## Conversation context
 
@@ -94,15 +106,19 @@ If ZeroGPU allocation or generation fails, the chat reports that the 9B model
 is unavailable. It does not substitute a Python-generated banking answer.
 
 The diagnostics panel exposes domain probabilities, top intent predictions,
-generated tool names and arguments, tool status, and the response path. Presets
-are evaluation prompts, not production routing rules or proof of
-generalization.
+generated tool names and arguments, tool status, response path, exact model
+revision, and separate prompt/output hashes for the `base`, `reflection`, and
+`grounded_final` model calls. Expandable raw outputs, the generation-call count,
+and actual runtime/CUDA device metadata make the reflection behavior directly
+inspectable. Presets are evaluation prompts, not production routing rules or
+proof of generalization.
 
 ## Authentication
 
-The demo usernames are `alex.demo` and `maya.demo`. Passwords are provided
-through the Space's write-only `DEMO_AUTH_JSON` secret and are not committed.
-Authentication exists only to select isolated synthetic customer records.
+The demo usernames are `alex.demo` and `maya.demo`. Passwords are supplied
+through the Space's write-only `DEMO_AUTH_JSON` secret and displayed on the
+login screen for public testing; they are not committed. Authentication exists
+only to select isolated synthetic customer records.
 
 ## Local verification
 

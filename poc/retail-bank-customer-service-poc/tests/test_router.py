@@ -55,4 +55,153 @@ def test_router_uses_three_way_domain_decision_and_always_returns_top_intents(
     assert result["intent"] == "b"
     assert [item["intent"] for item in result["intent_candidates"]] == ["b", "d", "c"]
     assert result["ood_probability"] == pytest.approx(1 - result["banking_probability"])
-    assert result["ood_threshold"] == pytest.approx(0.02)
+    assert result["ood_threshold"] == pytest.approx(0.5)
+
+
+def test_short_fragment_uses_the_immediately_preceding_banking_exchange(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = LearnedBankingRouter(
+        tokenizer=FakeTokenizer(),
+        model=FakeModel([8.0, -8.0], [3.0, 1.0]),
+        intent_labels=("card", "other"),
+        threshold=0.98,
+        max_length=32,
+    )
+    rendered_inputs: list[str] = []
+
+    def predict(rendered: str):
+        rendered_inputs.append(rendered)
+        if rendered == "[CURRENT]\n4821":
+            return {"route": "out_of_domain", "intent": "other"}
+        if rendered == "[CURRENT]\nMy card was stolen. Freeze it.":
+            return {"route": "in_domain", "intent": "card"}
+        return {"route": "uncertain", "intent": "card"}
+
+    monkeypatch.setattr(router, "_predict", predict)
+
+    result = router.classify(
+        "4821",
+        [
+            {"role": "user", "content": "My card was stolen. Freeze it."},
+            {
+                "role": "assistant",
+                "content": "What are the last four digits of the card?",
+            },
+        ],
+    )
+
+    assert result["route"] == "uncertain"
+    assert result["context_applied"] is True
+    assert result["context_reason"] == "short_follow_up"
+    assert "[PREVIOUS_ASSISTANT]\nWhat are the last four digits" in rendered_inputs[-1]
+    assert "[PREVIOUS_USER]\nMy card was stolen. Freeze it." in rendered_inputs[-1]
+
+
+def test_short_fragment_does_not_inherit_an_out_of_domain_exchange(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = LearnedBankingRouter(
+        tokenizer=FakeTokenizer(),
+        model=FakeModel([8.0, -8.0], [3.0, 1.0]),
+        intent_labels=("card", "other"),
+        threshold=0.98,
+        max_length=32,
+    )
+    predictions = iter(
+        [
+            {"route": "out_of_domain", "intent": "other"},
+            {"route": "out_of_domain", "intent": "other"},
+        ]
+    )
+    monkeypatch.setattr(router, "_predict", lambda _rendered: next(predictions))
+
+    result = router.classify(
+        "yes",
+        [
+            {"role": "user", "content": "What is the weather tomorrow?"},
+            {
+                "role": "assistant",
+                "content": "I can only help with the retail-banking demonstration.",
+            },
+        ],
+    )
+
+    assert result["route"] == "out_of_domain"
+    assert result.get("context_applied") is not True
+
+
+def test_context_remains_active_after_a_fragment_was_resolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = LearnedBankingRouter(
+        tokenizer=FakeTokenizer(),
+        model=FakeModel([8.0, -8.0], [3.0, 1.0]),
+        intent_labels=("card", "other"),
+        threshold=0.98,
+        max_length=32,
+    )
+
+    def predict(rendered: str):
+        if rendered in {
+            "[CURRENT]\n4821",
+            "[CURRENT]\nreplace it too",
+        }:
+            return {"route": "out_of_domain", "intent": "other"}
+        if rendered == "[CURRENT]\nMy card was stolen. Freeze it.":
+            return {"route": "in_domain", "intent": "card"}
+        return {"route": "uncertain", "intent": "card"}
+
+    monkeypatch.setattr(router, "_predict", predict)
+
+    result = router.classify(
+        "replace it too",
+        [
+            {"role": "user", "content": "My card was stolen. Freeze it."},
+            {
+                "role": "assistant",
+                "content": "What are the last four digits of the card?",
+            },
+            {"role": "user", "content": "4821"},
+            {
+                "role": "assistant",
+                "content": "Your card ending in 4821 is now frozen.",
+            },
+        ],
+    )
+
+    assert result["route"] == "uncertain"
+    assert result["context_applied"] is True
+    assert result["context_reason"] == "contextual_reference"
+
+
+def test_explicit_ood_subject_is_not_rescued_by_a_reference_word(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = LearnedBankingRouter(
+        tokenizer=FakeTokenizer(),
+        model=FakeModel([8.0, -8.0], [3.0, 1.0]),
+        intent_labels=("card", "other"),
+        threshold=0.98,
+        max_length=32,
+    )
+    predictions = iter(
+        [
+            {"route": "out_of_domain", "intent": "other"},
+        ]
+    )
+    monkeypatch.setattr(router, "_predict", lambda _rendered: next(predictions))
+
+    result = router.classify(
+        "what about the weather there?",
+        [
+            {"role": "user", "content": "Show my account balances."},
+            {
+                "role": "assistant",
+                "content": "You have two synthetic accounts.",
+            },
+        ],
+    )
+
+    assert result["route"] == "out_of_domain"
+    assert result["context_applied"] is False
