@@ -32,14 +32,19 @@ https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
 - Banking-to-OOD false-accept rate: `0.005085`
 - Calibrated banking threshold: `0.980000`
 
+The hosted POC uses two serving boundaries: banking probability below `0.50`
+is OOD, probability at least `0.98` is in-domain, and the middle region is
+uncertain. Uncertain turns continue to the 9B agent with the top three intent
+predictions as advisory context.
+
 ## Data and licenses
 
 Classifier-only data combines PolyAI Banking77 and UCI CLINC150 under
 CC-BY-4.0. Banking77 is prohibited from the generative SFT lane. The prepared
 dataset contains 44,832 training, 8,669 validation, and 16,380 test rows.
 
-## Safety boundary
+## Serving fallback
 
-If the artifact is unavailable or corrupt, serving must fail closed to the
-standard OOD response. This model does not replace credential-input or
-unsafe-output guards.
+If the artifact is unavailable or classification fails, the experimental POC
+marks the route uncertain and delegates the turn to the 9B model. The router is
+an experiment component, not a production authorization or safety boundary.

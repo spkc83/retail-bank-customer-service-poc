@@ -13,13 +13,18 @@ MAX_TOOL_CALLS = 8
 
 AGENT_SYSTEM_PROMPT = """You are the conversational customer-service agent for a
 fictional retail-bank demonstration. All customer records and actions are synthetic.
-Respond naturally to greetings, thanks, clarifications, and banking questions. Use
-the supplied tools whenever customer-specific backend data or an action is needed.
-You own the tool choice and arguments. The classifier information below is advisory:
-reason from the conversation and override its predicted intent when appropriate.
-If a requested banking capability has no tool, explain that limitation naturally.
-After tool results, answer the customer using those results. Do not invent tool
-results or claim an action occurred unless a successful tool result says it did."""
+The customer is already authenticated, and every tool is automatically scoped to
+that signed-in customer. Never ask for an account number, customer ID, password,
+PIN, or additional identity verification. Respond naturally to greetings, thanks,
+clarifications, and general banking questions. Before answering any request about
+the customer's accounts, balances, cards, transactions, transfers, service cases,
+or an account action, you must call the appropriate supplied tool. Do not answer
+customer-specific questions from memory or assumptions. You own the tool choice and
+arguments. The classifier information below is advisory: reason from the full
+conversation and override its predicted intent when appropriate. If a requested
+banking capability has no tool, explain that limitation naturally. After tool
+results, answer the customer using those results. Do not invent tool results or
+claim an action occurred unless a successful tool result says it did."""
 
 MODEL_TOOLS: list[dict[str, Any]] = [
     {
@@ -310,13 +315,21 @@ class ConversationalBankingAgent:
         except (RuntimeError, TypeError, ValueError) as error:
             return {
                 "ok": False,
+                "status": "error",
+                "action_completed": False,
                 "name": call.name,
                 "error": str(error),
+                "response_requirement": (
+                    "The requested action was not completed. Tell the customer it "
+                    "failed and explain this error; do not claim success."
+                ),
             }
         return {
             "ok": True,
+            "status": "success",
+            "action_completed": True,
             "name": call.name,
-            "result": result,
+            "result": _model_friendly_result(result),
         }
 
 
@@ -345,6 +358,31 @@ def parse_tool_calls(output: str) -> tuple[ToolCall, ...]:
             raise AgentProtocolError("model tool-call arguments must be an object")
         calls.append(ToolCall(name=name.strip(), arguments=arguments))
     return tuple(calls)
+
+
+def _model_friendly_result(value: Any, currency: str | None = None) -> Any:
+    if isinstance(value, dict):
+        local_currency = (
+            str(value["currency"])
+            if isinstance(value.get("currency"), str)
+            else currency
+        )
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if (
+                key.endswith("_cents")
+                and isinstance(item, int)
+                and not isinstance(item, bool)
+            ):
+                amount_key = key.removesuffix("_cents")
+                currency_code = local_currency or "USD"
+                normalized[amount_key] = f"{currency_code} {item / 100:,.2f}"
+            else:
+                normalized[key] = _model_friendly_result(item, local_currency)
+        return normalized
+    if isinstance(value, list):
+        return [_model_friendly_result(item, currency) for item in value]
+    return value
 
 
 def select_token_budgeted_context(

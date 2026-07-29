@@ -174,6 +174,13 @@ def test_tool_calls_execute_in_order_and_second_model_pass_writes_final_answer()
     assert len(model.calls) == 2
     assert model.calls[0]["tools"] == MODEL_TOOLS
     assert model.calls[1]["tools"] is None
+    transfer_result = model.calls[1]["messages"][-2]["content"]
+    assert '"amount": "USD 450.00"' in transfer_result
+    assert "amount_cents" not in transfer_result
+    system_prompt = model.calls[0]["messages"][0]["content"]
+    assert "already authenticated" in system_prompt
+    assert "must call the appropriate supplied tool" in system_prompt
+    assert "Never ask for an account number" in system_prompt
     assert [item["role"] for item in result.conversation] == [
         "user",
         "assistant",
@@ -235,6 +242,12 @@ def test_unknown_tool_and_backend_error_return_to_model_as_tool_results() -> Non
     )
 
     assert [item["ok"] for item in result.tool_results] == [False, False]
+    assert all(item["action_completed"] is False for item in result.tool_results)
+    assert all(item["status"] == "error" for item in result.tool_results)
+    assert all(
+        "do not claim success" in item["response_requirement"]
+        for item in result.tool_results
+    )
     assert "unsupported tool" in result.tool_results[0]["error"]
     assert "matching" in result.tool_results[1]["error"]
     assert len(model.calls) == 2

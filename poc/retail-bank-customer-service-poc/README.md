@@ -40,9 +40,10 @@ cannot access real accounts or perform real transactions.
 
 ```text
 Authenticated user and stored session transcript
-  → dual-head CPU classifier
-  → high-confidence OOD: stock response
-  → allowed or uncertain: registered ZeroGPU 9B event
+  → one directly registered ZeroGPU chat event
+  → CPU-resident dual-head classifier inside the managed worker
+  → OOD: stock response without 9B generation
+  → allowed or uncertain: 9B generation
   → 9B direct response, or Qwen <tool_call> JSON
   → direct execution against session-isolated synthetic SQLite
   → tool results appended to model history
@@ -50,9 +51,10 @@ Authenticated user and stored session transcript
 ```
 
 The domain head has three operating regions: `in_domain`, `uncertain`, and
-`out_of_domain`. Only high-confidence OOD bypasses the model. The intent head's
-top three predictions and probabilities are advisory context for the 9B model;
-they do not select a tool.
+`out_of_domain`. Every turn enters the managed GPU event so ZeroGPU owns the
+complete execution boundary. High-confidence OOD bypasses 9B generation after
+classification. The intent head's top three predictions and probabilities are
+advisory context for the 9B model; they do not select a tool.
 
 The 9B model owns greetings, conversational responses, contextual reasoning,
 clarification, tool selection, tool arguments, and final wording. The runtime
@@ -100,9 +102,10 @@ generalization.
 
 ## Authentication
 
-The demo usernames are `alex.demo` and `maya.demo`. Passwords are provided
-through the Space's write-only `DEMO_AUTH_JSON` secret and are not committed.
-Authentication exists only to select isolated synthetic customer records.
+The demo usernames are `alex.demo` and `maya.demo`. Passwords are supplied
+through the Space's write-only `DEMO_AUTH_JSON` secret and displayed on the
+login screen for public testing; they are not committed. Authentication exists
+only to select isolated synthetic customer records.
 
 ## Local verification
 

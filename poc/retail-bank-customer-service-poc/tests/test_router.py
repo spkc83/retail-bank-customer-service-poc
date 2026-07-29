@@ -55,4 +55,4 @@ def test_router_uses_three_way_domain_decision_and_always_returns_top_intents(
     assert result["intent"] == "b"
     assert [item["intent"] for item in result["intent_candidates"]] == ["b", "d", "c"]
     assert result["ood_probability"] == pytest.approx(1 - result["banking_probability"])
-    assert result["ood_threshold"] == pytest.approx(0.02)
+    assert result["ood_threshold"] == pytest.approx(0.5)
