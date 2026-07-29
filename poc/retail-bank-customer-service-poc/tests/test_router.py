@@ -58,6 +58,23 @@ def test_router_uses_three_way_domain_decision_and_always_returns_top_intents(
     assert result["ood_threshold"] == pytest.approx(0.5)
 
 
+def test_router_preserves_uncertainty_band_when_calibrated_threshold_is_low() -> None:
+    router = LearnedBankingRouter(
+        tokenizer=FakeTokenizer(),
+        model=FakeModel([1.29, 0.0], [0.1, 3.0]),
+        intent_labels=("a", "b"),
+        threshold=0.165,
+        max_length=32,
+    )
+
+    result = router.classify("Write Python code to sort a list.", [])
+
+    assert result["banking_probability"] == pytest.approx(0.215852, abs=1e-6)
+    assert result["route"] == "uncertain"
+    assert result["ood_threshold"] == pytest.approx(0.165)
+    assert result["in_domain_threshold"] == pytest.approx(0.5)
+
+
 def test_short_fragment_uses_the_immediately_preceding_banking_exchange(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

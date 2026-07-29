@@ -13,7 +13,7 @@ from torch import nn
 from transformers import AutoModel, AutoTokenizer
 
 ROUTER_REPO_ID = "spkc83/retail-bank-domain-intent-router"
-ROUTER_REVISION = "e7d928e5cf8c8be0883625f276c4e6c85c35eaf1"
+ROUTER_REVISION = "136ee159d19cda7f585dd122907bbeb1ef4ec4db"
 OOD_BANKING_PROBABILITY_THRESHOLD = 0.5
 
 
@@ -189,8 +189,12 @@ class LearnedBankingRouter:
             )
         ]
         ood_probability = 1.0 - banking_probability
-        ood_threshold = OOD_BANKING_PROBABILITY_THRESHOLD
-        if banking_probability >= self.threshold:
+        ood_threshold = min(self.threshold, OOD_BANKING_PROBABILITY_THRESHOLD)
+        in_domain_threshold = max(
+            self.threshold,
+            OOD_BANKING_PROBABILITY_THRESHOLD,
+        )
+        if banking_probability >= in_domain_threshold:
             route = "in_domain"
         elif banking_probability < ood_threshold:
             route = "out_of_domain"
@@ -206,6 +210,7 @@ class LearnedBankingRouter:
             "intent_candidates": candidates,
             "threshold": self.threshold,
             "ood_threshold": ood_threshold,
+            "in_domain_threshold": in_domain_threshold,
             "router_revision": ROUTER_REVISION,
         }
 
