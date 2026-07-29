@@ -142,28 +142,26 @@ false-accept rate `0.020109` at its calibrated `0.165` lower boundary. The
 public POC is an
 experimental synthetic environment, not a production-qualified banking agent.
 
-## Public POC serving role
+## Historical public POC serving role
 
-In the public
-[Retail Bank Servicing POC](https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc),
-this checkpoint is the conversational and tool-calling agent:
+This section records the earlier MoE experiment. The current public
+[Retail Bank Servicing POC](https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc)
+uses `spkc83/retail-bank-agent-9b`, not this checkpoint.
 
 1. Static Gradio authentication identifies one of two synthetic demo users.
 2. One directly registered ZeroGPU event owns the complete turn.
-3. Its CPU-resident dual-head router gates OOD and supplies
-   ranked intent guidance; accepted and uncertain turns continue to the 9B
-   model, which responds directly or emits one or more Qwen tool calls.
-4. A no-tool base draft receives a separately labeled 9B reflection pass that
-   either emits a tool call or retains the untouched draft.
-5. A session-isolated SQLite backend executes generated calls against synthetic
+3. Its CPU-resident dual-head router gates high-confidence OOD; ranked intent
+   predictions are diagnostics. Accepted and uncertain turns continue to the
+   9B model, which responds directly or emits one or more Qwen tool calls.
+4. A session-isolated SQLite backend executes generated calls against synthetic
    records.
-6. Tool results return to the model for a customer-facing grounded generation.
+5. Tool results return to the model for a customer-facing grounded generation.
 
 The application retains complete session history and selects newest complete
 conversation/tool interactions within an 8,192-token input budget. It does not
 replace model responses with deterministic grounded templates. Per-pass prompt
 and output hashes, raw outputs, call counts, and runtime device metadata
-distinguish base, reflection, and grounded-final generations.
+distinguish direct and grounded-final generations.
 
 ## Limitations
 
@@ -176,13 +174,10 @@ distinguish base, reflection, and grounded-final generations.
 
 ## Deployment status
 
-The public
-[Retail Bank Servicing POC](https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc)
-authenticates two static demo users and runs each complete chat turn as one
-direct ZeroGPU event. The event applies the learned CPU-resident dual-head
-router, then uses this checkpoint for accepted/uncertain conversation, tool
-calling, reflection, and final response generation. Generated calls operate
-only on isolated synthetic state.
+This MoE checkpoint is retained as an evaluation control and is not the active
+public POC model. The active deployment uses the dense Granite-based
+`spkc83/retail-bank-agent-9b` checkpoint for accepted and uncertain
+conversation, tool calling, and final response generation.
 
 The deployment uses eager expert execution for compatibility with the current
 ZeroGPU partition. If ZeroGPU is unavailable, the POC reports model

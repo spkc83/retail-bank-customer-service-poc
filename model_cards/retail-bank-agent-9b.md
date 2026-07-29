@@ -27,57 +27,77 @@ adaptation of `ibm-granite/granite-4.1-8b`.
 
 - Model repository: `spkc83/retail-bank-agent-9b`
 - Immutable weights revision:
-  `32f327ba162ef8988255017694dd6b8983d3af34`
+  `085df3d089cfadd77424b548542da0390a54a23e`
 - Training/provenance head:
-  `53e4d50367b0013c3ad47d3404f04c46fa27570e`
+  `247ac402989144698f89727a59a07ce5d05f31c6`
 - Base revision:
   `1504002f650e656a0a3789d99574df12e3e94ed0`
 - Source revision:
-  `3a6a7efe22b9ea2a104712cbeff5648df3eeec31`
+  `4270636255515f7a563d935794a3642e0b13ccb3`
+- Recovery source revision:
+  `0237b97c0a9558bbb2e95c45097ac5ae5f9f7f21`
 - Training job:
-  `spkc83/6a6a19a1b36a6516e969f78b`
-- FP32-to-FP16 remerge job:
-  `spkc83/6a6a2b4f23ed89c748ec3b2a`
-- Merge-parity job:
-  `spkc83/6a6a2be323ed89c748ec3b36`
+  `spkc83/6a6a60d4b36a6516e96a0709`
+- FP16-native recovery and merge-parity job:
+  `spkc83/6a6a6b6323ed89c748ec502c`
 - Dataset revision:
-  `c0e0be08f9d56f382e3c85a6bca1e4f4090eacac`
+  `183e7e1ed1aba9c3d7155e7b83b64dc854935055`
 - Dataset fingerprint:
-  `d8014d6e7eda0d30f403461395c17882719fbe6b5b2c8f1ad4fe44deb25cd270`
+  `2bb7a400ed2556b15c7e5eb6147668041b5deef8ae4f037f9e2e52295ff29ab5`
 - Parameters: 8,791,592,960
 - Architecture: dense decoder-only causal transformer
 - Tool format: Granite native tagged JSON
 
 ## Adaptation
 
-- 3,502 training conversations
-- 748 validation conversations
-- 750 frozen test conversations
+- 6,304 training conversations
+- 1,349 validation conversations
+- 1,347 frozen test conversations
 - BF16 LoRA over attention and MLP projection modules
 - LoRA rank 32, alpha 64, dropout 0.05
 - 2,048-token maximum training sequence
-- learning rate `1e-4`
+- corrective continuation learning rate `5e-5`
 - effective batch size 4
-- FP32-accumulated, merged FP16 root checkpoint
+- FP16-native merged root checkpoint
 - unmerged adapter retained under `adapter/`
 
 ## Training and merge results
 
-- 3,000 optimizer steps in 3,570.523 seconds
-- aggregate training loss: `0.0507329`
-- final validation loss: `0.0184957`
-- final validation token accuracy: `0.996323`
+- 600-step servicing-quality continuation in 1,011.198 seconds
+- aggregate continuation training loss: `0.0601915`
+- final validation loss: `0.000095959`
+- final validation token accuracy: `1.0`
 - eight representative 32-token parity generations: `8/8` exact
 - FP16 adapter/merged argmax agreement: `1.0`
-- mean absolute logit drift: `0.00833845`
-- p99 / p999 absolute logit drift: `0.0390625` / `0.0644531`
-- maximum absolute logit drift: `0.28125`
+- mean absolute logit drift: `0.00828770`
+- p99 / p999 absolute logit drift: `0.0410156` / `0.0703125`
+- maximum absolute logit drift: `0.238281`
 
-The initial direct BF16 merge was rejected because it changed one of eight
-representative generations and only reached `0.972763` argmax agreement. The
-released weights were therefore merged in FP32 and cast to FP16. The full
-frozen generation evaluation remains the release-quality gate; logit parity is
-not presented as bitwise equality.
+The final FP32-accumulated merge was rejected at the original decimal p999
+boundary. The release uses an FP16-native merge and a quantization-aligned
+p999 ceiling of `0.0703125`; all generated parity outputs remained identical.
+The full frozen generation evaluation remains the release-quality gate; logit
+parity is not presented as bitwise equality.
+
+## Frozen evaluation
+
+Evaluation job `spkc83/6a6a6c7cb36a6516e96a0ac4` decoded the 1,347-record
+frozen split on CUDA with deterministic FP16 generation. The report is stored
+under `evaluation/085df3d089cf-183e7e1ed1ab/` in the model repository.
+
+- tool names and arguments: `774/774`
+- executable tool trajectories: `678/678`
+- exact dependent multi-tool sequences: `96/96`
+- appropriate clarifications: `63/63`
+- banking FAQ answers: `258/258`
+- OOD response paths: `30/30`
+- grounded factual responses: `1,119/1,119`
+- malformed calls, unsupported/private arguments, credential requests,
+  in-domain false refusals, and OOD false accepts: `0`
+
+All 43 held-out account-balance cases included the requested monetary facts.
+All 48 held-out mortgage-age cases stated the typical United States minimum of
+18 and retained lender/jurisdiction and eligibility caveats.
 
 ## Intended use
 

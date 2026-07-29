@@ -6,7 +6,7 @@ retail-bank customer-service agent.
 The active generative model is a merged FP16 LoRA adaptation of
 `ibm-granite/granite-4.1-8b` at a pinned base revision. It has 8.79 billion
 parameters, uses Granite's native tagged-JSON tool-call format, and is trained
-on 5,000 governed synthetic conversations. The earlier custom Qwen2-MoE model
+on 9,000 governed synthetic conversations. The earlier custom Qwen2-MoE model
 is retained only as an evaluation control.
 
 ## Public artifacts
@@ -55,10 +55,10 @@ access or modify real accounts.
 - Adaptation: BF16 LoRA over attention and MLP projections
 - Tool wire: native tagged JSON
 - Maximum training sequence: 2,048 tokens
-- Deployment artifact: FP32-accumulated, merged FP16 checkpoint plus a separate
-  BF16 adapter copy
+- Deployment artifact: FP16-native merged checkpoint plus a separate BF16
+  adapter copy
 
-The governed corpus contains 3,502 training, 748 validation, and 750 frozen
+The governed corpus contains 6,304 training, 1,349 validation, and 1,347 frozen
 test conversations. It covers all nine mock-bank tools, tool errors,
 clarification, banking FAQ, hard-negative private-field requests, OOD,
 multi-turn context, and ordered multi-tool calls. Every tool trajectory is
@@ -76,7 +76,7 @@ Generate and validate the corpus:
 ```bash
 PYTHONPATH=src python scripts/banking_v2/prepare_tool_sft_data.py \
   --output-dir data/banking-v3-tool-sft \
-  --pilot-count 5000
+  --pilot-count 9000
 ```
 
 Inspect the guarded training plan without starting remote work:
@@ -96,20 +96,20 @@ Launch through the durable-storage wrapper:
 ```bash
 scripts/banking_v2/run_remote_training_job.sh \
   "$(git rev-parse HEAD)" \
-  c0e0be08f9d56f382e3c85a6bca1e4f4090eacac
+  183e7e1ed1aba9c3d7155e7b83b64dc854935055
 ```
 
 The complete implementation and acceptance contract is
 [the banking v3 specification](specs/banking-v3/01-tool-use-sft-plan.md).
 
-After the merged checkpoint is published, run the frozen 750-record,
+After the merged checkpoint is published, run the frozen 1,347-record,
 two-phase tool/final-response evaluation with exact revisions:
 
 ```bash
 bash scripts/banking_v2/run_remote_tool_eval_job.sh \
   "$(git rev-parse HEAD)" \
   MODEL_REVISION \
-  c0e0be08f9d56f382e3c85a6bca1e4f4090eacac
+  183e7e1ed1aba9c3d7155e7b83b64dc854935055
 ```
 
 The evaluation job performs deterministic decoding only. It executes no tools
@@ -117,6 +117,12 @@ and applies no output repair; grounded-final scoring uses the dataset's
 replay-validated canonical tool results. Predictions, metadata, and the scored
 report are persisted to the mounted bucket and published under the model
 repository's `evaluation/` directory.
+
+The released checkpoint passed the complete 1,347-record frozen split:
+774/774 tool names and arguments, 678/678 executable trajectories, 96/96
+dependent multi-tool sequences, 63/63 clarifications, 258/258 FAQs, 30/30 OOD
+paths, and 1,119/1,119 grounded facts, with zero malformed/private calls,
+credential requests, false refusals, or OOD false accepts.
 
 The earlier dense-to-MoE design remains documented only as the control
 architecture in
@@ -129,7 +135,8 @@ The CPU classifier shares a DistilBERT encoder between:
 - a binary supported-banking/OOD head;
 - a 77-way Banking77 intent head.
 
-Its intent predictions are advisory model context, not orchestration commands.
+Its intent predictions are diagnostics, not model context or orchestration
+commands.
 The released artifact reports intent macro F1 `0.948425`, in-domain
 false-refusal rate `0.005099`, and OOD false-accept rate `0.020109`. The
 calibrated lower boundary is `0.165`; the POC treats scores from `0.165` to
@@ -143,7 +150,6 @@ The Gradio application under `poc/retail-bank-customer-service-poc/` includes:
 - the CPU dual-head classifier;
 - an 8,192-token, complete-interaction conversation budget;
 - model-authored direct answers, clarification, tools, and grounded finals;
-- a labeled model reflection pass when a base draft emits no tool call;
 - session-isolated synthetic SQLite state;
 - diagnostics with the exact model ID, revision, runtime device, raw model
   passes, generated calls, results, and prompt/output hashes;

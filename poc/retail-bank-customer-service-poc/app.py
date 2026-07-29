@@ -595,9 +595,9 @@ with gr.Blocks(
 
         <div class="synthetic-banner">
         <strong>Fictional data only.</strong> The dual-head classifier gates
-        OOD requests and supplies intent guidance. The 9B model owns
-        allowed conversation, tool selection, tool arguments, and final responses.
-        No real banking system is connected.
+        only high-confidence OOD requests; its intent predictions are diagnostic.
+        The 9B model owns allowed conversation, tool selection, tool arguments,
+        and final responses. No real banking system is connected.
         </div>
         """
     )

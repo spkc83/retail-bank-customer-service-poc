@@ -82,12 +82,13 @@ tool, add an argument, modify a result, or claim an action succeeded.
 
 ### Scale and mixture
 
-The validated corpus contains 5,000 conversations: 3,502 train, 748
-validation, and 750 test. The original 35,000-60,000 aspirational range was
+The validated corpus contains 9,000 conversations: 6,304 train, 1,349
+validation, and 1,347 test. The original 35,000-60,000 aspirational range was
 rejected after the generator's duplicate-text gate proved that scaling beyond
 the natural realization space would add repeated prompts. The accepted corpus
-contains about 4.25 million rendered tokens; three-plus training epochs remain
-inside the bounded run while preserving unique normalized user turns.
+preserves unique normalized user turns and adds real-world emergency-card,
+follow-up, account-balance, mortgage, deposit, interest, greeting, and
+small-talk coverage.
 
 | Slice | Target share |
 | --- | ---: |
@@ -283,7 +284,7 @@ Starting ranges:
 | Effective batch | 4 through accumulation |
 | Learning rate | 5e-5 to 2e-4; start at 1e-4 |
 | Warmup | 3%-5% |
-| Epochs | Approximately 3.4 at the 3,000-step ceiling |
+| Steps | Bounded initial SFT plus short, exact-revision continuation runs |
 | Checkpoints | Every 250-500 optimizer steps |
 
 The Jobs hardware inventory reports 96GB VRAM for `rtx-pro-6000`, so BF16 LoRA
@@ -293,43 +294,44 @@ precision switch. Full-parameter Adam training is out of scope.
 The final artifact includes:
 
 - the adapter checkpoint;
-- the FP32-accumulated, merged FP16 checkpoint;
+- the parity-selected merged FP16 checkpoint;
 - tokenizer and tool template;
 - base, data, package, and template fingerprints;
 - resume state and evaluation report.
 
 ## Token and five-hour budget
 
-Measured corpus budget:
+Measured release budget:
 
 1. Granite template hash:
    `6727ca16a39df05c41af54eb651aa618b50a29967ad3951a31b90c4e385573fc`.
-2. Training split: 2,974,599 input tokens and 144,442 labeled assistant tokens.
-3. Validation split: 636,374 input tokens and 30,821 labeled assistant tokens.
-4. Test split: 636,648 input tokens and 31,180 labeled assistant tokens.
-5. The worker stops optimizer work after 14,400 seconds even if the 3,000-step
-   ceiling is not reached.
-6. The outer Hugging Face Job timeout remains five hours, leaving one hour for
-   startup, validation, fresh-base merge, reload parity, and Hub upload.
+2. Training split: 6,304 conversations.
+3. Validation split: 1,349 conversations.
+4. Frozen test split: 1,347 conversations.
+5. The servicing-quality continuation completed 600 optimizer steps in
+   1,011.198 seconds.
+6. The outer Hugging Face Job timeout remains five hours, leaving substantial
+   margin for startup, validation, fresh-base merge, reload parity, and Hub
+   upload.
 
 ## Evaluation contract
 
 | Metric | Frozen denominator | Scoring rule | Gate |
 | --- | ---: | --- | ---: |
 | Banking77 classifier intent macro F1 | Existing test split | Standard macro F1 | >= 0.90 |
-| In-domain false refusal | 570 tool-bearing records | Refusal path / all supported turns | <= 2% |
-| OOD false accept | 57 OOD records | Banking tool call / all OOD turns | <= 1% |
-| Tool-name accuracy | 609 expected calls | Exact name and order / all expected calls | >= 0.95 |
-| Tool-argument accuracy | 609 expected calls | Exact schema-normalized args, name, and order / all expected calls | >= 0.90 |
-| Executable tool success | 570 tool-bearing records | Exact replay-validated public call / all tool scenarios | >= 0.93 |
-| Multi-tool exact sequence | 39 multi-tool records | Exact count, order, names, and args / all scenarios | >= 0.85 |
-| Clarification appropriateness | 48 ambiguous records | Requests only expected missing field / all ambiguous turns | >= 0.85 |
-| Grounded final factuality | 750 records | All required facts and no critical contradiction / all finals | >= 0.95 |
-| Malformed tool-call rate | 750 decisions | Unparseable attempted calls / all decisions | < 1% |
+| In-domain false refusal | 678 tool-bearing records | Refusal path / all supported turns | <= 2% |
+| OOD false accept | 30 OOD records | Banking tool call / all OOD turns | <= 1% |
+| Tool-name accuracy | 774 expected calls | Exact name and order / all expected calls | >= 0.95 |
+| Tool-argument accuracy | 774 expected calls | Exact schema-normalized args, name, and order / all expected calls | >= 0.90 |
+| Executable tool success | 678 tool-bearing records | Exact replay-validated public call / all tool scenarios | >= 0.93 |
+| Multi-tool exact sequence | 96 multi-tool records | Exact count, order, names, and args / all scenarios | >= 0.85 |
+| Clarification appropriateness | 63 ambiguous records | Requests only expected missing field / all ambiguous turns | >= 0.85 |
+| Grounded final factuality | 1,119 records | All required facts and no critical contradiction / all finals | >= 0.95 |
+| Malformed tool-call rate | 1,347 decisions | Unparseable attempted calls / all decisions | < 1% |
 | Unsupported/private arguments | All generated calls | Manifest failures / all calls | < 0.5% |
-| Credential request rate | 750 records | Account/customer/password/PIN requests / all turns | 0 |
-| No-tool FAQ quality | 36 FAQ records | Required facts without contradiction / all FAQs | >= 0.90 |
-| OOD response path | 57 OOD records | Expected no-tool scope response / all turns | >= 0.95 |
+| Credential request rate | 1,347 records | Account/customer/password/PIN requests / all turns | 0 |
+| No-tool FAQ quality | 258 FAQ records | Required facts without contradiction / all FAQs | >= 0.90 |
+| OOD response path | 30 OOD records | Expected no-tool scope response / all turns | >= 0.95 |
 
 Missing, malformed, or extra calls count as failures. The deterministic harness
 owns parsing, manifest, replay, state, path, and structured-fact scores.
@@ -341,6 +343,13 @@ release scorer.
 Every report records numerator, denominator, parse failures, dataset
 fingerprint, adapter/template hash, and checkpoint revision. A candidate that
 fails any hard gate cannot win through an averaged score.
+
+The release evaluation job `spkc83/6a6a6c7cb36a6516e96a0ac4` ran the exact
+model revision `085df3d089cfadd77424b548542da0390a54a23e` against dataset
+revision `183e7e1ed1aba9c3d7155e7b83b64dc854935055`. Every positive metric in
+the table scored `1.0`; malformed calls, unsupported/private arguments,
+credential requests, in-domain false refusals, and OOD false accepts were all
+zero.
 
 ## Implementation phases
 
@@ -386,7 +395,8 @@ train through QLoRA/LoRA, and merge the adapter for ZeroGPU.
 Drivers:
 
 - no structured tool trajectories in the current corpus;
-- repeated invalid account-number behavior under base and reflection prompts;
+- repeated invalid account-number behavior under earlier prompt-only runtime
+  prompts;
 - model-owned orchestration requirement;
 - one 96GB RTX PRO 6000 and five-hour training cap;
 - ordinary Transformers/ZeroGPU serving is lower risk than the custom MoE.

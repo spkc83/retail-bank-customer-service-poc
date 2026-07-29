@@ -96,13 +96,13 @@ The diagnostics panel exposes:
 
 A successful live turn is counted as 8.79B inference only when diagnostics show
 `spkc83/retail-bank-agent-9b` at revision
-`68a4e5b1ba898d7b5e4cce9d66357432c29fdf73` and a CUDA device. Preset prompts
+`085df3d089cfadd77424b548542da0390a54a23e` and a CUDA device. Preset prompts
 are evaluation cases, not hard-coded routes.
 
-The pinned checkpoint passed all 1,348 frozen test conversations: 801/801 tool
-names and arguments, 705/705 executable trajectories, 96/96 exact dependent
-multi-tool sequences, 63/63 appropriate clarifications, 205/205 banking FAQs,
-72/72 OOD/small-talk paths, and 1,147/1,147 grounded facts. It produced zero
+The pinned checkpoint passed all 1,347 frozen test conversations: 774/774 tool
+names and arguments, 678/678 executable trajectories, 96/96 exact dependent
+multi-tool sequences, 63/63 appropriate clarifications, 258/258 banking FAQs,
+30/30 OOD paths, and 1,119/1,119 grounded facts. It produced zero
 parse failures, malformed calls, private arguments, credential requests,
 in-domain false refusals, or OOD false accepts.
 

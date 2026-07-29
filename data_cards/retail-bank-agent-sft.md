@@ -14,12 +14,12 @@ pretty_name: Retail Bank Agent Tool-Use SFT
 
 # Retail Bank Agent Tool-Use SFT
 
-This dataset contains 5,000 deterministic, fictional retail-banking
+This dataset contains 9,000 deterministic, fictional retail-banking
 conversations for supervised fine-tuning of a conversational tool-using model.
 
 - Dataset: https://huggingface.co/datasets/spkc83/retail-bank-agent-sft
 - Training revision:
-  `c0e0be08f9d56f382e3c85a6bca1e4f4090eacac`
+  `183e7e1ed1aba9c3d7155e7b83b64dc854935055`
 - Source: https://github.com/spkc83/retail-bank-servicing
 - Model: https://huggingface.co/spkc83/retail-bank-agent-9b
 - Public POC:
@@ -27,12 +27,12 @@ conversations for supervised fine-tuning of a conversational tool-using model.
 
 ## Splits
 
-- Train: 3,502
-- Validation: 748
-- Frozen test: 750
+- Train: 6,304
+- Validation: 1,349
+- Frozen test: 1,347
 - Corpus fingerprint:
-  `d8014d6e7eda0d30f403461395c17882719fbe6b5b2c8f1ad4fe44deb25cd270`
-- Split seed: `7303`
+  `2bb7a400ed2556b15c7e5eb6147668041b5deef8ae4f037f9e2e52295ff29ab5`
+- Split seed: `711`
 
 ## Coverage
 
@@ -43,13 +43,14 @@ calls.
 
 | Scenario family | Conversations |
 |---|---:|
-| Clarification | 294 |
-| Hard negative | 294 |
-| Multi-turn | 588 |
-| No-tool banking FAQ | 294 |
-| OOD | 294 |
-| Tool error | 588 |
-| Tool success | 2,648 |
+| Clarification | 333 |
+| Conversation | 999 |
+| Hard negative | 333 |
+| Multi-turn | 1,665 |
+| No-tool banking FAQ | 1,665 |
+| OOD | 333 |
+| Tool error | 666 |
+| Tool success | 3,006 |
 
 Every tool-bearing record was replayed against isolated deterministic
 synthetic state before inclusion. Assistant tool-call and final-response tokens
