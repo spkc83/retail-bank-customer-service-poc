@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /workspace
-uv run --extra scale scripts/banking_v2/cloud_train_banking_moe.py \
-  --execute-remote \
-  --allow-remote-execution \
-  --push-to-hub \
-  --hub-dest spkc83/hello-banking-moe-9b \
-  --manifest data/banking-v2/manifest.json \
-  --output-dir /tmp/hello-slm-banking-v2-artifacts \
-  --max-steps 1000 \
-  --batch-size 1 \
-  --max-seq-len 512 \
-  --learning-rate 2e-5 \
-  --checkpoint-every 250
+if [[ $# -ne 2 ]]; then
+  echo "usage: $0 SOURCE_COMMIT DATASET_REVISION" >&2
+  exit 2
+fi
+
+source_commit="$1"
+dataset_revision="$2"
+script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${source_commit}/scripts/banking_v2/hf_job_tool_sft.py"
+
+hf jobs uv run \
+  --flavor rtx-pro-6000 \
+  --timeout 5h \
+  --secrets HF_TOKEN \
+  --volume hf://buckets/spkc83/jobs-artifacts:/data \
+  --label project=retail-bank-agent-v3 \
+  --label source="${source_commit:0:8}" \
+  "$script_url" \
+  --source-commit "$source_commit" \
+  --dataset-revision "$dataset_revision" \
+  --output-dir "/data/retail-bank-agent-9b-${source_commit:0:8}"

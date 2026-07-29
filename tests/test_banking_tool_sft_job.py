@@ -63,6 +63,15 @@ def test_job_command_preserves_five_hour_internal_budget() -> None:
     assert '"--push-to-hub",' in source
 
 
+def test_remote_launcher_mounts_durable_job_bucket() -> None:
+    launcher = Path(
+        "scripts/banking_v2/run_remote_training_job.sh"
+    ).read_text(encoding="utf-8")
+
+    assert "--volume hf://buckets/spkc83/jobs-artifacts:/data" in launcher
+    assert '--output-dir "/data/retail-bank-agent-9b-${source_commit:0:8}"' in launcher
+
+
 def test_post_training_evaluation_detaches_closed_trackio_callback() -> None:
     worker_source = Path(
         "scripts/banking_v2/cloud_train_tool_sft.py"
