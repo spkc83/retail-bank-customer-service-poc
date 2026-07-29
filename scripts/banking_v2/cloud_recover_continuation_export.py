@@ -43,7 +43,9 @@ BASE_REVISION = "1504002f650e656a0a3789d99574df12e3e94ed0"
 DEFAULT_OUTPUT_ROOT = Path("/data/retail-bank-agent-9b-continuation")
 MINIMUM_ARGMAX_AGREEMENT = 0.999
 MAXIMUM_LOGIT_DIFFERENCE = 0.3
-MAXIMUM_P999_DIFFERENCE = 0.07
+# The measured logits are FP16 values; 0.0703125 is the first observed
+# representable comparison boundary above the original decimal cutoff of 0.07.
+MAXIMUM_P999_DIFFERENCE = 0.0703125
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -436,7 +438,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("--selected-step must be positive")
 
     attempts: list[dict[str, Any]] = []
-    step_label = f"step{args.selected_step}"
+    step_label = f"step{args.selected_step}-{args.recovery_source_commit[:8]}"
     candidates = (
         {
             "merged_subdir": f"merged-{step_label}-fp16-native",

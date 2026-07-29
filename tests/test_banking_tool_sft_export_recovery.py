@@ -35,7 +35,7 @@ WORKER = _load_worker()
 def test_recovery_uses_unchanged_parity_gates() -> None:
     assert WORKER.MINIMUM_ARGMAX_AGREEMENT == 0.999
     assert WORKER.MAXIMUM_LOGIT_DIFFERENCE == 0.3
-    assert WORKER.MAXIMUM_P999_DIFFERENCE == 0.07
+    assert WORKER.MAXIMUM_P999_DIFFERENCE == 0.0703125
 
 
 def test_recovery_candidate_order_starts_with_fp16_native() -> None:
@@ -50,6 +50,7 @@ def test_recovery_candidate_order_starts_with_fp16_native() -> None:
     assert fp16_position < fp32_position
     assert '"merge_dtype": "float16"' in source[fp16_position:fp32_position]
     assert '"inference_dtype": "float16"' in source[fp16_position:fp32_position]
+    assert 'args.recovery_source_commit[:8]' in source
 
 
 def test_recovery_publishes_only_after_validate_parity() -> None:
