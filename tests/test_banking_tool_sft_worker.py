@@ -10,6 +10,9 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+from model_service import MODEL_TOOLS  # type: ignore[import-not-found]
+
+from hello_slm.banking_tool_sft_data import public_tool_manifest
 
 WORKER_PATH = Path("scripts/banking_v2/cloud_train_tool_sft.py")
 
@@ -247,6 +250,51 @@ def test_remote_model_load_has_no_blanket_quantized_fallback() -> None:
 
     assert "except Exception" not in remote_body
     assert "if configs[\"quantization\"] is not None" in remote_body
+
+
+def test_poc_serves_the_exact_sft_tool_manifest() -> None:
+    serving_manifest = tuple(MODEL_TOOLS)
+
+    assert tuple(public_tool_manifest()) == worker.PUBLIC_BANKING_TOOL_MANIFEST
+    assert serving_manifest == worker.PUBLIC_BANKING_TOOL_MANIFEST
+
+
+def test_trainer_checkpoint_metadata_is_resume_compatible(tmp_path: Path) -> None:
+    fingerprint = {"base_revision": "pinned", "dataset": {"sha256": "abc"}}
+    checkpoint_metadata = worker.save_trainer_checkpoint_metadata(
+        tmp_path,
+        step=500,
+        fingerprint=fingerprint,
+    )
+
+    assert checkpoint_metadata == tmp_path / "checkpoint-500" / "metadata.json"
+    worker.validate_resume_fingerprint(checkpoint_metadata.parent, fingerprint)
+    payload = json.loads(checkpoint_metadata.read_text(encoding="utf-8"))
+    assert payload["contract"] == "banking-tool-sft-resume/v1"
+    assert payload["optimizer_scheduler_rng_state"] is True
+
+
+def test_dataset_identity_is_stable_across_job_local_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = tmp_path / "job-a" / "manifest.json"
+    second = tmp_path / "job-b" / "manifest.json"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text('{"contract":"test"}', encoding="utf-8")
+    second.write_text('{"contract":"test"}', encoding="utf-8")
+    monkeypatch.setenv(
+        "RETAIL_BANK_TOOL_SFT_DATASET_REPO",
+        "spkc83/retail-bank-agent-sft",
+    )
+    monkeypatch.setenv(
+        "RETAIL_BANK_TOOL_SFT_DATASET_REVISION",
+        "fcf065db",
+    )
+
+    assert worker.dataset_identity(first) == worker.dataset_identity(second)
+    assert "manifest_path" not in worker.dataset_identity(first)
 
 
 def test_configs_pin_tool_sft_contract_and_disable_push_by_default() -> None:

@@ -99,10 +99,16 @@ def test_greeting_and_uncertain_turns_are_answered_by_9b(
         lambda *_args: route("uncertain", banking_probability=0.52, intent="small_talk"),
     )
     monkeypatch.setattr(app_module, "count_tokens", lambda *_args: 50)
+    outputs = iter(
+        [
+            "Hey! How can I help with your banking today?",
+            "<use_original/>",
+        ]
+    )
     monkeypatch.setattr(
         app_module,
         "generate_text",
-        lambda *_args: "Hey! How can I help with your banking today?",
+        lambda *_args: next(outputs),
     )
 
     result = app_module.run_model_turn("yo, sup ?", [], [], request())

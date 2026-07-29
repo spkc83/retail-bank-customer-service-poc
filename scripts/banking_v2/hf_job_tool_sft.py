@@ -42,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-revision", required=True)
     parser.add_argument("--manifest")
     parser.add_argument("--output-dir", default="/data/retail-bank-agent-9b")
+    parser.add_argument("--resume-from")
     parser.add_argument("--max-steps", type=int, default=3_000)
     parser.add_argument("--max-train-seconds", type=int, default=14_400)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=2)
@@ -131,6 +132,8 @@ def main() -> int:
             "--trackio-run-name",
             f"granite-tool-sft-{args.source_commit[:8]}",
         ]
+        if args.resume_from:
+            command.extend(["--resume-from", args.resume_from])
         subprocess.run(command, cwd=source_root, env=env, check=True)
     return 0
 

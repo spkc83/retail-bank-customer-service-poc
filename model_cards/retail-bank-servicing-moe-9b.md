@@ -137,8 +137,9 @@ non-banking requests return:
 
 Prompting or fine-tuning alone does not guarantee that exact response. The
 released DistilBERT router has a binary supported-banking/OOD head and a 77-way
-Banking77 intent head. Its held-out intent macro F1 is `0.951208`, with OOD
-false-accept rate `0.007733` at threshold `0.98`. The public POC is an
+Banking77 intent head. Its held-out intent macro F1 is `0.948425`, with OOD
+false-accept rate `0.020109` at its calibrated `0.165` lower boundary. The
+public POC is an
 experimental synthetic environment, not a production-qualified banking agent.
 
 ## Public POC serving role

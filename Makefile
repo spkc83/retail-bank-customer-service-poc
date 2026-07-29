@@ -1,22 +1,23 @@
-.PHONY: install audit-data prepare-data model-plan tiny-smoke test lint typecheck
+.PHONY: install prepare-data model-plan tiny-smoke test lint typecheck
 
 install:
 	python -m pip install -e '.[dev]'
 
-audit-data:
-	python -m hello_slm.banking_data audit-sources
-
 prepare-data:
-	python -m hello_slm.banking_data prepare
+	PYTHONPATH=src python scripts/banking_v2/prepare_tool_sft_data.py \
+		--output-dir data/banking-v3-tool-sft \
+		--pilot-count 5000
 
 model-plan:
-	PYTHONPATH=src python scripts/banking_v2/train_banking_moe.py
+	PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
+		--manifest data/banking-v3-tool-sft/manifest.json
 
 tiny-smoke:
-	PYTHONPATH=src python scripts/banking_v2/cloud_train_banking_moe.py \
+	PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
 		--run-tiny-smoke \
+		--family granite \
 		--max-steps 1 \
-		--output-dir artifacts/banking-v2-tiny-smoke
+		--output-dir artifacts/banking-v3-tool-sft-smoke
 
 test:
 	python -m pytest tests/test_banking_*.py poc/retail-bank-customer-service-poc/tests

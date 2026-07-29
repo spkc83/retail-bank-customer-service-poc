@@ -17,8 +17,9 @@ direct registered ZeroGPU chat event
 ```
 
 The domain head produces `in_domain`, `uncertain`, or `out_of_domain`.
-`p(in_domain) >= 0.98` is confidently in-domain, `p(in_domain) < 0.50` is OOD
-by the binary head's decision boundary, and the middle region is uncertain.
+`p(in_domain) >= 0.50` is confidently in-domain, `p(in_domain) < 0.165` is OOD
+by the calibrated lower boundary, and the middle region is uncertain. The
+lower boundary is loaded from the released router artifact.
 OOD bypasses the 9B generator, although every turn enters the managed ZeroGPU
 event. The intent head always exposes its top three predictions; they are
 included as advisory model context rather than mapped to backend workflows.

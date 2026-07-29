@@ -28,6 +28,7 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 
+from hello_slm.banking_tool_sft_data import public_tool_manifest
 from hello_slm.banking_tool_wire import IGNORED_LABEL, ToolWireAdapter
 
 REMOTE_CONFIRMATION_ENV = "RETAIL_BANK_ALLOW_REMOTE_TOOL_SFT"
@@ -50,73 +51,7 @@ LORA_TARGET_MODULES = (
     "down_proj",
 )
 
-PUBLIC_BANKING_TOOL_MANIFEST: tuple[dict[str, Any], ...] = (
-    {
-        "name": "list_accounts",
-        "description": "List the signed-in synthetic customer's accounts and balances.",
-        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-    },
-    {
-        "name": "list_cards",
-        "description": "List the signed-in synthetic customer's cards and statuses.",
-        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-    },
-    {
-        "name": "list_service_cases",
-        "description": "List recent synthetic service cases.",
-        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-    },
-    {
-        "name": "list_transactions",
-        "description": "List recent synthetic account transactions.",
-        "parameters": {
-            "type": "object",
-            "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 20}},
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "list_transfers",
-        "description": "List the signed-in synthetic customer's transfers and statuses.",
-        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-    },
-    {
-        "name": "freeze_card",
-        "description": "Freeze a synthetic card, optionally selected by last four digits.",
-        "parameters": {
-            "type": "object",
-            "properties": {"last4": {"type": ["string", "null"]}},
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "replace_card",
-        "description": "Request replacement of a synthetic card.",
-        "parameters": {
-            "type": "object",
-            "properties": {"last4": {"type": ["string", "null"]}},
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "dispute_transaction",
-        "description": "Dispute a synthetic transaction by description.",
-        "parameters": {
-            "type": "object",
-            "properties": {"description": {"type": ["string", "null"]}},
-            "additionalProperties": False,
-        },
-    },
-    {
-        "name": "cancel_transfer",
-        "description": "Cancel a synthetic pending transfer by recipient.",
-        "parameters": {
-            "type": "object",
-            "properties": {"recipient": {"type": ["string", "null"]}},
-            "additionalProperties": False,
-        },
-    },
-)
+PUBLIC_BANKING_TOOL_MANIFEST: tuple[dict[str, Any], ...] = tuple(public_tool_manifest())
 
 
 @dataclass(frozen=True)
@@ -422,7 +357,8 @@ def sha256_file(path: Path) -> str | None:
 
 def dataset_identity(manifest_path: Path) -> dict[str, str | None]:
     return {
-        "manifest_path": str(manifest_path),
+        "repository": os.environ.get("RETAIL_BANK_TOOL_SFT_DATASET_REPO"),
+        "revision": os.environ.get("RETAIL_BANK_TOOL_SFT_DATASET_REVISION"),
         "manifest_sha256": sha256_file(manifest_path),
     }
 
@@ -450,6 +386,33 @@ def validate_resume_fingerprint(resume_from: Path, expected: Mapping[str, Any]) 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     if metadata.get("fingerprint") != expected:
         raise ValueError("resume fingerprint does not match current training inputs")
+
+
+def save_trainer_checkpoint_metadata(
+    output_dir: Path,
+    *,
+    step: int,
+    fingerprint: Mapping[str, Any],
+) -> Path:
+    checkpoint = output_dir / f"checkpoint-{step}"
+    checkpoint.mkdir(parents=True, exist_ok=True)
+    path = checkpoint / "metadata.json"
+    path.write_text(
+        json.dumps(
+            {
+                "contract": "banking-tool-sft-resume/v1",
+                "step": step,
+                "worker": "cloud_train_tool_sft",
+                "fingerprint": dict(fingerprint),
+                "optimizer_scheduler_rng_state": True,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def tokenize_records(
@@ -914,6 +877,22 @@ def run_remote_training(config: WorkerConfig) -> dict[str, Any]:
                 control.should_save = True
             return control
 
+    class ResumeMetadataCallback(TrainerCallback):
+        def on_save(
+            self,
+            args: Any,
+            state: Any,
+            control: Any,
+            **kwargs: Any,
+        ) -> Any:
+            del args, kwargs
+            save_trainer_checkpoint_metadata(
+                config.output_dir,
+                step=int(state.global_step),
+                fingerprint=fingerprint,
+            )
+            return control
+
     trainer = SFTTrainer(
         model=model,
         args=configs["training_args"],
@@ -925,7 +904,10 @@ def run_remote_training(config: WorkerConfig) -> dict[str, Any]:
         ),
         peft_config=configs["lora"],
         processing_class=tokenizer,
-        callbacks=[WallClockStopCallback(config.max_train_seconds)],
+        callbacks=[
+            WallClockStopCallback(config.max_train_seconds),
+            ResumeMetadataCallback(),
+        ],
     )
     train_output = trainer.train(
         resume_from_checkpoint=str(config.resume_from) if config.resume_from else None

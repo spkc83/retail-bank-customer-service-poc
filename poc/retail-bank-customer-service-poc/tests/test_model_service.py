@@ -90,7 +90,7 @@ def test_public_tool_schemas_use_customer_facing_arguments() -> None:
     assert "transaction_id" not in json.dumps(MODEL_TOOLS)
 
 
-def test_qwen_tool_call_parser_accepts_multiple_ordered_calls_and_ignores_prose() -> None:
+def test_tagged_json_parser_accepts_multiple_ordered_calls_and_ignores_prose() -> None:
     calls = parse_tool_calls(
         """I will check both.
 <tool_call>
@@ -119,7 +119,7 @@ def test_qwen_tool_call_parser_accepts_multiple_ordered_calls_and_ignores_prose(
         "<tool_call>",
     ],
 )
-def test_qwen_tool_call_parser_rejects_malformed_protocol(output: str) -> None:
+def test_tagged_json_parser_rejects_malformed_protocol(output: str) -> None:
     with pytest.raises(AgentProtocolError):
         parse_tool_calls(output)
 
@@ -279,14 +279,15 @@ def test_tool_calls_execute_in_order_and_second_model_pass_writes_final_answer()
     assert all(item["ok"] is True for item in result.tool_results)
     assert len(model.calls) == 2
     assert model.calls[0]["tools"] == MODEL_TOOLS
-    assert model.calls[1]["tools"] is None
+    assert model.calls[1]["tools"] == MODEL_TOOLS
     assert result.tool_calls[0].id.endswith("_0_list_transfers")
     assert result.tool_calls[1].id.endswith("_1_list_transactions")
     assert model.calls[1]["messages"][-2]["tool_call_id"] == result.tool_calls[0].id
     assert model.calls[1]["messages"][-1]["tool_call_id"] == result.tool_calls[1].id
     transfer_result = model.calls[1]["messages"][-2]["content"]
-    assert '"amount": "USD 450.00"' in transfer_result
-    assert "amount_cents" not in transfer_result
+    assert json.loads(transfer_result) == result.tool_results[0]
+    assert '"amount_cents":45000' in transfer_result
+    assert '"amount":' not in transfer_result
     system_prompt = model.calls[0]["messages"][0]["content"]
     assert "already authenticated" in system_prompt
     assert "must call the appropriate supplied tool" in system_prompt

@@ -74,8 +74,8 @@ class StaticPredictionModel:
         return self._outputs[str(record["record_id"])]
 
 
-class QwenXmlToolAdapter:
-    def __init__(self, *, template_hash: str = "sha256:qwen-xml-tool-call-v1") -> None:
+class TaggedJsonToolAdapter:
+    def __init__(self, *, template_hash: str = "sha256:tagged-json-tool-call-v1") -> None:
         self._template_hash = template_hash
 
     @property
@@ -358,7 +358,7 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--output", type=Path, help="Write JSON report to this path.")
     parser.add_argument("--checkpoint-revision", default="unversioned-local")
-    parser.add_argument("--template-hash", default="sha256:qwen-xml-tool-call-v1")
+    parser.add_argument("--template-hash", default="sha256:tagged-json-tool-call-v1")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -377,7 +377,7 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
     report = evaluate_records(
         records,
         model=StaticPredictionModel(predictions),
-        adapter=QwenXmlToolAdapter(template_hash=args.template_hash),
+        adapter=TaggedJsonToolAdapter(template_hash=args.template_hash),
         checkpoint_revision=args.checkpoint_revision,
     )
     serialized = json.dumps(report, indent=2, sort_keys=True) + "\n"

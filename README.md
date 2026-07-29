@@ -1,256 +1,176 @@
-# Retail Bank Servicing Model Development
+# Retail Bank Agent
 
-Training, evaluation, routing, and demonstration code for a focused retail-bank
-customer-service model. The repository contains only the banking model-development
-track and its public proof-of-concept application.
+Training, evaluation, and public demonstration code for a model-driven
+retail-bank customer-service agent.
 
-The released language model is an 8.94B-parameter Qwen2-MoE checkpoint derived
-from the pinned `Qwen/Qwen2.5-1.5B-Instruct` model. It is domain-adapted, not
-trained from random initialization. Approximately 2.07B parameters are active
-per token.
+The active generative model is a merged BF16 LoRA adaptation of
+`ibm-granite/granite-4.1-8b` at a pinned base revision. It has 8.79 billion
+parameters, uses Granite's native tagged-JSON tool-call format, and is trained
+on 5,000 governed synthetic conversations. The earlier custom Qwen2-MoE model
+is retained only as an evaluation control.
 
 ## Public artifacts
 
-- Model: https://huggingface.co/spkc83/retail-bank-servicing-moe-9b
+- Model: https://huggingface.co/spkc83/retail-bank-agent-9b
+- Tool-use SFT dataset:
+  https://huggingface.co/datasets/spkc83/retail-bank-agent-sft
 - Domain and intent router:
   https://huggingface.co/spkc83/retail-bank-domain-intent-router
 - Router training dataset:
   https://huggingface.co/datasets/spkc83/retail-bank-router-training-data
-- Public application:
+- Public ZeroGPU application:
   https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
 - Standalone application source:
   https://github.com/spkc83/retail-bank-servicing-poc
 - Model-development source:
   https://github.com/spkc83/retail-bank-servicing
 
-## System
+## Runtime
 
 ```text
-Authenticated request
-  → credential guard
-  → CPU-resident dual-head router gates OOD requests
-  → intent probabilities guide the ZeroGPU 9B MoE agent
-  → 9B model responds directly or emits Qwen tool calls
-  → a no-tool draft receives a labeled 9B tool-use reflection pass
-  → session-isolated synthetic SQLite executes generated calls
-  → tool results return to the 9B model for its final response
+Authenticated synthetic customer
+  → CPU dual-head classifier identifies OOD and predicts advisory intents
+  → in-domain or uncertain request enters the ZeroGPU 8.79B agent
+  → model responds directly or emits tagged-JSON tool calls
+  → generated calls execute against session-isolated synthetic SQLite
+  → tool results return to the model for a grounded final response
 ```
 
-The POC is a behavioral experiment. The dual-head router exposes a three-way
-domain decision plus its top three intent predictions. Only OOD
-bypasses the 9B model. For allowed and uncertain turns, the 9B model owns
-conversation, clarification, tool selection, tool arguments, and final wording.
-The runtime performs mechanical parsing and direct mock-tool execution; it does
-not replace the model's answer with a deterministic banking response.
-Short follow-ups may be classified with the immediately preceding banking
-exchange. The reflection pass can emit a valid tool call or explicitly retain
-the untouched base answer; it does not map classifier intents to tools.
+The classifier does not select tools. The generative model owns the
+conversation, clarification, tool choice, public arguments, and final wording.
+The runtime performs mechanical schema validation, mock-tool execution, context
+budgeting, and diagnostics. High-confidence OOD requests receive the governed
+financial-services scope response without invoking the 8.79B model.
 
-The application is synthetic. It has no connection to a bank and cannot access
-or modify real accounts.
+This is a research demonstration. It has no connection to a bank and cannot
+access or modify real accounts.
 
-## Model architecture
+## Model and training
 
-- `Qwen2MoeForCausalLM`
-- 8,943,713,792 total parameters
-- approximately 2,073,443,840 active parameters per token
-- 28 layers
-- 28 routed experts per layer, top-2 routing
-- BF16 released checkpoint
-- inherited 151,936-token Qwen vocabulary
+- Base: `ibm-granite/granite-4.1-8b`
+- Base revision:
+  `1504002f650e656a0a3789d99574df12e3e94ed0`
+- Architecture: dense decoder-only causal transformer
+- Parameters: 8,791,592,960
+- Adaptation: BF16 LoRA over attention and MLP projections
+- Tool wire: native tagged JSON
+- Maximum training sequence: 2,048 tokens
+- Deployment artifact: merged BF16 checkpoint plus a separate adapter copy
 
-Compatible embeddings, attention, normalization, and language representations
-were copied from the pinned 1.5B base model. The dense MLP was expanded into a
-shared expert and zero-initialized routed residual experts. Router weights and
-routed down projections were then adapted for 1,000 optimizer steps.
+The governed corpus contains 3,502 training, 748 validation, and 750 frozen
+test conversations. It covers all nine mock-bank tools, tool errors,
+clarification, banking FAQ, hard-negative private-field requests, OOD,
+multi-turn context, and ordered multi-tool calls. Every tool trajectory is
+replayed against deterministic synthetic state before inclusion.
 
-See [the architecture specification](specs/banking-v2/04-dense-to-moe-routing.md)
-for the conversion and routing details.
+All generative rows are self-authored synthetic data under MIT. Banking77 and
+CLINC remain classifier/evaluation-only. The quarantined Bitext corpus
+contributes no rows to this release.
 
-## Training data
+See the [tool-use dataset card](data_cards/retail-bank-agent-sft.md) for split,
+coverage, provenance, and privacy details.
 
-Generative adaptation uses the prepared Bitext retail-banking corpus plus a
-small self-authored set of governed out-of-domain and multi-turn conversations.
-The released split contains 22,033 training, 1,008 validation, and 1,001 test
-conversations.
-
-Banking77 and CLINC150 are classifier-only sources. They are used for the
-dual-head router and are prohibited from the generative training lane.
-
-Data preparation is deterministic and enforces:
-
-- pinned source revisions and fingerprints;
-- placeholder normalization;
-- PII-like value scrubbing;
-- exact and clustered cross-split deduplication;
-- explicit source licenses and trainability;
-- exact stock responses only for governed OOD records.
+Generate and validate the corpus:
 
 ```bash
-python -m pip install -e '.[dev]'
-python -m hello_slm.banking_data audit-sources
-python -m hello_slm.banking_data prepare
+PYTHONPATH=src python scripts/banking_v2/prepare_tool_sft_data.py \
+  --output-dir data/banking-v3-tool-sft \
+  --pilot-count 5000
 ```
 
-Generated corpora and downloaded source snapshots are ignored by Git. Their
-tracked lock files are under `data/sources/`.
-
-## MoE training and evaluation
-
-The reproducible model shape and run limits are in
-`configs/banking-v2-moe-9b.toml`. The executable worker is
-`scripts/banking_v2/cloud_train_banking_moe.py`.
-
-Run the offline tiny architecture test:
+Inspect the guarded training plan without starting remote work:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/cloud_train_banking_moe.py \
-  --run-tiny-smoke \
-  --max-steps 1 \
-  --output-dir artifacts/banking-v2-tiny-smoke
+PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
+  --manifest data/banking-v3-tool-sft/manifest.json
 ```
 
-Inspect the guarded full-run plan without launching paid infrastructure:
+The full Hugging Face Jobs entry point is
+`scripts/banking_v2/hf_job_tool_sft.py`. It requires exact source, dataset, and
+base revisions; a five-hour outer timeout; a four-hour optimizer callback; and
+fresh-base adapter merge/reload parity before Hub upload.
+
+Launch through the durable-storage wrapper:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/train_banking_moe.py
+scripts/banking_v2/run_remote_training_job.sh \
+  "$(git rev-parse HEAD)" \
+  fcf065dbb524f387d456f731dd708fba6da0f361
 ```
 
-Remote execution requires both the worker flag and its explicit confirmation
-environment variable. Checkpoint resumes verify the base revision, dataset
-fingerprint, converted-state manifest, optimizer, scheduler, and RNG state.
+The complete implementation and acceptance contract is
+[the banking v3 specification](specs/banking-v3/01-tool-use-sft-plan.md).
+The earlier dense-to-MoE design remains documented only as the control
+architecture in
+[the historical routing note](specs/banking-v2/04-dense-to-moe-routing.md).
 
-The released run completed 1,000 steps on an RTX PRO 6000:
+## Dual-head classifier
 
-- final training loss: `1.2638`;
-- validation loss: `0.7775`;
-- every expert-health gate passed at steps 250, 500, 750, and 1,000.
-
-These values demonstrate a completed run, not production readiness. The raw
-model still requires external domain, credential, tool, and output guards.
-
-## Dual-head router
-
-The CPU router shares a DistilBERT encoder between:
+The CPU classifier shares a DistilBERT encoder between:
 
 - a binary supported-banking/OOD head;
 - a 77-way Banking77 intent head.
 
-Prepare and train it locally:
-
-```bash
-PYTHONPATH=src python scripts/banking_v2/prepare_dual_head_router_data.py
-PYTHONPATH=src python scripts/banking_v2/train_dual_head_router.py --help
-```
-
-The public router artifact reports intent macro F1 `0.951208`, in-domain
-false-refusal rate `0.013689`, and OOD false-accept rate `0.007733` at a
-calibrated banking threshold of `0.98`.
-
-## Local model lab
-
-The Shiny application loads a local Transformers checkpoint and supports
-multi-turn banking chat:
-
-```bash
-RETAIL_BANK_MODEL=/path/to/checkpoint \
-  shiny run --reload src/hello_slm/banking_shiny_app.py
-```
-
-The canonical BF16 checkpoint needs more than 12 GB of VRAM. The conversion
-script creates a separate GGUF copy and quantizes it to `Q4_K_M`; it does not
-modify the released BF16 model. The resulting file is about 5.1 GiB and fits in
-the 12 GB TITAN V, but local inference is not a supported release path yet:
-current llama.cpp builds do not load this tied-output Qwen2-MoE checkpoint
-without a loader workaround, and the tested workaround did not produce valid
-text. Use the public ZeroGPU application for validated model inference.
-
-With the model snapshot and llama.cpp checked out locally:
-
-```bash
-scripts/banking_v2/quantize_local_gguf.sh \
-  /path/to/retail-bank-servicing-moe-9b \
-  /path/to/llama.cpp \
-  artifacts/gguf
-
-sha256sum artifacts/gguf/retail-bank-servicing-moe-9b-q4_k_m.gguf
-```
+Its intent predictions are advisory model context, not orchestration commands.
+The released artifact reports intent macro F1 `0.948425`, in-domain
+false-refusal rate `0.005099`, and OOD false-accept rate `0.020109`. The
+calibrated lower boundary is `0.165`; the POC treats scores from `0.165` to
+`0.50` as uncertain and asks the 9B model to adjudicate them.
 
 ## Public POC
 
-The deployable Gradio source is in
-`poc/retail-bank-customer-service-poc/`. It includes:
+The Gradio application under `poc/retail-bank-customer-service-poc/` includes:
 
-- two static demonstration accounts configured through a Space secret;
-- a learned CPU domain/intent router with OOD gating and
-  top-three intent guidance;
-- CPU session-isolated synthetic SQLite state;
-- ZeroGPU 9B-owned conversation and Qwen tool calling;
-- an experimental labeled 9B reflection pass after a no-tool base draft;
-- an 8,192-token input budget retaining complete user/assistant/tool
-  interactions without splitting a turn;
-- diagnostics for route probabilities, intent candidates, generated tool calls,
-  tool results, response path, raw pass outputs, prompt/output hashes, and
-  actual runtime device metadata;
-- preset read, write, multi-turn, sensitive-data, and OOD cases.
+- two static demonstration identities selected through Space authentication;
+- the CPU dual-head classifier;
+- an 8,192-token, complete-interaction conversation budget;
+- model-authored direct answers, clarification, tools, and grounded finals;
+- a labeled model reflection pass when a base draft emits no tool call;
+- session-isolated synthetic SQLite state;
+- diagnostics with the exact model ID, revision, runtime device, raw model
+  passes, generated calls, results, and prompt/output hashes;
+- preset read, write, multi-turn, FAQ, and OOD scenarios.
 
-The hidden conversation state stores complete user, assistant, tool-call, and
-tool-result messages. Each inference builds a tokenizer-measured context from
-the newest complete interactions up to 8,192 input tokens and reserves 512
-tokens for generation. The current synthetic data has limited address-history
-coverage through service-case records; it is not a full customer-profile audit
-log.
-
-ZeroGPU compatibility requires the complete chat turn to be registered directly
-in the Gradio event graph. Every submitted turn enters that one managed event;
-the CPU-resident dual-head router runs inside its worker, OOD
-returns the stock response without invoking the 9B generator, and all other
-turns continue to model inference. If ZeroGPU fails, the UI reports model
-unavailability and does not synthesize a banking response on CPU.
+ZeroGPU owns the model generation boundary. If GPU inference fails, the
+application reports the failure and does not synthesize a Python banking
+answer.
 
 ## Verification
 
 ```bash
-python -m pytest \
-  tests/test_banking_chat_runtime.py \
-  tests/test_banking_cloud_worker.py \
-  tests/test_banking_data.py \
-  tests/test_banking_dual_head_router.py \
-  tests/test_banking_hf_generator.py \
-  tests/test_banking_moe.py \
-  tests/test_banking_policy.py \
-  tests/test_banking_router_data.py \
-  tests/test_banking_router_training.py \
-  tests/test_banking_shiny_app.py \
-  poc/retail-bank-customer-service-poc/tests
-ruff check src scripts tests poc/retail-bank-customer-service-poc
-mypy src scripts tests
+python -m pytest -q tests
+ruff check .
+MYPYPATH=src mypy src scripts tests
+uv lock --check
+```
+
+POC verification also requires its application dependencies and a live
+ZeroGPU round trip:
+
+```bash
+POC_SKIP_MODEL_LOAD=1 POC_SKIP_ROUTER_LOAD=1 \
+  pytest -q poc/retail-bank-customer-service-poc/tests
 ```
 
 ## Repository map
 
 ```text
-configs/        banking dense-baseline and MoE run configurations
-data_cards/     released classifier-dataset documentation
+configs/        pinned model candidates and training configurations
+data_cards/     classifier-dataset documentation
 data/sources/   governed source locks; generated data is ignored
-model_cards/    released generative-model and router documentation
-poc/            current authenticated Gradio application
-scripts/        cloud training, evaluation, and router tooling
-specs/          banking data, model, routing, evaluation, and serving contracts
-src/hello_slm/  banking data, model, router, policy, and local UI modules
-tests/          banking-only regression tests
+model_cards/    released model and classifier documentation
+poc/            authenticated Gradio/ZeroGPU application
+scripts/        corpus, training, evaluation, and Hub job entry points
+specs/          data, architecture, evaluation, and serving contracts
+src/hello_slm/  dataset, tool-wire, evaluator, router, and local UI modules
+tests/          banking regression tests
 ```
 
-## Safety boundary
+## Safety and license
 
-This is a research demonstration, not financial advice or a production banking
-system. Do not enter passwords, PINs, one-time codes, full account numbers, or
-payment-card details. The model may produce incorrect, inconsistent, or unsafe
-financial guidance. Generated operations run only against isolated synthetic
-state so conversational and tool-use behavior can be observed directly.
+Do not enter passwords, PINs, one-time codes, full account numbers, or
+payment-card details. The model may produce incorrect or inconsistent banking
+guidance. All operations affect only isolated synthetic state.
 
-## License
-
-Repository code is MIT licensed. Dataset rows retain their source licenses:
-Bitext generative records are CDLA-Sharing-1.0, self-authored records are MIT,
-and Banking77/CLINC150 classifier records are CC-BY-4.0.
+Repository code and the released synthetic tool-use dataset are MIT licensed.
+Upstream base-model and classifier artifacts retain their own licenses.

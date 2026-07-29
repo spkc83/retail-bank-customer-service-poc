@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 from hello_slm.banking_tool_eval import (
-    QwenXmlToolAdapter,
     StaticPredictionModel,
+    TaggedJsonToolAdapter,
     evaluate_records,
     fingerprint_records,
     state_hash,
@@ -71,7 +71,7 @@ def test_tool_name_and_argument_metrics_use_exact_ordered_denominators() -> None
         }
     )
 
-    report = evaluate_records(records, model=model, adapter=QwenXmlToolAdapter())
+    report = evaluate_records(records, model=model, adapter=TaggedJsonToolAdapter())
 
     assert report["metrics"]["tool_name_accuracy"]["numerator"] == 2
     assert report["metrics"]["tool_name_accuracy"]["denominator"] == 4
@@ -113,7 +113,7 @@ def test_parse_failures_and_private_arguments_are_reported_with_call_denominator
         }
     )
 
-    report = evaluate_records(records, model=model, adapter=QwenXmlToolAdapter())
+    report = evaluate_records(records, model=model, adapter=TaggedJsonToolAdapter())
 
     assert report["parse_failures"] == 1
     assert report["metrics"]["malformed_tool_call_rate"]["numerator"] == 1
@@ -182,7 +182,7 @@ def test_replay_final_state_grounding_faq_credentials_and_ood_metrics() -> None:
         }
     )
 
-    report = evaluate_records(records, model=model, adapter=QwenXmlToolAdapter())
+    report = evaluate_records(records, model=model, adapter=TaggedJsonToolAdapter())
 
     assert report["metrics"]["executable_tool_success"]["numerator"] == 1
     assert report["metrics"]["executable_tool_success"]["denominator"] == 1
@@ -211,7 +211,7 @@ def test_report_includes_fingerprints_and_record_parse_failure_details() -> None
     report = evaluate_records(
         records,
         model=StaticPredictionModel({"missing": "I need your account number first."}),
-        adapter=QwenXmlToolAdapter(template_hash="sha256:test-template"),
+        adapter=TaggedJsonToolAdapter(template_hash="sha256:test-template"),
         checkpoint_revision="local-test",
     )
 
@@ -265,7 +265,7 @@ def test_generated_sft_records_have_evaluable_expected_tool_calls() -> None:
     report = evaluate_records(
         records,
         model=StaticPredictionModel(outputs),
-        adapter=QwenXmlToolAdapter(),
+        adapter=TaggedJsonToolAdapter(),
     )
 
     expected_denominator = sum(

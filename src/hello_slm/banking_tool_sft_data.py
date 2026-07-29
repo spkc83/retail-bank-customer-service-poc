@@ -277,12 +277,12 @@ def public_tool_manifest() -> list[dict[str, Any]]:
         _tool(
             "list_transactions",
             "List recent synthetic account transactions.",
-            {"limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5}},
+            {"limit": {"type": "integer", "minimum": 1, "maximum": 20}},
         ),
         _tool("list_transfers", "List the signed-in synthetic customer's transfers and statuses."),
         _tool(
             "freeze_card",
-            "Freeze a synthetic card selected by last four digits.",
+            "Freeze a synthetic card, optionally selected by last four digits.",
             {"last4": {"type": ["string", "null"]}},
         ),
         _tool(
@@ -292,12 +292,12 @@ def public_tool_manifest() -> list[dict[str, Any]]:
         ),
         _tool(
             "dispute_transaction",
-            "Dispute a synthetic debit transaction by merchant description.",
+            "Dispute a synthetic transaction by description.",
             {"description": {"type": ["string", "null"]}},
         ),
         _tool(
             "cancel_transfer",
-            "Cancel a pending synthetic transfer by recipient.",
+            "Cancel a synthetic pending transfer by recipient.",
             {"recipient": {"type": ["string", "null"]}},
         ),
     ]

@@ -386,7 +386,7 @@ Drivers:
 - no structured tool trajectories in the current corpus;
 - repeated invalid account-number behavior under base and reflection prompts;
 - model-owned orchestration requirement;
-- one 48GB GPU and five-hour training cap;
+- one 96GB RTX PRO 6000 and five-hour training cap;
 - ordinary Transformers/ZeroGPU serving is lower risk than the custom MoE.
 
 Alternatives rejected:
@@ -422,9 +422,10 @@ Recommended lanes after plan approval:
 - independent verification: candidate evidence, budget, and ZeroGPU proof;
 - documentation: dataset card, model card, and final ADR.
 
-The local stop condition is passing unit tests, static checks, one-step QLoRA,
-save/reload, and a model-service smoke without starting a paid job. The remote
-stop condition remains explicit operator approval for the full run.
+The local stop condition is passing unit tests, static checks, an exact
+TRL/PEFT optimizer smoke, save/reload, and model-service tests. The remote stop
+condition is a completed capped job, merged-checkpoint parity, frozen behavior
+evaluation, and a proven public ZeroGPU deployment.
 
 ## Official references
 

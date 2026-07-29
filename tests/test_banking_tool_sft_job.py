@@ -61,6 +61,8 @@ def test_job_command_preserves_five_hour_internal_budget() -> None:
     assert '"--precision",' in source
     assert '"bf16-lora",' in source
     assert '"--push-to-hub",' in source
+    assert 'parser.add_argument("--resume-from")' in source
+    assert 'command.extend(["--resume-from", args.resume_from])' in source
 
 
 def test_remote_launcher_mounts_durable_job_bucket() -> None:
@@ -70,6 +72,9 @@ def test_remote_launcher_mounts_durable_job_bucket() -> None:
 
     assert "--volume hf://buckets/spkc83/jobs-artifacts:/data" in launcher
     assert '--output-dir "/data/retail-bank-agent-9b-${source_commit:0:8}"' in launcher
+    assert "must be the exact 40-character lowercase Git commit" in launcher
+    assert 'curl --fail --silent --show-error --head "$script_url"' in launcher
+    assert 'job_args+=(--resume-from "$resume_from")' in launcher
 
 
 def test_post_training_evaluation_detaches_closed_trackio_callback() -> None:

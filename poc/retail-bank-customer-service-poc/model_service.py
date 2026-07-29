@@ -71,7 +71,7 @@ MODEL_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "list_service_cases",
-            "description": "List recent synthetic service cases, including address changes.",
+            "description": "List recent synthetic service cases.",
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         },
     },
@@ -87,7 +87,6 @@ MODEL_TOOLS: list[dict[str, Any]] = [
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 20,
-                        "default": 5,
                     }
                 },
                 "additionalProperties": False,
@@ -130,7 +129,7 @@ MODEL_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "dispute_transaction",
-            "description": "Dispute a synthetic debit transaction by merchant description.",
+            "description": "Dispute a synthetic transaction by description.",
             "parameters": {
                 "type": "object",
                 "properties": {"description": {"type": ["string", "null"]}},
@@ -142,7 +141,7 @@ MODEL_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "cancel_transfer",
-            "description": "Cancel a pending synthetic transfer by recipient.",
+            "description": "Cancel a synthetic pending transfer by recipient.",
             "parameters": {
                 "type": "object",
                 "properties": {"recipient": {"type": ["string", "null"]}},
@@ -296,7 +295,12 @@ class TaggedJsonToolSyntaxAdapter:
             "role": "tool",
             "tool_call_id": call.id,
             "name": call.name,
-            "content": json.dumps(content, sort_keys=True),
+            "content": json.dumps(
+                content,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
         }
 
 
@@ -424,18 +428,19 @@ class ConversationalBankingAgent:
             results.append(result)
             result_messages.append(self.tool_adapter.render_tool_result(call, result))
         with_tools = [*current, call_message, *result_messages]
+        serving_tools = self.tool_adapter.render_tools(MODEL_TOOLS)
         try:
             second_context = select_token_budgeted_context(
                 system,
                 with_tools,
-                tools=None,
+                tools=serving_tools,
                 token_counter=self.model.count_tokens,
                 input_budget=self.input_budget,
             )
             final_output, final_trace = self._generate_pass(
                 "grounded_final",
                 second_context,
-                None,
+                serving_tools,
             )
             model_passes.append(final_trace)
             if not final_output:
@@ -539,7 +544,7 @@ class ConversationalBankingAgent:
             }
         return {
             "ok": True,
-            "result": _model_friendly_result(result),
+            "result": result,
         }
 
 
@@ -725,31 +730,6 @@ def _safe_tool_error(error: Exception) -> dict[str, str]:
     }
 
 
-def _model_friendly_result(value: Any, currency: str | None = None) -> Any:
-    if isinstance(value, dict):
-        local_currency = (
-            str(value["currency"])
-            if isinstance(value.get("currency"), str)
-            else currency
-        )
-        normalized: dict[str, Any] = {}
-        for key, item in value.items():
-            if (
-                key.endswith("_cents")
-                and isinstance(item, int)
-                and not isinstance(item, bool)
-            ):
-                amount_key = key.removesuffix("_cents")
-                currency_code = local_currency or "USD"
-                normalized[amount_key] = f"{currency_code} {item / 100:,.2f}"
-            else:
-                normalized[key] = _model_friendly_result(item, local_currency)
-        return normalized
-    if isinstance(value, list):
-        return [_model_friendly_result(item, currency) for item in value]
-    return value
-
-
 def select_token_budgeted_context(
     system_message: dict[str, Any],
     conversation: list[dict[str, Any]],
@@ -880,5 +860,5 @@ def _reflection_request(message: str, first_output: str) -> str:
     return (
         "TOOL_USE_REVIEW_REQUEST\n"
         f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}\n"
-        "Return only <use_original/> or valid Qwen <tool_call> blocks."
+        "Return only <use_original/> or valid tagged-JSON <tool_call> blocks."
     )

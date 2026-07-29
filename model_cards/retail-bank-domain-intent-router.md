@@ -25,15 +25,18 @@ https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
 ## Held-out results
 
 - Release eligible: `True`
-- Intent macro F1: `0.951208`
-- In-domain false-refusal rate: `0.013689`
-- OOD false-accept rate: `0.007733`
-- Follow-up false-refusal rate: `0.006818`
-- Banking-to-OOD false-accept rate: `0.005085`
-- Calibrated banking threshold: `0.980000`
+- Model revision: `136ee159d19cda7f585dd122907bbeb1ef4ec4db`
+- Training-data revision: `54ff186a03501d76dc643dbed3d82729267ce811`
+- Intent macro F1: `0.948425`
+- In-domain false-refusal rate: `0.005099`
+- OOD false-accept rate: `0.020109`
+- Follow-up false-refusal rate: `0.001623`
+- Conversational false-refusal rate: `0.050000`
+- Banking-to-OOD false-accept rate: `0.009783`
+- Calibrated lower boundary: `0.165000`
 
-The hosted POC uses two serving boundaries: banking probability below `0.50`
-is OOD, probability at least `0.98` is in-domain, and the middle region is
+The hosted POC uses two serving boundaries: banking probability below `0.165`
+is OOD, probability at least `0.50` is in-domain, and the middle region is
 uncertain. Uncertain turns continue to the 9B agent with the top three intent
 predictions as advisory context.
 
@@ -41,7 +44,9 @@ predictions as advisory context.
 
 Classifier-only data combines PolyAI Banking77 and UCI CLINC150 under
 CC-BY-4.0. Banking77 is prohibited from the generative SFT lane. The prepared
-dataset contains 44,832 training, 8,669 validation, and 16,380 test rows.
+dataset contains 44,432 training, 8,589 validation, and 16,260 test rows.
+Supported greeting, thanks, goodbye, and bot-identity examples are positive
+domain rows with their 77-way intent loss masked.
 
 ## Serving fallback
 
