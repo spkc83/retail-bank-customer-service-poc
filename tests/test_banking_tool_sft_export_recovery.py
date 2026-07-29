@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -39,12 +40,16 @@ def test_recovery_uses_unchanged_parity_gates() -> None:
 
 def test_recovery_candidate_order_starts_with_fp16_native() -> None:
     source = WORKER_PATH.read_text(encoding="utf-8")
-    fp16_position = source.index('"merged_subdir": "merged-fp16-native"')
-    bf16_position = source.index('"merged_subdir": "merged-fp32-bf16"')
+    fp16_position = source.index(
+        '"merged_subdir": f"merged-{step_label}-fp16-native"'
+    )
+    fp32_position = source.index(
+        '"merged_subdir": f"merged-{step_label}-fp32-fp16"'
+    )
 
-    assert fp16_position < bf16_position
-    assert '"merge_dtype": "float16"' in source[fp16_position:bf16_position]
-    assert '"inference_dtype": "float16"' in source[fp16_position:bf16_position]
+    assert fp16_position < fp32_position
+    assert '"merge_dtype": "float16"' in source[fp16_position:fp32_position]
+    assert '"inference_dtype": "float16"' in source[fp16_position:fp32_position]
 
 
 def test_recovery_publishes_only_after_validate_parity() -> None:
@@ -56,9 +61,7 @@ def test_recovery_publishes_only_after_validate_parity() -> None:
     assert main_body.index('if candidate["passed"]') < main_body.index(
         "publish(args, candidate=candidate"
     )
-    assert main_body.index('candidate["release_dtype"] == "float16"') < (
-        main_body.index("publish(args, candidate=candidate")
-    )
+    assert "bfloat16" not in main_body
 
 
 def test_recovery_weights_and_evidence_use_one_atomic_hub_commit() -> None:
@@ -96,8 +99,167 @@ def test_recovery_launcher_is_export_only_and_capped() -> None:
     assert "cloud_continue_tool_sft.py" not in job
     assert "trainer.train" not in job
     assert "rm " not in launcher
+    assert '--selected-adapter-subdir "checkpoint-500"' in launcher
+    assert "--selected-step 500" in launcher
 
 
 def test_recovery_rejects_symbolic_revisions() -> None:
     with pytest.raises(ValueError, match="exact 40-character"):
         WORKER.require_exact_revision("main", field="--recovery-source-commit")
+
+
+def test_recovery_cross_checks_persisted_and_job_provenance() -> None:
+    args = SimpleNamespace(
+        parent_model_revision="a" * 40,
+        dataset_revision="b" * 40,
+        base_model="base",
+        base_revision="c" * 40,
+        training_source_commit="d" * 40,
+        output_root=Path("/data/run"),
+        training_job="job-123",
+    )
+    metadata = {
+        "created_at_unix": 150,
+        "fingerprint": {
+            "source_model": {"revision": "a" * 40},
+            "dataset_identity": {
+                "revision": "b" * 40,
+                "manifest_sha256": "e" * 64,
+            },
+            "base_model": "base",
+            "base_revision": "c" * 40,
+        }
+    }
+    job = SimpleNamespace(
+        id="job-123",
+        started_at=datetime.fromtimestamp(100, tz=UTC),
+        finished_at=datetime.fromtimestamp(200, tz=UTC),
+        command=[
+            "uv",
+            "run",
+            "worker.py",
+            "--source-commit",
+            "d" * 40,
+            "--dataset-revision",
+            "b" * 40,
+            "--source-model-revision",
+            "a" * 40,
+            "--output-dir",
+            "/data/run",
+            "--max-steps",
+            "600",
+        ],
+    )
+
+    verified = WORKER.validate_training_provenance(
+        args,
+        metadata,
+        job,
+        {
+            "metadata": 150,
+            "adapter": 151,
+            "trainer_state": 152,
+        },
+    )
+
+    assert verified["training_job_command_verified"] is True
+    assert verified["training_job_artifact_window_verified"] is True
+    assert verified["dataset_manifest_sha256"] == "e" * 64
+
+
+def test_recovery_rejects_job_metadata_provenance_mismatch() -> None:
+    args = SimpleNamespace(
+        parent_model_revision="a" * 40,
+        dataset_revision="b" * 40,
+        base_model="base",
+        base_revision="c" * 40,
+        training_source_commit="d" * 40,
+        output_root=Path("/data/run"),
+        training_job="job-123",
+    )
+    metadata = {
+        "created_at_unix": 150,
+        "fingerprint": {
+            "source_model": {"revision": "a" * 40},
+            "dataset_identity": {
+                "revision": "f" * 40,
+                "manifest_sha256": "e" * 64,
+            },
+            "base_model": "base",
+            "base_revision": "c" * 40,
+        }
+    }
+    job = SimpleNamespace(
+        id="job-123",
+        started_at=datetime.fromtimestamp(100, tz=UTC),
+        finished_at=datetime.fromtimestamp(200, tz=UTC),
+        command=[
+            "--source-commit",
+            "d" * 40,
+            "--dataset-revision",
+            "b" * 40,
+            "--source-model-revision",
+            "a" * 40,
+            "--output-dir",
+            "/data/run",
+            "--max-steps",
+            "600",
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="provenance mismatch"):
+        WORKER.validate_training_provenance(
+            args,
+            metadata,
+            job,
+            {"metadata": 150, "adapter": 151, "trainer_state": 152},
+        )
+
+
+def test_recovery_rejects_artifacts_outside_training_job_window() -> None:
+    args = SimpleNamespace(
+        parent_model_revision="a" * 40,
+        dataset_revision="b" * 40,
+        base_model="base",
+        base_revision="c" * 40,
+        training_source_commit="d" * 40,
+        output_root=Path("/data/run"),
+        training_job="job-123",
+    )
+    metadata = {
+        "created_at_unix": 150,
+        "fingerprint": {
+            "source_model": {"revision": "a" * 40},
+            "dataset_identity": {
+                "revision": "b" * 40,
+                "manifest_sha256": "e" * 64,
+            },
+            "base_model": "base",
+            "base_revision": "c" * 40,
+        },
+    }
+    job = SimpleNamespace(
+        id="job-123",
+        started_at=datetime.fromtimestamp(100, tz=UTC),
+        finished_at=datetime.fromtimestamp(200, tz=UTC),
+        command=[
+            "--source-commit",
+            "d" * 40,
+            "--dataset-revision",
+            "b" * 40,
+            "--source-model-revision",
+            "a" * 40,
+            "--output-dir",
+            "/data/run",
+            "--max-steps",
+            "600",
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="outside training job window"):
+        WORKER.validate_training_provenance(
+            args,
+            metadata,
+            job,
+            {"metadata": 150, "adapter": 250, "trainer_state": 152},
+        )

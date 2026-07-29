@@ -36,4 +36,6 @@ hf jobs uv run \
   --dataset-revision "$dataset_revision" \
   --parent-model-revision "$parent_model_revision" \
   --training-job "$training_job" \
+  --selected-adapter-subdir "checkpoint-500" \
+  --selected-step 500 \
   --output-root "$output_root"

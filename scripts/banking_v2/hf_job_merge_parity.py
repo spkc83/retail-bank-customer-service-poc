@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--merged-subdir", default="merged")
+    parser.add_argument("--adapter-subdir", default="adapter")
     parser.add_argument("--base-model", default=BASE_MODEL)
     parser.add_argument("--base-revision", default=BASE_REVISION)
     parser.add_argument(
@@ -56,8 +57,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def require_artifacts(output_root: Path, merged_subdir: str) -> tuple[Path, Path]:
-    adapter_dir = output_root / "adapter"
+def require_artifacts(
+    output_root: Path,
+    merged_subdir: str,
+    adapter_subdir: str = "adapter",
+) -> tuple[Path, Path]:
+    adapter_dir = output_root / adapter_subdir
     merged_dir = output_root / merged_subdir
     required = (
         adapter_dir / "adapter_model.safetensors",
@@ -231,6 +236,7 @@ def main() -> int:
     adapter_dir, merged_dir = require_artifacts(
         args.output_root,
         args.merged_subdir,
+        args.adapter_subdir,
     )
     inference_dtype = {
         "bfloat16": torch.bfloat16,

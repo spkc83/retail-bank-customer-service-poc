@@ -34,6 +34,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parent-model-revision", required=True)
     parser.add_argument("--training-job", required=True)
     parser.add_argument("--output-root", required=True)
+    parser.add_argument("--selected-adapter-subdir", required=True)
+    parser.add_argument("--selected-step", type=int, required=True)
     return parser.parse_args()
 
 
@@ -93,6 +95,10 @@ def main() -> int:
             args.parent_model_revision,
             "--training-job",
             args.training_job,
+            "--selected-adapter-subdir",
+            args.selected_adapter_subdir,
+            "--selected-step",
+            str(args.selected_step),
         ]
         subprocess.run(command, cwd=source_root, check=True)
     return 0

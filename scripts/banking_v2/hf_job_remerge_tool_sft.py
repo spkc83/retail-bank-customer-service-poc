@@ -33,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--output-subdir", default="merged-fp16")
+    parser.add_argument("--adapter-subdir", default="adapter")
     parser.add_argument("--base-model", default=BASE_MODEL)
     parser.add_argument("--base-revision", default=BASE_REVISION)
     parser.add_argument(
@@ -62,7 +63,7 @@ def main() -> int:
     args = parse_args()
     if "HF_TOKEN" not in os.environ:
         raise RuntimeError("HF_TOKEN must be passed as a Hugging Face Job secret")
-    adapter_dir = args.output_root / "adapter"
+    adapter_dir = args.output_root / args.adapter_subdir
     merged_dir = args.output_root / args.output_subdir
     if merged_dir.exists():
         raise RuntimeError(f"refusing to overwrite existing merge directory: {merged_dir}")
