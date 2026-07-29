@@ -29,9 +29,9 @@ results, answer the customer using those results. Do not invent tool results or
 claim an action occurred unless a successful tool result says it did."""
 
 REFLECTION_PROMPT = """You are a second-pass tool-use reviewer for the same
-authenticated synthetic-bank conversation. Audit the BASE DRAFT against the latest
-customer request and the supplied tool schemas. This is a decision pass, not the
-customer-facing answer.
+authenticated synthetic-bank conversation. Audit the base draft in the final
+TOOL_USE_REVIEW_REQUEST against its customer request and the supplied tool schemas.
+This is a decision pass, not the customer-facing answer.
 
 Return exactly one of:
 1. <use_original/> when the base draft is appropriate without customer-specific
@@ -280,9 +280,17 @@ class ConversationalBankingAgent:
             raise AgentProtocolError("model returned an empty first response")
         calls = parse_tool_calls(first_output)
         if not calls:
+            reflection_messages = [
+                *current,
+                {"role": "assistant", "content": first_output},
+                {
+                    "role": "user",
+                    "content": _reflection_request(message, first_output),
+                },
+            ]
             reflection_context = select_token_budgeted_context(
-                _reflection_system_message(router_result, first_output),
-                current,
+                _reflection_system_message(router_result),
+                reflection_messages,
                 tools=MODEL_TOOLS,
                 token_counter=self.model.count_tokens,
                 input_budget=self.input_budget,
@@ -624,14 +632,24 @@ def _system_message(router_result: dict[str, Any]) -> dict[str, str]:
 
 def _reflection_system_message(
     router_result: dict[str, Any],
-    first_output: str,
 ) -> dict[str, str]:
     base_system = _system_message(router_result)["content"]
     return {
         "role": "system",
         "content": (
             f"{base_system}\n\n"
-            f"{REFLECTION_PROMPT}\n\n"
-            f"BASE DRAFT JSON:\n{json.dumps(first_output)}"
+            f"{REFLECTION_PROMPT}"
         ),
     }
+
+
+def _reflection_request(message: str, first_output: str) -> str:
+    payload = {
+        "customer_request": message.strip(),
+        "base_draft": first_output,
+    }
+    return (
+        "TOOL_USE_REVIEW_REQUEST\n"
+        f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}\n"
+        "Return only <use_original/> or valid Qwen <tool_call> blocks."
+    )
