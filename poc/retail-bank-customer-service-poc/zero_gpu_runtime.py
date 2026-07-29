@@ -6,7 +6,7 @@ from typing import Any
 MODEL_ID = os.environ.get("RETAIL_BANK_MODEL_ID", "spkc83/retail-bank-agent-9b")
 MODEL_REVISION = os.environ.get(
     "RETAIL_BANK_MODEL_REVISION",
-    "b47e2028c8cf573eb50ef7fe1c48d67e2a08e865",
+    "68a4e5b1ba898d7b5e4cce9d66357432c29fdf73",
 )
 SKIP_MODEL_LOAD = os.environ.get("POC_SKIP_MODEL_LOAD") == "1"
 

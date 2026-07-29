@@ -107,6 +107,7 @@ def test_continuation_mix_oversamples_sequential_and_safe_clarification() -> Non
         [sequential, clarification, single_tool, faq],
         sequential_multiplier=5,
         clarification_multiplier=4,
+        servicing_quality_multiplier=4,
         seed=123,
     )
     counts = {
@@ -122,6 +123,38 @@ def test_continuation_mix_oversamples_sequential_and_safe_clarification() -> Non
     assert stats["regression_records"] == 2
 
 
+def test_continuation_mix_oversamples_servicing_quality_families() -> None:
+    balances = _record(
+        "read_accounts",
+        path="tool_success",
+        assistant_tool_calls=1,
+        final="Everyday Checking has USD 3,245.67 available.",
+        requires_tool=True,
+    )
+    mortgage_age = _record(
+        "faq_mortgage_age",
+        path="no_tool_banking_faq",
+        final="Applicants are typically at least 18.",
+    )
+    unrelated = _record("write_card", path="tool_success", assistant_tool_calls=1)
+
+    mixed, stats = WORKER.build_continuation_mix(
+        [balances, mortgage_age, unrelated],
+        sequential_multiplier=5,
+        clarification_multiplier=4,
+        servicing_quality_multiplier=4,
+        seed=123,
+    )
+    counts = {
+        record_id: sum(1 for record in mixed if record["record_id"] == record_id)
+        for record_id in ("read_accounts", "faq_mortgage_age", "write_card")
+    }
+
+    assert counts == {"read_accounts": 4, "faq_mortgage_age": 4, "write_card": 1}
+    assert stats["servicing_quality_records"] == 2
+    assert stats["servicing_quality_multiplier"] == 4
+
+
 def test_unsafe_clarification_is_not_focus_oversampled() -> None:
     unsafe = _record(
         "unsafe",
@@ -133,6 +166,7 @@ def test_unsafe_clarification_is_not_focus_oversampled() -> None:
         [unsafe],
         sequential_multiplier=5,
         clarification_multiplier=4,
+        servicing_quality_multiplier=4,
     )
 
     assert len(mixed) == 1
@@ -147,6 +181,7 @@ def test_worker_dry_run_exposes_capped_continuation_plan() -> None:
     assert plan["source_model_revision"] == "00c4ba1be926fc26dbc1f5311a4fd037462be1c1"
     assert plan["training"]["max_steps"] == 600
     assert plan["training"]["max_train_seconds"] == 9_000
+    assert plan["training"]["servicing_quality_multiplier"] == 4
     assert plan["release"]["merge"] == "existing FP32 accumulation, FP16 saved weights"
     assert plan["remote_guard"]["currently_allowed"] is False
 

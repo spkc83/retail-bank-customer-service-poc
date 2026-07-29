@@ -74,8 +74,8 @@ def test_generate_records_cover_tool_and_non_tool_contracts() -> None:
 
 
 def test_tool_calls_have_stable_ids_typed_args_and_replay_hashes() -> None:
-    first = generate_records(pilot_count=26, split_seed=711)
-    second = generate_records(pilot_count=26, split_seed=711)
+    first = generate_records(pilot_count=27, split_seed=711)
+    second = generate_records(pilot_count=27, split_seed=711)
 
     assert second == first
     for record in first:
@@ -103,7 +103,7 @@ def test_tool_calls_have_stable_ids_typed_args_and_replay_hashes() -> None:
 def test_multi_call_plan_is_serialized_as_causal_tool_steps() -> None:
     record = next(
         record
-        for record in generate_records(pilot_count=26, split_seed=711)
+        for record in generate_records(pilot_count=27, split_seed=711)
         if record["record_id"] == "multi_tool_freeze"
     )
 
@@ -147,7 +147,7 @@ def test_multi_call_plan_is_serialized_as_causal_tool_steps() -> None:
 def test_second_tool_call_arguments_are_observable_from_prior_tool_result() -> None:
     record = next(
         record
-        for record in generate_records(pilot_count=26, split_seed=711)
+        for record in generate_records(pilot_count=27, split_seed=711)
         if record["record_id"] == "multi_tool_freeze"
     )
     first_tool_result = record["messages"][3]["content"]
@@ -215,6 +215,7 @@ def test_faq_and_conversation_templates_cover_out_of_template_live_prompts() -> 
 
     for marker in (
         "mortgage",
+        "at least 18",
         "open a new savings account",
         "savings interest",
         "yo sup",
@@ -225,10 +226,51 @@ def test_faq_and_conversation_templates_cover_out_of_template_live_prompts() -> 
     assert "i checked that" not in text
 
 
+def test_servicing_targets_include_requested_balances_without_canned_prefixes() -> None:
+    records = generate_records(pilot_count=96, split_seed=711)
+    account_rows = [
+        record
+        for record in records
+        if record["metadata"]["scenario_family"] == "read_accounts"
+    ]
+    assert account_rows
+    for record in account_rows:
+        response = record["messages"][-1]["content"]
+        facts = record["expected"]["grounding_facts"]
+        assert " available" in response
+        assert " current" in response
+        assert sum(fact.startswith("account.balance=") for fact in facts) == 2
+        assert all(
+            fact.split("=", 1)[1] in response
+            for fact in facts
+            if fact.startswith("account.balance=")
+        )
+        assert not response.startswith(
+            (
+                "Done",
+                "Here’s what I found",
+                "Here is the current status",
+                "I completed that",
+                "Here’s the update",
+            )
+        )
+
+    clarification_rows = [
+        record
+        for record in records
+        if record["metadata"]["scenario_family"] == "clarification_card"
+    ]
+    assert clarification_rows
+    assert all(
+        "no other identifier" not in record["messages"][-1]["content"].lower()
+        for record in clarification_rows
+    )
+
+
 def test_each_sequential_assistant_emission_restarts_tool_index_at_zero() -> None:
     record = next(
         record
-        for record in generate_records(pilot_count=26, split_seed=711)
+        for record in generate_records(pilot_count=27, split_seed=711)
         if record["record_id"] == "multi_tool_freeze"
     )
     invalid = json.loads(json.dumps(record))
@@ -306,7 +348,7 @@ def test_prepare_writes_manifest_report_and_is_split_isolated(tmp_path: Path) ->
 
 
 def test_pilot_realizer_uses_natural_text_and_varied_state_slots() -> None:
-    records = generate_records(pilot_count=1600, split_seed=4321)
+    records = generate_records(pilot_count=1800, split_seed=4321)
     user_keys = [
         normalized_user_text(
             next(
@@ -318,8 +360,8 @@ def test_pilot_realizer_uses_natural_text_and_varied_state_slots() -> None:
         for record in records
     ]
 
-    assert len(user_keys) == 1600
-    assert len(set(user_keys)) == 1600
+    assert len(user_keys) == 1800
+    assert len(set(user_keys)) == 1800
     serialized_users = "\n".join(
         message["content"]
         for record in records
@@ -375,6 +417,7 @@ def test_pilot_realizer_uses_natural_text_and_varied_state_slots() -> None:
     faq_template_markers = {
         "faq-overdraft-v1": "overdraft",
         "faq-mortgage-opening-v1": "mortgage",
+        "faq-mortgage-age-v1": "at least 18",
         "faq-deposit-opening-v1": "account",
         "faq-savings-interest-v1": "interest",
     }
@@ -392,7 +435,7 @@ def test_pilot_realizer_uses_natural_text_and_varied_state_slots() -> None:
 
 
 def test_teacher_realization_round_trip_allows_only_wording_changes(tmp_path: Path) -> None:
-    records = generate_records(pilot_count=26, split_seed=711)
+    records = generate_records(pilot_count=27, split_seed=711)
     request_path = tmp_path / "teacher-requests.jsonl"
     response_path = tmp_path / "teacher-responses.jsonl"
 
@@ -442,7 +485,7 @@ def test_cli_exports_and_applies_teacher_realizations(tmp_path: Path) -> None:
                 "--output-dir",
                 str(output_dir),
                 "--pilot-count",
-                "26",
+                "27",
                 "--export-teacher-requests",
                 str(request_path),
             ]
@@ -462,7 +505,7 @@ def test_cli_exports_and_applies_teacher_realizations(tmp_path: Path) -> None:
                 "--output-dir",
                 str(output_dir),
                 "--pilot-count",
-                "26",
+                "27",
                 "--teacher-responses",
                 str(response_path),
                 "--teacher-model",
@@ -487,7 +530,7 @@ def test_cli_exports_and_applies_teacher_realizations(tmp_path: Path) -> None:
 
 
 def test_validator_rejects_private_or_unknown_tool_arguments() -> None:
-    record = generate_records(pilot_count=26)[0]
+    record = generate_records(pilot_count=27)[0]
     assistant = next(message for message in record["messages"] if message.get("tool_calls"))
     assistant["tool_calls"][0]["function"]["arguments"]["customer_id"] = "cust_alex"
 
@@ -496,7 +539,7 @@ def test_validator_rejects_private_or_unknown_tool_arguments() -> None:
 
 
 def test_validator_rejects_semantically_empty_final_response() -> None:
-    record = generate_records(pilot_count=26)[0]
+    record = generate_records(pilot_count=27)[0]
     record["messages"][-1]["content"] = "Done."
 
     with pytest.raises(BankingToolSftDataError, match="missing semantic content"):
@@ -504,7 +547,7 @@ def test_validator_rejects_semantically_empty_final_response() -> None:
 
 
 def test_validator_rejects_untrainable_final_assistant_response() -> None:
-    record = generate_records(pilot_count=26)[0]
+    record = generate_records(pilot_count=27)[0]
     record["messages"][-1]["loss"] = False
 
     with pytest.raises(BankingToolSftDataError, match="must be trainable"):

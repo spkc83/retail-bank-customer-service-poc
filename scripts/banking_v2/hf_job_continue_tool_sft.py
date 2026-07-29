@@ -48,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-every", type=int, default=100)
     parser.add_argument("--sequential-multiplier", type=int, default=5)
     parser.add_argument("--clarification-multiplier", type=int, default=4)
+    parser.add_argument("--servicing-quality-multiplier", type=int, default=4)
     return parser.parse_args()
 
 
@@ -143,6 +144,8 @@ def main() -> int:
             str(args.sequential_multiplier),
             "--clarification-multiplier",
             str(args.clarification_multiplier),
+            "--servicing-quality-multiplier",
+            str(args.servicing_quality_multiplier),
             "--trackio-project",
             "retail-bank-agent-v3",
             "--trackio-run-name",

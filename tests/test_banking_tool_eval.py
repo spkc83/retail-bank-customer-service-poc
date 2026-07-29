@@ -222,6 +222,48 @@ def test_report_includes_fingerprints_and_record_parse_failure_details() -> None
     assert report["records"]["missing"]["credential_request"] is True
 
 
+def test_account_grounding_requires_the_requested_balance_values() -> None:
+    record = _record(
+        "balances",
+        expected={
+            "requires_tool": True,
+            "tool_calls": [{"name": "list_accounts", "arguments": {}}],
+            "grounding_facts": [
+                "account.last4=1042",
+                "account.last4=8831",
+                "account.balance=3,245.67",
+                "account.balance=12,500.00",
+            ],
+        },
+    )
+    tool_call = '<tool_call>{"name":"list_accounts","arguments":{}}</tool_call>\n'
+
+    incomplete = evaluate_records(
+        [record],
+        model=StaticPredictionModel(
+            {
+                "balances": tool_call
+                + "You have Everyday Checking ending in 1042 and Goal Saver ending in 8831."
+            }
+        ),
+        adapter=TaggedJsonToolAdapter(),
+    )
+    complete = evaluate_records(
+        [record],
+        model=StaticPredictionModel(
+            {
+                "balances": tool_call
+                + "Everyday Checking ending in 1042 has USD 3,245.67 available. "
+                "Goal Saver ending in 8831 has USD 12,500.00 available."
+            }
+        ),
+        adapter=TaggedJsonToolAdapter(),
+    )
+
+    assert incomplete["metrics"]["grounded_final_factuality"]["score"] == 0.0
+    assert complete["metrics"]["grounded_final_factuality"]["score"] == 1.0
+
+
 def test_cli_dry_run_writes_json_report(tmp_path: Path) -> None:
     output_path = tmp_path / "report.json"
 

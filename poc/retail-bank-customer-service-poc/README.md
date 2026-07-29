@@ -96,14 +96,15 @@ The diagnostics panel exposes:
 
 A successful live turn is counted as 8.79B inference only when diagnostics show
 `spkc83/retail-bank-agent-9b` at revision
-`b47e2028c8cf573eb50ef7fe1c48d67e2a08e865` and a CUDA device. Preset prompts
+`68a4e5b1ba898d7b5e4cce9d66357432c29fdf73` and a CUDA device. Preset prompts
 are evaluation cases, not hard-coded routes.
 
-The pinned checkpoint passed a frozen 750-record test split with 100% tool-name
-and argument accuracy, 100% executable-tool success, 39/39 exact dependent
-multi-tool sequences, 48/48 appropriate clarifications, 100% grounded
-factuality, and zero malformed calls, private arguments, or credential
-requests.
+The pinned checkpoint passed all 1,348 frozen test conversations: 801/801 tool
+names and arguments, 705/705 executable trajectories, 96/96 exact dependent
+multi-tool sequences, 63/63 appropriate clarifications, 205/205 banking FAQs,
+72/72 OOD/small-talk paths, and 1,147/1,147 grounded facts. It produced zero
+parse failures, malformed calls, private arguments, credential requests,
+in-domain false refusals, or OOD false accepts.
 
 If ZeroGPU allocation or generation fails, the UI reports model
 unavailability. It does not substitute a Python-generated banking answer.

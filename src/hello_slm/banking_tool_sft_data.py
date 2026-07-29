@@ -17,7 +17,7 @@ from hello_slm.config import canonical_json_bytes, file_sha256
 BANKING_TOOL_SFT_CONTRACT = "banking-tool-sft/v1"
 BANKING_TOOL_SFT_MANIFEST_CONTRACT = "banking-tool-sft-manifest"
 CREATED_AT = "2026-07-29T00:00:00Z"
-GENERATOR_VERSION = "banking-tool-sft/v1.2-realworld"
+GENERATOR_VERSION = "banking-tool-sft/v1.3-servicing-quality"
 DEFAULT_OUTPUT_DIR = Path("data/banking-v3-tool-sft")
 DEFAULT_SYNTHETIC_BANK_PATH = Path("poc/retail-bank-customer-service-poc/synthetic_bank.json")
 SPLITS = ("train", "validation", "test")
@@ -192,17 +192,11 @@ RECIPIENT_TYPES = (
     "Utilities",
     "Catering",
 )
-REALIZER_FINAL_PREFIXES = (
-    "",
-    "Done —",
-    "Here’s what I found:",
-    "Here is the current status:",
-    "I completed that —",
-    "Here’s the update:",
-)
+REALIZER_FINAL_PREFIXES = ("",)
 FAQ_REQUIRED_MARKERS = {
     "faq-overdraft-v1": ("overdraft",),
     "faq-mortgage-opening-v1": ("mortgage", "cannot open"),
+    "faq-mortgage-age-v1": ("mortgage", "18", "cannot determine"),
     "faq-deposit-opening-v1": ("account", "cannot open"),
     "faq-savings-interest-v1": ("interest",),
 }
@@ -704,10 +698,18 @@ def _base_scenarios() -> tuple[Scenario, ...]:
             "synthetic-customer-alex",
             "state-alex-001",
             "What accounts do I have and what are their balances?",
-            "You have Everyday Checking ending in 1042 and Goal Saver ending in 8831.",
+            "Everyday Checking ending in 1042 has USD 3,245.67 available and "
+            "USD 3,300.12 current. Goal Saver ending in 8831 has USD 12,500.00 "
+            "available and current.",
             "tool_success",
             (ToolPlan("list_accounts", {}),),
-            grounding_facts=("accounts.count=2", "account.last4=1042", "account.last4=8831"),
+            grounding_facts=(
+                "accounts.count=2",
+                "account.last4=1042",
+                "account.last4=8831",
+                "account.balance=3,245.67",
+                "account.balance=12,500.00",
+            ),
         ),
         Scenario(
             "cards_read",
@@ -888,8 +890,8 @@ def _base_scenarios() -> tuple[Scenario, ...]:
             "synthetic-customer-alex",
             "state-alex-001",
             "Replace my card.",
-            "Which card should I replace? Please provide only the last four digits shown in "
-            "the app; no other identifier is needed.",
+            "Which card should I replace? Please share the last four digits shown in "
+            "the app.",
             "clarification",
             grounding_facts=("missing_field=last4",),
         ),
@@ -921,6 +923,21 @@ def _base_scenarios() -> tuple[Scenario, ...]:
             "application and disclose its terms through an approved channel.",
             "no_tool_banking_faq",
             grounding_facts=("faq=mortgage",),
+        ),
+        Scenario(
+            "mortgage_age_faq",
+            "faq_mortgage_age",
+            "faq-mortgage-age-v1",
+            "realization-000",
+            "alex.demo",
+            "synthetic-customer-alex",
+            "state-alex-001",
+            "How old do I need to be to apply for a mortgage?",
+            "Mortgage applicants generally must be legal adults—typically at least "
+            "18 in the United States. Requirements vary by lender and jurisdiction, "
+            "and this demo cannot determine your eligibility.",
+            "no_tool_banking_faq",
+            grounding_facts=("faq=mortgage", "mortgage.minimum_age=18"),
         ),
         Scenario(
             "deposit_account_opening_faq",
@@ -1287,8 +1304,8 @@ def _materialized_pre_messages(
             _message("user", "Replace my card.", loss=False),
             _message(
                 "assistant",
-                "Which card should I replace? Please provide only the last four digits "
-                "shown in the app; no other identifier is needed.",
+                "Which card should I replace? Please share the last four digits shown "
+                "in the app.",
                 loss=False,
             ),
         )
@@ -1317,6 +1334,8 @@ def _materialized_grounding_facts(
             "accounts.count=2",
             f"account.last4={slot['checking_last4']}",
             f"account.last4={slot['savings_last4']}",
+            f"account.balance={_format_usd(slot['checking_available'])}",
+            f"account.balance={_format_usd(slot['savings_available'])}",
         )
     if family == "read_cards":
         return (f"card.last4={slot['card_last4']}", "card.status=active")
@@ -1348,8 +1367,11 @@ def _materialized_final_response(
     family = template.scenario_family
     if family == "read_accounts":
         final = (
-            f"You have {slot['checking_name']} ending in {slot['checking_last4']} and "
-            f"{slot['savings_name']} ending in {slot['savings_last4']}."
+            f"{slot['checking_name']} ending in {slot['checking_last4']} has USD "
+            f"{_format_usd(slot['checking_available'])} available and USD "
+            f"{_format_usd(slot['checking_current'])} current. "
+            f"{slot['savings_name']} ending in {slot['savings_last4']} has USD "
+            f"{_format_usd(slot['savings_available'])} available and current."
         )
     elif family == "read_cards":
         final = (
@@ -1847,6 +1869,10 @@ def _message(role: str, content: str, *, loss: bool) -> dict[str, Any]:
     return {"role": role, "content": content, "loss": loss}
 
 
+def _format_usd(cents: Any) -> str:
+    return f"{int(cents) / 100:,.2f}"
+
+
 def _realize_user(template: Scenario, occurrence: int) -> str:
     stems = _user_stems(template)
     stem = _pick(stems, occurrence)
@@ -2087,6 +2113,17 @@ def _user_stems(template: Scenario) -> tuple[str, ...]:
             "tell me how mortgage applications generally work",
             "can you start a mortgage for me",
             "what should I expect when applying for a home loan",
+        )
+    if family == "faq_mortgage_age":
+        return (
+            "how old do I need to be to apply for a mortgage",
+            "what is the minimum age for a home loan",
+            "do mortgage applicants need to be at least 18",
+            "can someone under 18 apply for a mortgage",
+            "explain the usual age requirement for a mortgage",
+            "what age must a borrower be for a home loan",
+            "is there a legal adult requirement for mortgages",
+            "tell me the typical minimum mortgage application age",
         )
     if family == "faq_deposit_opening":
         return (

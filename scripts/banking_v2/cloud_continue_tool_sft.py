@@ -71,6 +71,21 @@ BASE_REVISION = "1504002f650e656a0a3789d99574df12e3e94ed0"
 DEFAULT_SOURCE_MODEL_REVISION = "00c4ba1be926fc26dbc1f5311a4fd037462be1c1"
 DEFAULT_MANIFEST = "data/banking-v3-tool-sft/manifest.json"
 DEFAULT_OUTPUT_DIR = "/data/retail-bank-agent-9b-continuation"
+SERVICING_QUALITY_FAMILIES = frozenset(
+    {
+        "read_accounts",
+        "read_cards",
+        "read_service_cases",
+        "read_transactions",
+        "read_transfers",
+        "clarification_card",
+        "faq_mortgage",
+        "faq_mortgage_age",
+        "faq_deposit_opening",
+        "faq_savings_interest",
+        "no_tool_banking_faq",
+    }
+)
 
 @dataclass(frozen=True)
 class ContinuationConfig:
@@ -91,6 +106,7 @@ class ContinuationConfig:
     checkpoint_every: int
     sequential_multiplier: int
     clarification_multiplier: int
+    servicing_quality_multiplier: int
     dry_run: bool
     allow_remote_execution: bool
     push_to_hub: bool
@@ -117,6 +133,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--checkpoint-every", type=int, default=100)
     parser.add_argument("--sequential-multiplier", type=int, default=5)
     parser.add_argument("--clarification-multiplier", type=int, default=4)
+    parser.add_argument("--servicing-quality-multiplier", type=int, default=4)
     parser.add_argument("--dry-run", action="store_true", default=True)
     parser.add_argument("--execute-remote", action="store_false", dest="dry_run")
     parser.add_argument("--allow-remote-execution", action="store_true")
@@ -145,6 +162,7 @@ def config_from_args(args: argparse.Namespace) -> ContinuationConfig:
         checkpoint_every=int(args.checkpoint_every),
         sequential_multiplier=int(args.sequential_multiplier),
         clarification_multiplier=int(args.clarification_multiplier),
+        servicing_quality_multiplier=int(args.servicing_quality_multiplier),
         dry_run=bool(args.dry_run),
         allow_remote_execution=bool(args.allow_remote_execution),
         push_to_hub=bool(args.push_to_hub),
@@ -219,37 +237,55 @@ def is_regression_record(record: Mapping[str, Any]) -> bool:
     }
 
 
+def is_servicing_quality_record(record: Mapping[str, Any]) -> bool:
+    metadata = record.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return False
+    return str(metadata.get("scenario_family", "")) in SERVICING_QUALITY_FAMILIES
+
+
 def build_continuation_mix(
     records: Sequence[dict[str, Any]],
     *,
     sequential_multiplier: int,
     clarification_multiplier: int,
+    servicing_quality_multiplier: int,
     seed: int = TRAINING_SEED,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    if sequential_multiplier < 1 or clarification_multiplier < 1:
+    if (
+        sequential_multiplier < 1
+        or clarification_multiplier < 1
+        or servicing_quality_multiplier < 1
+    ):
         raise ValueError("continuation multipliers must be >= 1")
     mixed: list[dict[str, Any]] = []
     stats = {
         "input_records": len(records),
         "sequential_focus_records": 0,
         "credential_safe_clarification_records": 0,
+        "servicing_quality_records": 0,
         "regression_records": 0,
         "total_weighted_records": 0,
         "sequential_multiplier": sequential_multiplier,
         "clarification_multiplier": clarification_multiplier,
+        "servicing_quality_multiplier": servicing_quality_multiplier,
     }
     for record in records:
         sequential = is_sequential_focus_record(record)
         clarification = is_credential_safe_clarification_record(record)
+        servicing_quality = is_servicing_quality_record(record)
         regression = is_regression_record(record)
         stats["sequential_focus_records"] += int(sequential)
         stats["credential_safe_clarification_records"] += int(clarification)
+        stats["servicing_quality_records"] += int(servicing_quality)
         stats["regression_records"] += int(regression)
         weight = 1
         if sequential:
             weight = max(weight, sequential_multiplier)
         if clarification:
             weight = max(weight, clarification_multiplier)
+        if servicing_quality:
+            weight = max(weight, servicing_quality_multiplier)
         mixed.extend([record] * weight)
     random.Random(seed).shuffle(mixed)
     stats["total_weighted_records"] = len(mixed)
@@ -293,6 +329,7 @@ def build_dry_run_plan(config: ContinuationConfig) -> dict[str, Any]:
             "checkpoint_every": config.checkpoint_every,
             "sequential_multiplier": config.sequential_multiplier,
             "clarification_multiplier": config.clarification_multiplier,
+            "servicing_quality_multiplier": config.servicing_quality_multiplier,
             "retained_regression_mix": [
                 "single-tool",
                 "tool-error",
@@ -563,6 +600,7 @@ def run_remote_continuation(config: ContinuationConfig) -> dict[str, Any]:
         train_records,
         sequential_multiplier=config.sequential_multiplier,
         clarification_multiplier=config.clarification_multiplier,
+        servicing_quality_multiplier=config.servicing_quality_multiplier,
     )
     train_examples = tokenize_records(
         mixed_train_records,
