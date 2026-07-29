@@ -8,10 +8,18 @@ calibrated outputs:
 - a binary domain head for supported retail banking versus out-of-domain;
 - a 77-way Banking77 intent head evaluated only for accepted banking inputs.
 
-The learned router replaces keyword OOD classification in deployment. The
-deterministic credential-input and unsafe-output guards remain separate safety
-controls. If the learned router is missing, corrupt, or cannot load, serving
-fails closed to the exact OOD response rather than falling back to keywords.
+The learned router replaces keyword OOD classification in deployment. A narrow
+credential-value input guard remains for the public demo, but there is no
+deterministic model-output repair or safety validator. The router artifact is
+loaded and verified during application startup, so a missing, corrupt, or
+unloadable artifact stops startup. If an already-loaded router fails to classify
+an individual turn, the POC records an `uncertain` result with the failure reason
+and delegates that turn to the 9B model. It does not mislabel a router failure as
+an OOD decision or substitute a keyword classifier.
+
+This is an experimental observability contract, not a production security
+boundary. The diagnostics panel and route API expose whether the learned router
+actually ran.
 
 ## Governed data
 

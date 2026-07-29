@@ -22,16 +22,7 @@ SECRET_VALUE = re.compile(
     re.IGNORECASE,
 )
 LONG_NUMBER = re.compile(r"\b(?:\d[ -]?){12,19}\b")
-UNSAFE_OUTPUT = re.compile(
-    r"\b(?:provide|send|share|tell (?:me|us)|enter)\b.{0,80}"
-    r"\b(?:account number|card number|cvv|cvc|pin|password|passcode|otp)\b",
-    re.IGNORECASE | re.DOTALL,
-)
 
 
 def contains_sensitive_value(message: str) -> bool:
     return bool(SECRET_VALUE.search(message) or LONG_NUMBER.search(message))
-
-
-def generated_response_is_unsafe(response: str) -> bool:
-    return bool(UNSAFE_OUTPUT.search(response))

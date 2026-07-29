@@ -135,7 +135,7 @@ def test_high_confidence_ood_uses_stock_response_inside_registered_gpu_turn(
     assert "out_of_domain" in result[5]
 
 
-def test_router_unavailability_fails_open_to_9b_experiment(app_module) -> None:
+def test_test_mode_router_omission_routes_uncertain_to_9b(app_module) -> None:
     result = app_module.route_query("hello", [])
 
     assert result["route"] == "uncertain"
