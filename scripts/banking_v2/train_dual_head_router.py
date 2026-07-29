@@ -41,6 +41,8 @@ WEIGHT_DECAY = 0.01
 WARMUP_RATIO = 0.10
 INTENT_LOSS_WEIGHT = 0.7
 MINIMUM_IN_DOMAIN_RECALL = 0.98
+MINIMUM_CONVERSATIONAL_RECALL = 0.95
+CONVERSATIONAL_DOMAIN_LOSS_WEIGHT = 8.0
 
 
 class RouterDataset(Dataset[dict[str, Any]]):
@@ -77,26 +79,59 @@ def calibrate_threshold(
     probabilities: Sequence[float],
     labels: Sequence[int],
     *,
+    example_kinds: Sequence[str] | None = None,
     minimum_in_domain_recall: float = MINIMUM_IN_DOMAIN_RECALL,
+    minimum_conversational_recall: float = MINIMUM_CONVERSATIONAL_RECALL,
 ) -> dict[str, float]:
     if len(probabilities) != len(labels) or not labels:
         raise ValueError("probabilities and labels must be non-empty and equal length")
+    if example_kinds is not None and len(example_kinds) != len(labels):
+        raise ValueError("example_kinds must have the same length as labels")
     candidates = [index / 200 for index in range(1, 200)]
     scored = []
     for threshold in candidates:
         counts = _domain_counts(probabilities, labels, threshold)
         recall = _safe_ratio(counts["true_positive"], counts["positive"])
         specificity = _safe_ratio(counts["true_negative"], counts["negative"])
+        conversational_pairs = (
+            [
+                (probability, label)
+                for probability, label, kind in zip(
+                    probabilities,
+                    labels,
+                    example_kinds,
+                    strict=True,
+                )
+                if kind == "clinc_conversational_in_domain"
+            ]
+            if example_kinds is not None
+            else []
+        )
+        conversational_recall = (
+            _safe_ratio(
+                sum(
+                    probability >= threshold and label == 1
+                    for probability, label in conversational_pairs
+                ),
+                sum(label == 1 for _, label in conversational_pairs),
+            )
+            if conversational_pairs
+            else 1.0
+        )
         scored.append(
             {
                 "threshold": threshold,
                 "in_domain_recall": recall,
+                "conversational_recall": conversational_recall,
                 "ood_specificity": specificity,
                 "balanced_accuracy": (recall + specificity) / 2,
             }
         )
     eligible = [
-        item for item in scored if item["in_domain_recall"] >= minimum_in_domain_recall
+        item
+        for item in scored
+        if item["in_domain_recall"] >= minimum_in_domain_recall
+        and item["conversational_recall"] >= minimum_conversational_recall
     ]
     pool = eligible or scored
     return max(
@@ -286,6 +321,7 @@ def main() -> int:
             calibration = calibrate_threshold(
                 validation_predictions["domain_probabilities"],
                 validation_predictions["domain_labels"],
+                example_kinds=validation_predictions["example_kinds"],
             )
             validation_metrics = evaluate_predictions(
                 **validation_predictions,
@@ -296,6 +332,10 @@ def main() -> int:
                 float(validation_metrics["intent_macro_f1"])
                 + float(validation_metrics["in_domain_recall"])
                 + float(validation_metrics["ood_specificity"])
+                + (
+                    1.0
+                    - float(validation_metrics["conversational_false_refusal_rate"])
+                )
             )
             epoch_result = {
                 "epoch": epoch,
@@ -337,6 +377,9 @@ def main() -> int:
                 "learning_rate": LEARNING_RATE,
                 "weight_decay": WEIGHT_DECAY,
                 "intent_loss_weight": INTENT_LOSS_WEIGHT,
+                "conversational_domain_loss_weight": (
+                    CONVERSATIONAL_DOMAIN_LOSS_WEIGHT
+                ),
             },
             "history": history,
             "selected_epoch": best_epoch["epoch"],
@@ -345,6 +388,12 @@ def main() -> int:
             "release_gate_failures": failures,
             "release_eligible": not failures,
         }
+        if failures:
+            print(
+                json.dumps({"stage": "release_gate_failed", **metrics}, indent=2),
+                flush=True,
+            )
+            return 2
         publish_artifact(
             model=model,
             tokenizer=tokenizer,
@@ -354,7 +403,7 @@ def main() -> int:
             token=token,
         )
         print(json.dumps({"stage": "completed", **metrics}, indent=2), flush=True)
-        return 0 if not failures else 2
+        return 0
 
 
 def load_governed_data(
@@ -445,7 +494,24 @@ def train_epoch(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
             )
-            domain_loss = nn.functional.cross_entropy(domain_logits, domain_labels)
+            domain_losses = nn.functional.cross_entropy(
+                domain_logits,
+                domain_labels,
+                reduction="none",
+            )
+            domain_weights = torch.tensor(
+                [
+                    (
+                        CONVERSATIONAL_DOMAIN_LOSS_WEIGHT
+                        if kind == "clinc_conversational_in_domain"
+                        else 1.0
+                    )
+                    for kind in batch["example_kinds"]
+                ],
+                device=device,
+                dtype=domain_losses.dtype,
+            )
+            domain_loss = (domain_losses * domain_weights).sum() / domain_weights.sum()
             active_intent = intent_labels >= 0
             intent_loss = (
                 nn.functional.cross_entropy(

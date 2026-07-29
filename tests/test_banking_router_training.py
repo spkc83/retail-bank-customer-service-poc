@@ -30,6 +30,33 @@ def test_calibration_prioritizes_ood_specificity_under_recall_constraint() -> No
     assert calibration["ood_specificity"] == 1.0
 
 
+def test_calibration_enforces_supported_conversation_recall() -> None:
+    training = load_training_module()
+    probabilities = [0.99, 0.90, 0.80, 0.50, 0.55, 0.40, 0.20, 0.10]
+    labels = [1, 1, 1, 1, 0, 0, 0, 0]
+    example_kinds = [
+        "banking77_single",
+        "banking77_single",
+        "banking77_single",
+        "clinc_conversational_in_domain",
+        "clinc_nonbanking",
+        "clinc_nonbanking",
+        "clinc_nonbanking",
+        "clinc_nonbanking",
+    ]
+
+    calibration = training.calibrate_threshold(
+        probabilities,
+        labels,
+        example_kinds=example_kinds,
+        minimum_in_domain_recall=0.75,
+        minimum_conversational_recall=1.0,
+    )
+
+    assert calibration["threshold"] <= 0.50
+    assert calibration["conversational_recall"] == 1.0
+
+
 def test_metrics_and_release_gates_cover_transition_subsets() -> None:
     training = load_training_module()
     metrics = training.evaluate_predictions(
