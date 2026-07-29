@@ -539,7 +539,13 @@ def validate_records(
                 for call in message["tool_calls"]:
                     call_id = _required_str(call, "id")
                     index = call.get("index")
-                    if call_id != f"call_{record_id}_{index}":
+                    if index != 0:
+                        raise BankingToolSftDataError(
+                            f"{record_id} tool call index must restart at zero per "
+                            "assistant message"
+                        )
+                    global_call_index = len(tool_call_ids)
+                    if call_id != f"call_{record_id}_{global_call_index}":
                         raise BankingToolSftDataError(f"{record_id} has unstable tool call id")
                     function = call.get("function", {})
                     name = function.get("name")
@@ -1271,7 +1277,7 @@ def _scenario_to_record(scenario: Scenario, *, bank_path: Path) -> dict[str, Any
             )
             tool_call = {
                 "id": call_id,
-                "index": index,
+                "index": 0,
                 "type": "function",
                 "function": {
                     "name": call.name,

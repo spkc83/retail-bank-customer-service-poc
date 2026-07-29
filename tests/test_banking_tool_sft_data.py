@@ -91,7 +91,7 @@ def test_tool_calls_have_stable_ids_typed_args_and_replay_hashes() -> None:
         for message in record["messages"]:
             for call in message.get("tool_calls", []):
                 assert isinstance(call["function"]["arguments"], dict)
-                assert call["index"] == ordered_calls.index(call["id"])
+                assert call["index"] == 0
         assert record["validation"]["accepted"] is True
         assert record["validation"]["tool_manifest_hash"].startswith("sha256:")
         assert record["validation"]["replay_hash"].startswith("sha256:")
@@ -128,6 +128,8 @@ def test_multi_call_plan_is_serialized_as_causal_tool_steps() -> None:
     first_tool_result = record["messages"][3]
     second_call_message = record["messages"][4]
     second_tool_result = record["messages"][5]
+    assert first_call_message["tool_calls"][0]["index"] == 0
+    assert second_call_message["tool_calls"][0]["index"] == 0
 
     call_counts = [
         len(message["tool_calls"]) for message in (first_call_message, second_call_message)
@@ -154,6 +156,22 @@ def test_second_tool_call_arguments_are_observable_from_prior_tool_result() -> N
     second_last4 = second_call["function"]["arguments"]["last4"]
     assert isinstance(second_last4, str)
     assert second_last4 in json.dumps(first_tool_result, sort_keys=True)
+
+
+def test_each_sequential_assistant_emission_restarts_tool_index_at_zero() -> None:
+    record = next(
+        record
+        for record in generate_records(pilot_count=18, split_seed=711)
+        if record["record_id"] == "multi_tool_freeze"
+    )
+    invalid = json.loads(json.dumps(record))
+    invalid["messages"][4]["tool_calls"][0]["index"] = 1
+
+    with pytest.raises(
+        BankingToolSftDataError,
+        match="tool call index must restart at zero",
+    ):
+        validate_records([invalid])
 
 
 def test_prepare_writes_manifest_report_and_is_split_isolated(tmp_path: Path) -> None:
