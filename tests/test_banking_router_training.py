@@ -98,3 +98,19 @@ def test_release_gate_reports_each_failed_contract() -> None:
     )
 
     assert len(failures) == 6
+
+
+def test_release_gate_accepts_float_roundoff_at_boundary() -> None:
+    training = load_training_module()
+    failures = training.release_gate_failures(
+        {
+            "intent_macro_f1": 0.90,
+            "in_domain_false_refusal_rate": 0.02,
+            "ood_false_accept_rate": 0.05,
+            "followup_false_refusal_rate": 0.05,
+            "conversational_false_refusal_rate": 0.050000000000000044,
+            "transition_ood_false_accept_rate": 0.05,
+        }
+    )
+
+    assert failures == []

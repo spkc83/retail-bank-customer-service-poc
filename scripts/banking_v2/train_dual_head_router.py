@@ -219,7 +219,17 @@ def release_gate_failures(metrics: dict[str, Any]) -> list[str]:
     failures = []
     for name, operator, threshold in gates:
         value = float(metrics[name])
-        passed = value >= threshold if operator == ">=" else value <= threshold
+        equal_within_float_tolerance = math.isclose(
+            value,
+            threshold,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        passed = (
+            value > threshold or equal_within_float_tolerance
+            if operator == ">="
+            else value < threshold or equal_within_float_tolerance
+        )
         if not passed:
             failures.append(f"{name}={value:.6f} must be {operator} {threshold:.6f}")
     return failures
