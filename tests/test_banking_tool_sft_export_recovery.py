@@ -99,8 +99,10 @@ def test_recovery_launcher_is_export_only_and_capped() -> None:
     assert "cloud_continue_tool_sft.py" not in job
     assert "trainer.train" not in job
     assert "rm " not in launcher
-    assert '--selected-adapter-subdir "checkpoint-500"' in launcher
-    assert "--selected-step 500" in launcher
+    assert 'selected_adapter_subdir="${8:-checkpoint-${selected_step}}"' in launcher
+    assert '--selected-adapter-subdir "$selected_adapter_subdir"' in launcher
+    assert '--selected-step "$selected_step"' in launcher
+    assert 'output_root="$6"' in launcher
 
 
 def test_recovery_rejects_symbolic_revisions() -> None:
@@ -120,6 +122,7 @@ def test_recovery_cross_checks_persisted_and_job_provenance() -> None:
     )
     metadata = {
         "created_at_unix": 150,
+        "step": 800,
         "fingerprint": {
             "source_model": {"revision": "a" * 40},
             "dataset_identity": {
@@ -147,7 +150,7 @@ def test_recovery_cross_checks_persisted_and_job_provenance() -> None:
             "--output-dir",
             "/data/run",
             "--max-steps",
-            "600",
+            "800",
         ],
     )
 
@@ -165,6 +168,7 @@ def test_recovery_cross_checks_persisted_and_job_provenance() -> None:
     assert verified["training_job_command_verified"] is True
     assert verified["training_job_artifact_window_verified"] is True
     assert verified["dataset_manifest_sha256"] == "e" * 64
+    assert verified["max_steps"] == 800
 
 
 def test_recovery_rejects_job_metadata_provenance_mismatch() -> None:
@@ -179,6 +183,7 @@ def test_recovery_rejects_job_metadata_provenance_mismatch() -> None:
     )
     metadata = {
         "created_at_unix": 150,
+        "step": 800,
         "fingerprint": {
             "source_model": {"revision": "a" * 40},
             "dataset_identity": {
@@ -203,7 +208,7 @@ def test_recovery_rejects_job_metadata_provenance_mismatch() -> None:
             "--output-dir",
             "/data/run",
             "--max-steps",
-            "600",
+            "800",
         ],
     )
 
@@ -228,6 +233,7 @@ def test_recovery_rejects_artifacts_outside_training_job_window() -> None:
     )
     metadata = {
         "created_at_unix": 150,
+        "step": 800,
         "fingerprint": {
             "source_model": {"revision": "a" * 40},
             "dataset_identity": {
@@ -252,7 +258,7 @@ def test_recovery_rejects_artifacts_outside_training_job_window() -> None:
             "--output-dir",
             "/data/run",
             "--max-steps",
-            "600",
+            "800",
         ],
     )
 

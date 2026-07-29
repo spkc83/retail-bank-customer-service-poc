@@ -40,9 +40,7 @@ from hf_job_finalize_tool_sft import (  # type: ignore[import-not-found]
 MODEL_REPO = "spkc83/retail-bank-agent-9b"
 BASE_MODEL = "ibm-granite/granite-4.1-8b"
 BASE_REVISION = "1504002f650e656a0a3789d99574df12e3e94ed0"
-DEFAULT_OUTPUT_ROOT = Path(
-    "/data/retail-bank-agent-9b-continuation-68e96a7d-00c4ba1b"
-)
+DEFAULT_OUTPUT_ROOT = Path("/data/retail-bank-agent-9b-continuation")
 MINIMUM_ARGMAX_AGREEMENT = 0.999
 MAXIMUM_LOGIT_DIFFERENCE = 0.3
 MAXIMUM_P999_DIFFERENCE = 0.07
@@ -59,8 +57,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dataset-revision", required=True)
     parser.add_argument("--parent-model-revision", required=True)
     parser.add_argument("--training-job", required=True)
-    parser.add_argument("--selected-adapter-subdir", default="adapter")
-    parser.add_argument("--selected-step", type=int, default=600)
+    parser.add_argument("--selected-adapter-subdir", required=True)
+    parser.add_argument("--selected-step", type=int, required=True)
     return parser.parse_args(argv)
 
 
@@ -106,6 +104,9 @@ def validate_training_provenance(
     training_job: Any,
     artifact_mtimes: Mapping[str, float],
 ) -> dict[str, Any]:
+    run_completed_steps = int(metadata.get("step", 0))
+    if run_completed_steps < 1:
+        raise RuntimeError("continuation metadata has no completed training step")
     fingerprint = metadata.get("fingerprint")
     if not isinstance(fingerprint, dict):
         raise RuntimeError("continuation metadata has no fingerprint")
@@ -136,7 +137,7 @@ def validate_training_provenance(
         "--dataset-revision": args.dataset_revision,
         "--source-model-revision": args.parent_model_revision,
         "--output-dir": str(args.output_root),
-        "--max-steps": "600",
+        "--max-steps": str(run_completed_steps),
     }
     for flag, value in command_expected.items():
         observed_value = command_argument(command, flag)
@@ -179,7 +180,7 @@ def validate_training_provenance(
         "base_model": str(fingerprint["base_model"]),
         "base_revision": str(fingerprint["base_revision"]),
         "output_root": str(args.output_root),
-        "max_steps": 600,
+        "max_steps": run_completed_steps,
     }
 
 
@@ -284,8 +285,12 @@ def publish(
 ) -> dict[str, Any]:
     metadata_path = args.output_root / "continuation_training_metadata.json"
     metadata = read_json(metadata_path)
-    if metadata.get("step") != 600:
-        raise RuntimeError("continuation metadata does not represent step 600")
+    run_completed_steps = int(metadata.get("step", 0))
+    selected_step = int(candidate["selected_step"])
+    if run_completed_steps < 1:
+        raise RuntimeError("continuation metadata has no completed training step")
+    if selected_step > run_completed_steps:
+        raise RuntimeError("selected checkpoint is later than the completed training run")
     merged_dir = args.output_root / str(candidate["merged_subdir"])
     adapter_dir = args.output_root / str(candidate["adapter_subdir"])
     trainer_state_path = adapter_dir / "trainer_state.json"
@@ -308,7 +313,6 @@ def publish(
         },
     )
     trainer_state = read_json(trainer_state_path)
-    selected_step = int(candidate["selected_step"])
     if int(trainer_state.get("global_step", 0)) != selected_step:
         raise RuntimeError("selected checkpoint trainer state does not match its step")
     selected_eval = [
@@ -321,7 +325,7 @@ def publish(
     result = {
         "contract": "banking-v3-continuation-sft-result/v1",
         "worker": "cloud_recover_continuation_export",
-        "run_completed_steps": 600,
+        "run_completed_steps": run_completed_steps,
         "selected_step": selected_step,
         "selected_adapter_subdir": str(candidate["adapter_subdir"]),
         "recovery_source_commit": args.recovery_source_commit,

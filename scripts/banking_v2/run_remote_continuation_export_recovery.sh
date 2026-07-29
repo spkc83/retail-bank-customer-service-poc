@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 5 ]]; then
-  echo "usage: $0 RECOVERY_SOURCE_COMMIT TRAINING_SOURCE_COMMIT DATASET_REVISION PARENT_MODEL_REVISION TRAINING_JOB" >&2
+if [[ $# -lt 7 || $# -gt 8 ]]; then
+  echo "usage: $0 RECOVERY_SOURCE_COMMIT TRAINING_SOURCE_COMMIT DATASET_REVISION" \
+    "PARENT_MODEL_REVISION TRAINING_JOB OUTPUT_ROOT SELECTED_STEP" \
+    "[SELECTED_ADAPTER_SUBDIR]" >&2
   exit 2
 fi
 
@@ -11,8 +13,10 @@ training_source_commit="$2"
 dataset_revision="$3"
 parent_model_revision="$4"
 training_job="$5"
+output_root="$6"
+selected_step="$7"
+selected_adapter_subdir="${8:-checkpoint-${selected_step}}"
 script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${recovery_source_commit}/scripts/banking_v2/hf_job_recover_continuation_export.py"
-output_root="/data/retail-bank-agent-9b-continuation-68e96a7d-00c4ba1b"
 
 for revision in "$recovery_source_commit" "$training_source_commit" "$dataset_revision" "$parent_model_revision"; do
   if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
@@ -20,6 +24,16 @@ for revision in "$recovery_source_commit" "$training_source_commit" "$dataset_re
     exit 2
   fi
 done
+
+if [[ "$output_root" != /data/retail-bank-agent-9b-continuation-* ]]; then
+  echo "OUTPUT_ROOT must identify one continuation run under /data" >&2
+  exit 2
+fi
+
+if [[ ! "$selected_step" =~ ^[1-9][0-9]*$ ]]; then
+  echo "SELECTED_STEP must be a positive integer" >&2
+  exit 2
+fi
 
 curl --fail --silent --show-error --head "$script_url" >/dev/null
 
@@ -36,6 +50,6 @@ hf jobs uv run \
   --dataset-revision "$dataset_revision" \
   --parent-model-revision "$parent_model_revision" \
   --training-job "$training_job" \
-  --selected-adapter-subdir "checkpoint-500" \
-  --selected-step 500 \
+  --selected-adapter-subdir "$selected_adapter_subdir" \
+  --selected-step "$selected_step" \
   --output-root "$output_root"
