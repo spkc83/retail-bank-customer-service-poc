@@ -96,6 +96,8 @@ def main() -> int:
             str(args.max_new_tokens_first),
             "--max-new-tokens-final",
             str(args.max_new_tokens_final),
+            "--dtype",
+            "fp16",
             "--push-to-hub",
         ]
         subprocess.run(command, cwd=source_root, env=env, check=True)

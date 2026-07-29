@@ -40,7 +40,7 @@ else:
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
         revision=MODEL_REVISION,
-        dtype=torch.bfloat16,
+        dtype=torch.float16,
         low_cpu_mem_usage=True,
     )
     model.to("cuda")
