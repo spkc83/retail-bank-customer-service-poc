@@ -1,0 +1,645 @@
+#!/usr/bin/env python
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#   "accelerate==1.12.0",
+#   "datasets==4.5.0",
+#   "huggingface-hub==1.22.0",
+#   "safetensors==0.8.0",
+#   "torch>=2.9,<3",
+#   "transformers==5.13.0",
+# ]
+# ///
+"""Generate read-only banking-v3 frozen tool-eval predictions from a merged Hub model."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+import time
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Protocol
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+
+from hello_slm.banking_tool_eval import (
+    StaticPredictionModel,
+    TaggedJsonToolAdapter,
+    evaluate_records,
+    load_predictions_jsonl,
+)
+from hello_slm.banking_tool_sft_data import public_tool_manifest
+from hello_slm.banking_tool_wire import ToolWireAdapter
+from hello_slm.config import canonical_json_bytes
+
+DEFAULT_MODEL_REPO = "spkc83/retail-bank-agent-9b"
+DEFAULT_DATASET_REPO = "spkc83/retail-bank-agent-sft"
+DEFAULT_OUTPUT_DIR = "artifacts/banking-v3-tool-eval"
+DEFAULT_FAMILY = "granite"
+REVISION_HEX_LENGTH = 40
+
+PUBLIC_BANKING_TOOL_MANIFEST: tuple[dict[str, Any], ...] = tuple(public_tool_manifest())
+
+
+class ToolEvalGenerationError(ValueError):
+    """Raised when frozen tool-eval generation inputs are invalid."""
+
+
+class GenerationBackend(Protocol):
+    tokenizer: Any
+
+    def generate_text(
+        self,
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        max_new_tokens: int,
+    ) -> str:
+        """Generate one assistant continuation for already-rendered banking messages."""
+
+
+@dataclass(frozen=True)
+class EvalConfig:
+    model_repo: str
+    model_revision: str
+    dataset_repo: str
+    dataset_revision: str
+    manifest: Path | None
+    output_dir: Path
+    predictions_jsonl: Path | None
+    metadata_json: Path | None
+    split: str
+    family: str
+    device: str
+    dtype: str
+    max_new_tokens_first: int
+    max_new_tokens_final: int
+    limit: int | None
+    trust_remote_code: bool
+    push_to_hub: bool
+    token: str | None
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model-repo", default=DEFAULT_MODEL_REPO)
+    parser.add_argument("--model-revision", required=True)
+    parser.add_argument("--dataset-repo", default=DEFAULT_DATASET_REPO)
+    parser.add_argument("--dataset-revision", required=True)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--output-dir", type=Path, default=Path(DEFAULT_OUTPUT_DIR))
+    parser.add_argument("--predictions-jsonl", type=Path)
+    parser.add_argument("--metadata-json", type=Path)
+    parser.add_argument("--split", default="test")
+    parser.add_argument("--family", default=DEFAULT_FAMILY)
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--dtype", choices=("bf16", "fp16", "fp32"), default="bf16")
+    parser.add_argument("--max-new-tokens-first", type=int, default=192)
+    parser.add_argument("--max-new-tokens-final", type=int, default=220)
+    parser.add_argument("--limit", type=int)
+    parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument("--push-to-hub", action="store_true")
+    parser.add_argument("--token", default=os.environ.get("HF_TOKEN"))
+    return parser.parse_args(argv)
+
+
+def config_from_args(args: argparse.Namespace) -> EvalConfig:
+    return EvalConfig(
+        model_repo=str(args.model_repo),
+        model_revision=str(args.model_revision),
+        dataset_repo=str(args.dataset_repo),
+        dataset_revision=str(args.dataset_revision),
+        manifest=args.manifest,
+        output_dir=args.output_dir,
+        predictions_jsonl=args.predictions_jsonl,
+        metadata_json=args.metadata_json,
+        split=str(args.split),
+        family=str(args.family),
+        device=str(args.device),
+        dtype=str(args.dtype),
+        max_new_tokens_first=int(args.max_new_tokens_first),
+        max_new_tokens_final=int(args.max_new_tokens_final),
+        limit=int(args.limit) if args.limit is not None else None,
+        trust_remote_code=bool(args.trust_remote_code),
+        push_to_hub=bool(args.push_to_hub),
+        token=args.token,
+    )
+
+
+def validate_exact_revision(value: str, *, field: str) -> None:
+    if len(value) != REVISION_HEX_LENGTH or any(char not in "0123456789abcdef" for char in value):
+        raise ToolEvalGenerationError(
+            f"{field} must be an exact 40-character lowercase Git revision"
+        )
+
+
+def run_eval(config: EvalConfig, backend: GenerationBackend | None = None) -> dict[str, Any]:
+    validate_config(config)
+    manifest_path = resolve_manifest(config)
+    records = load_manifest_records(manifest_path, config.split)
+    if config.limit is not None:
+        records = records[: config.limit]
+    if not records:
+        raise ToolEvalGenerationError("no records selected for evaluation")
+
+    owns_backend = backend is None
+    if backend is None:
+        backend = TransformersGenerationBackend(config)
+    adapter = ToolWireAdapter(
+        backend.tokenizer,
+        family=config.family,
+        public_tool_manifest=PUBLIC_BANKING_TOOL_MANIFEST,
+    )
+
+    output_paths = output_paths_for(config)
+    output_paths["predictions"].parent.mkdir(parents=True, exist_ok=True)
+    completed = read_completed_predictions(output_paths["predictions"])
+    written = 0
+    first_phase = 0
+    final_phase = 0
+    started = time.time()
+
+    with output_paths["predictions"].open("a", encoding="utf-8", newline="\n") as handle:
+        for record in records:
+            record_id = required_str(record, "record_id")
+            if record_id not in completed:
+                row = generate_record_prediction_row(
+                    backend,
+                    adapter,
+                    record,
+                    max_new_tokens_first=config.max_new_tokens_first,
+                    max_new_tokens_final=config.max_new_tokens_final,
+                )
+                handle.write(json.dumps(row, sort_keys=True) + "\n")
+                handle.flush()
+                completed.add(record_id)
+                written += 1
+            first_phase += 1
+            if expected_requires_tool(record):
+                final_phase += 1
+
+    if owns_backend and hasattr(backend, "close"):
+        backend.close()  # type: ignore[attr-defined]
+
+    report = evaluate_records(
+        records,
+        model=StaticPredictionModel(
+            load_predictions_jsonl(output_paths["predictions"])
+        ),
+        adapter=TaggedJsonToolAdapter(template_hash=adapter.template_hash),
+        checkpoint_revision=config.model_revision,
+    )
+    write_json(output_paths["report"], report)
+    metadata = build_metadata(
+        config,
+        manifest_path=manifest_path,
+        records=records,
+        adapter=adapter,
+        predictions_path=output_paths["predictions"],
+        first_phase=first_phase,
+        final_phase=final_phase,
+        written=written,
+        elapsed_seconds=time.time() - started,
+        report_path=output_paths["report"],
+    )
+    write_json(output_paths["metadata"], metadata)
+    if config.push_to_hub:
+        publish_eval_artifacts(config, output_paths)
+    return metadata
+
+
+def validate_config(config: EvalConfig) -> None:
+    validate_exact_revision(config.model_revision, field="--model-revision")
+    validate_exact_revision(config.dataset_revision, field="--dataset-revision")
+    if config.max_new_tokens_first < 1:
+        raise ToolEvalGenerationError("--max-new-tokens-first must be at least 1")
+    if config.max_new_tokens_final < 1:
+        raise ToolEvalGenerationError("--max-new-tokens-final must be at least 1")
+    if config.limit is not None and config.limit < 1:
+        raise ToolEvalGenerationError("--limit must be at least 1")
+
+
+def resolve_manifest(config: EvalConfig) -> Path:
+    if config.manifest is not None:
+        if not config.manifest.is_file():
+            raise ToolEvalGenerationError(f"manifest is unavailable: {config.manifest}")
+        return config.manifest
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError as exc:
+        raise ToolEvalGenerationError(
+            "huggingface-hub is required to download the dataset"
+        ) from exc
+    dataset_root = Path(
+        snapshot_download(
+            repo_id=config.dataset_repo,
+            repo_type="dataset",
+            revision=config.dataset_revision,
+            token=config.token,
+        )
+    )
+    manifest = dataset_root / "manifest.json"
+    if not manifest.is_file():
+        raise ToolEvalGenerationError(f"dataset manifest is unavailable: {manifest}")
+    return manifest
+
+
+def output_paths_for(config: EvalConfig) -> dict[str, Path]:
+    slug = f"{config.model_revision[:12]}-{config.dataset_revision[:12]}-{config.split}"
+    return {
+        "predictions": config.predictions_jsonl or config.output_dir / f"predictions-{slug}.jsonl",
+        "metadata": config.metadata_json or config.output_dir / f"metadata-{slug}.json",
+        "report": config.output_dir / f"report-{slug}.json",
+    }
+
+
+def load_manifest_records(manifest_path: Path, split: str) -> list[dict[str, Any]]:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    base_dir = manifest_path.parent
+    paths: list[Path] = []
+    if "splits" in manifest and split in manifest["splits"]:
+        entry = manifest["splits"][split]
+        value = entry["path"] if isinstance(entry, Mapping) else entry
+        paths.append(resolve_data_path(base_dir, value))
+    elif "tool_sft" in manifest:
+        for entry in manifest["tool_sft"]:
+            if entry.get("name") == split and entry.get("included", True):
+                paths.append(resolve_data_path(base_dir, entry["path"]))
+    else:
+        raise ToolEvalGenerationError(f"manifest {manifest_path} does not declare split {split!r}")
+
+    records: list[dict[str, Any]] = []
+    for path in paths:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    records.append(json.loads(line))
+    if not records:
+        raise ToolEvalGenerationError(f"manifest split {split!r} is empty")
+    return records
+
+
+def resolve_data_path(base_dir: Path, value: Any) -> Path:
+    path = Path(str(value))
+    return path if path.is_absolute() else base_dir / path
+
+
+def first_phase_messages(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    messages = messages_list(record)
+    if expected_requires_tool(record):
+        for index, message in enumerate(messages):
+            if message.get("role") == "assistant" and message.get("tool_calls"):
+                return [dict(item) for item in messages[:index]]
+    else:
+        return [dict(item) for item in messages[: final_assistant_index(record)]]
+    raise ToolEvalGenerationError(f"{record.get('record_id')} has no first assistant target")
+
+
+def grounded_final_phase_messages(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    if not expected_requires_tool(record):
+        raise ToolEvalGenerationError("grounded final phase requires a tool record")
+    messages = messages_list(record)
+    final_index = final_assistant_index(record)
+    prefix = messages[:final_index]
+    if not any(message.get("role") == "tool" for message in prefix):
+        raise ToolEvalGenerationError(f"{record.get('record_id')} has no canonical tool results")
+    return [dict(item) for item in prefix]
+
+
+def final_assistant_index(record: Mapping[str, Any]) -> int:
+    messages = messages_list(record)
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if message.get("role") == "assistant" and not message.get("tool_calls"):
+            return index
+    raise ToolEvalGenerationError(f"{record.get('record_id')} has no final assistant message")
+
+
+def messages_list(record: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    messages = record.get("messages")
+    if not isinstance(messages, list):
+        raise ToolEvalGenerationError(f"{record.get('record_id')} is missing messages")
+    return messages
+
+
+def expected_requires_tool(record: Mapping[str, Any]) -> bool:
+    expected = record.get("expected")
+    if not isinstance(expected, Mapping):
+        raise ToolEvalGenerationError(f"{record.get('record_id')} is missing expected metadata")
+    return bool(expected.get("requires_tool"))
+
+
+def generate_record_prediction_row(
+    backend: GenerationBackend,
+    adapter: ToolWireAdapter,
+    record: Mapping[str, Any],
+    *,
+    max_new_tokens_first: int,
+    max_new_tokens_final: int,
+) -> dict[str, Any]:
+    expected = record.get("expected", {})
+    first_messages = first_phase_messages(record)
+    first_raw = backend.generate_text(
+        first_messages,
+        max_new_tokens=max_new_tokens_first,
+    )
+    first_parsed, first_parse_error = parse_or_error(adapter, first_raw)
+    final_raw: str | None = None
+    final_parsed: dict[str, Any] | None = None
+    final_parse_error: str | None = None
+    final_message_count = 0
+    if expected_requires_tool(record):
+        final_messages = grounded_final_phase_messages(record)
+        final_message_count = len(final_messages)
+        final_raw = backend.generate_text(
+            final_messages,
+            max_new_tokens=max_new_tokens_final,
+        )
+        final_parsed, final_parse_error = parse_or_error(adapter, final_raw)
+    requires_tool = (
+        bool(expected.get("requires_tool")) if isinstance(expected, Mapping) else None
+    )
+    expected_path = expected.get("path") if isinstance(expected, Mapping) else None
+    expected_tool_calls = (
+        expected.get("tool_calls", []) if isinstance(expected, Mapping) else []
+    )
+    expected_grounding_facts = (
+        expected.get("grounding_facts", []) if isinstance(expected, Mapping) else []
+    )
+    return {
+        "contract": "banking-tool-eval-prediction/v1",
+        "record_id": required_str(record, "record_id"),
+        "requires_tool": requires_tool,
+        "expected_path": expected_path,
+        "expected_tool_calls": expected_tool_calls,
+        "expected_grounding_facts": expected_grounding_facts,
+        "first_assistant_prompt_message_count": len(first_messages),
+        "grounded_final_prompt_message_count": final_message_count,
+        "first_assistant_raw_output": first_raw,
+        "grounded_final_raw_output": final_raw,
+        "raw_output": f"{first_raw}\n{final_raw}" if final_raw is not None else first_raw,
+        "first_assistant_parsed": first_parsed,
+        "first_assistant_parse_error": first_parse_error,
+        "grounded_final_parsed": final_parsed,
+        "grounded_final_parse_error": final_parse_error,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def parse_or_error(
+    adapter: ToolWireAdapter,
+    raw_output: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        return adapter.parse_assistant(raw_output), None
+    except ValueError as exc:
+        return None, str(exc)
+
+
+class TransformersGenerationBackend:
+    def __init__(self, config: EvalConfig) -> None:
+        self.config = config
+        self.tokenizer: Any | None = None
+        self.model: Any | None = None
+        self.adapter: ToolWireAdapter | None = None
+        self._load()
+
+    def _load(self) -> None:
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+        except ImportError as exc:
+            raise ToolEvalGenerationError("transformers and torch are required") from exc
+        if self.config.device == "cuda" and not torch.cuda.is_available():
+            raise ToolEvalGenerationError("CUDA device requested but unavailable")
+        dtype_by_name = {
+            "bf16": torch.bfloat16,
+            "fp16": torch.float16,
+            "fp32": torch.float32,
+        }
+        tokenizer = AutoTokenizer.from_pretrained(
+            self.config.model_repo,
+            revision=self.config.model_revision,
+            token=self.config.token,
+            trust_remote_code=self.config.trust_remote_code,
+        )
+        if getattr(tokenizer, "pad_token_id", None) is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "left"
+        model = AutoModelForCausalLM.from_pretrained(
+            self.config.model_repo,
+            revision=self.config.model_revision,
+            token=self.config.token,
+            dtype=dtype_by_name[self.config.dtype],
+            device_map={"": 0} if self.config.device == "cuda" else None,
+            trust_remote_code=self.config.trust_remote_code,
+        )
+        if self.config.device != "cuda":
+            model.to(self.config.device)
+        model.eval()
+        self.tokenizer = tokenizer
+        self.model = model
+        self.adapter = ToolWireAdapter(
+            tokenizer,
+            family=self.config.family,
+            public_tool_manifest=PUBLIC_BANKING_TOOL_MANIFEST,
+        )
+
+    def generate_text(
+        self,
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        max_new_tokens: int,
+    ) -> str:
+        if self.model is None or self.tokenizer is None or self.adapter is None:
+            raise ToolEvalGenerationError("generation backend is not initialized")
+        import torch
+
+        rendered = self.adapter.render_generation(messages)
+        inputs = {
+            key: value.to(self.model.device)
+            for key, value in rendered.items()
+            if hasattr(value, "to") and key != "tools"
+        }
+        if "attention_mask" not in inputs:
+            inputs["attention_mask"] = torch.ones_like(inputs["input_ids"])
+        with torch.inference_mode():
+            output_ids = self.model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=getattr(self.tokenizer, "pad_token_id", None)
+                or getattr(self.tokenizer, "eos_token_id", None),
+                eos_token_id=getattr(self.tokenizer, "eos_token_id", None),
+                use_cache=True,
+            )
+        prompt_width = int(inputs["input_ids"].shape[-1])
+        new_tokens = output_ids[0, prompt_width:]
+        return str(self.tokenizer.decode(new_tokens, skip_special_tokens=True)).strip()
+
+    def close(self) -> None:
+        self.model = None
+
+
+def read_completed_predictions(path: Path) -> set[str]:
+    completed: set[str] = set()
+    if not path.exists():
+        return completed
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ToolEvalGenerationError(
+                    f"existing predictions JSONL is corrupt at line {line_number}: {path}"
+                ) from exc
+            if "phase" in row:
+                raise ToolEvalGenerationError(
+                    f"existing predictions JSONL uses the old phase-row contract: {path}"
+                )
+            completed.add(required_str(row, "record_id"))
+    return completed
+
+
+def build_metadata(
+    config: EvalConfig,
+    *,
+    manifest_path: Path,
+    records: Sequence[Mapping[str, Any]],
+    adapter: ToolWireAdapter,
+    predictions_path: Path,
+    first_phase: int,
+    final_phase: int,
+    written: int,
+    elapsed_seconds: float,
+    report_path: Path,
+) -> dict[str, Any]:
+    return {
+        "contract": "banking-tool-eval-run-metadata/v1",
+        "created_at": datetime.now(UTC).isoformat(),
+        "model": {
+            "repo": config.model_repo,
+            "revision": config.model_revision,
+            "family": config.family,
+        },
+        "dataset": {
+            "repo": config.dataset_repo,
+            "revision": config.dataset_revision,
+            "split": config.split,
+            "manifest": str(manifest_path),
+            "manifest_sha256": sha256_file(manifest_path),
+            "fingerprint": sha256_json(records),
+        },
+        "tool_manifest": {
+            "count": len(PUBLIC_BANKING_TOOL_MANIFEST),
+            "sha256": sha256_json(PUBLIC_BANKING_TOOL_MANIFEST),
+            "rendered_with_tokenizer_template_hash": adapter.template_hash,
+        },
+        "decode": {
+            "do_sample": False,
+            "max_new_tokens_first": config.max_new_tokens_first,
+            "max_new_tokens_final": config.max_new_tokens_final,
+            "dtype": config.dtype,
+            "device": config.device,
+        },
+        "phases": {
+            "first_assistant_records": first_phase,
+            "grounded_final_records": final_phase,
+        },
+        "outputs": {
+            "predictions_jsonl": str(predictions_path),
+            "predictions_sha256": sha256_file(predictions_path),
+            "report_json": str(report_path),
+            "report_sha256": sha256_file(report_path),
+            "new_rows_written": written,
+            "hub_path_prefix": (
+                f"evaluation/{config.model_revision[:12]}-{config.dataset_revision[:12]}"
+            ),
+        },
+        "elapsed_seconds": round(elapsed_seconds, 3),
+        "read_only_contract": {
+            "tool_execution": False,
+            "deterministic_output_repair": False,
+            "teacher_forced_canonical_tool_results_for_grounded_final": True,
+        },
+    }
+
+
+def publish_eval_artifacts(config: EvalConfig, output_paths: Mapping[str, Path]) -> None:
+    try:
+        from huggingface_hub import CommitOperationAdd, HfApi
+    except ImportError as exc:
+        raise ToolEvalGenerationError(
+            "huggingface-hub is required to publish evaluation artifacts"
+        ) from exc
+    path_prefix = f"evaluation/{config.model_revision[:12]}-{config.dataset_revision[:12]}"
+    operations = [
+        CommitOperationAdd(
+            path_in_repo=f"{path_prefix}/{path.name}",
+            path_or_fileobj=path,
+        )
+        for path in (
+            output_paths["predictions"],
+            output_paths["metadata"],
+            output_paths["report"],
+        )
+    ]
+    HfApi(token=config.token).create_commit(
+        repo_id=config.model_repo,
+        repo_type="model",
+        operations=operations,
+        commit_message="Add frozen banking-v3 tool-use evaluation",
+        commit_description=(
+            f"Model revision {config.model_revision}; "
+            f"dataset revision {config.dataset_revision}."
+        ),
+    )
+
+
+def sha256_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def sha256_json(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def required_str(row: Mapping[str, Any], field: str) -> str:
+    value = row.get(field)
+    if not isinstance(value, str) or not value:
+        raise ToolEvalGenerationError(f"missing required string field: {field}")
+    return value
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    try:
+        metadata = run_eval(config_from_args(parse_args(argv)))
+    except (OSError, ToolEvalGenerationError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(metadata, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

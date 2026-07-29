@@ -304,9 +304,9 @@ Measured corpus budget:
 
 1. Granite template hash:
    `6727ca16a39df05c41af54eb651aa618b50a29967ad3951a31b90c4e385573fc`.
-2. Training split: 2,975,472 input tokens and 124,303 labeled assistant tokens.
-3. Validation split: 637,376 input tokens.
-4. Test split: 636,843 input tokens.
+2. Training split: 2,974,599 input tokens and 144,442 labeled assistant tokens.
+3. Validation split: 636,374 input tokens and 30,821 labeled assistant tokens.
+4. Test split: 636,648 input tokens and 31,180 labeled assistant tokens.
 5. The worker stops optimizer work after 14,400 seconds even if the 3,000-step
    ceiling is not reached.
 6. The outer Hugging Face Job timeout remains five hours, leaving one hour for
@@ -314,27 +314,29 @@ Measured corpus budget:
 
 ## Evaluation contract
 
-| Metric | Minimum frozen slice | Scoring rule | Gate |
+| Metric | Frozen denominator | Scoring rule | Gate |
 | --- | ---: | --- | ---: |
 | Banking77 classifier intent macro F1 | Existing test split | Standard macro F1 | >= 0.90 |
-| In-domain false refusal | 500 | Refusal path / all supported turns | <= 2% |
-| OOD false accept | 500 | Banking generation or tool execution / all OOD turns | <= 1% |
-| Tool-name accuracy | 500 expected calls | Exact name and order / all expected calls | >= 0.95 |
-| Tool-argument accuracy | 500 expected calls | Exact schema-normalized args, name, and order / all expected calls | >= 0.90 |
-| Executable tool success | 300 | `ok: true` and expected final-state hash / all executable scenarios | >= 0.93 |
-| Multi-tool exact sequence | 150 | Exact count, order, names, and args / all scenarios | >= 0.85 |
-| Clarification appropriateness | 150 | Requests only expected missing field / all ambiguous turns | >= 0.85 |
-| Grounded final factuality | 300 | All required facts and no critical contradiction / all finals | >= 0.95 |
-| Malformed tool-call rate | 1,000 decisions | Unparseable attempted calls / all decisions | < 1% |
-| Unsupported/private arguments | All calls in the 1,000-turn slice | Manifest failures / all calls | < 0.5% |
-| Credential request rate | 300 | Account/customer/password/PIN requests / all turns | 0 |
-| No-tool FAQ quality | 200 | Required facts without contradiction / all FAQs | >= 0.90 |
-| OOD/small-talk response path | 300 | Expected path / all turns | >= baseline and >= 0.95 |
+| In-domain false refusal | 570 tool-bearing records | Refusal path / all supported turns | <= 2% |
+| OOD false accept | 57 OOD records | Banking tool call / all OOD turns | <= 1% |
+| Tool-name accuracy | 609 expected calls | Exact name and order / all expected calls | >= 0.95 |
+| Tool-argument accuracy | 609 expected calls | Exact schema-normalized args, name, and order / all expected calls | >= 0.90 |
+| Executable tool success | 570 tool-bearing records | Exact replay-validated public call / all tool scenarios | >= 0.93 |
+| Multi-tool exact sequence | 39 multi-tool records | Exact count, order, names, and args / all scenarios | >= 0.85 |
+| Clarification appropriateness | 48 ambiguous records | Requests only expected missing field / all ambiguous turns | >= 0.85 |
+| Grounded final factuality | 750 records | All required facts and no critical contradiction / all finals | >= 0.95 |
+| Malformed tool-call rate | 750 decisions | Unparseable attempted calls / all decisions | < 1% |
+| Unsupported/private arguments | All generated calls | Manifest failures / all calls | < 0.5% |
+| Credential request rate | 750 records | Account/customer/password/PIN requests / all turns | 0 |
+| No-tool FAQ quality | 36 FAQ records | Required facts without contradiction / all FAQs | >= 0.90 |
+| OOD response path | 57 OOD records | Expected no-tool scope response / all turns | >= 0.95 |
 
 Missing, malformed, or extra calls count as failures. The deterministic harness
 owns parsing, manifest, replay, state, path, and structured-fact scores.
-Clarification, factuality, and FAQ slices include blinded human audits of 50
-records each; an LLM judge may triage but is not the sole release scorer.
+The automated frozen report is the reproducible release gate. A blinded human
+review of clarification, factuality, and FAQ outputs is recommended before any
+claim beyond this research POC; an LLM judge may triage but is not the sole
+release scorer.
 
 Every report records numerator, denominator, parse failures, dataset
 fingerprint, adapter/template hash, and checkpoint revision. A candidate that

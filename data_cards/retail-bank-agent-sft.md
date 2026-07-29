@@ -19,7 +19,7 @@ conversations for supervised fine-tuning of a conversational tool-using model.
 
 - Dataset: https://huggingface.co/datasets/spkc83/retail-bank-agent-sft
 - Training revision:
-  `fcf065dbb524f387d456f731dd708fba6da0f361`
+  `c0e0be08f9d56f382e3c85a6bca1e4f4090eacac`
 - Source: https://github.com/spkc83/retail-bank-servicing
 - Model: https://huggingface.co/spkc83/retail-bank-agent-9b
 - Public POC:
@@ -31,7 +31,7 @@ conversations for supervised fine-tuning of a conversational tool-using model.
 - Validation: 748
 - Frozen test: 750
 - Corpus fingerprint:
-  `bea295674348caffc3561474635c8af8b55836041c81296b46940456610e01af`
+  `d8014d6e7eda0d30f403461395c17882719fbe6b5b2c8f1ad4fe44deb25cd270`
 - Split seed: `7303`
 
 ## Coverage
@@ -54,6 +54,8 @@ calls.
 Every tool-bearing record was replayed against isolated deterministic
 synthetic state before inclusion. Assistant tool-call and final-response tokens
 are trainable; system, user, and tool-result tokens are context only.
+The data validator rejects semantically empty final responses and asserts
+path-specific content for clarification, FAQ, OOD, and hard-negative rows.
 
 ## Source and privacy policy
 

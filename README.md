@@ -95,11 +95,28 @@ Launch through the durable-storage wrapper:
 ```bash
 scripts/banking_v2/run_remote_training_job.sh \
   "$(git rev-parse HEAD)" \
-  fcf065dbb524f387d456f731dd708fba6da0f361
+  c0e0be08f9d56f382e3c85a6bca1e4f4090eacac
 ```
 
 The complete implementation and acceptance contract is
 [the banking v3 specification](specs/banking-v3/01-tool-use-sft-plan.md).
+
+After the merged checkpoint is published, run the frozen 750-record,
+two-phase tool/final-response evaluation with exact revisions:
+
+```bash
+bash scripts/banking_v2/run_remote_tool_eval_job.sh \
+  "$(git rev-parse HEAD)" \
+  MODEL_REVISION \
+  c0e0be08f9d56f382e3c85a6bca1e4f4090eacac
+```
+
+The evaluation job performs deterministic decoding only. It executes no tools
+and applies no output repair; grounded-final scoring uses the dataset's
+replay-validated canonical tool results. Predictions, metadata, and the scored
+report are persisted to the mounted bucket and published under the model
+repository's `evaluation/` directory.
+
 The earlier dense-to-MoE design remains documented only as the control
 architecture in
 [the historical routing note](specs/banking-v2/04-dense-to-moe-routing.md).

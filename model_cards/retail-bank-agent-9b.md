@@ -30,13 +30,13 @@ adaptation of `ibm-granite/granite-4.1-8b`.
 - Base revision:
   `1504002f650e656a0a3789d99574df12e3e94ed0`
 - Source revision:
-  `2996273af060504c7bba913691228cc8687b67fb`
+  `3a6a7efe22b9ea2a104712cbeff5648df3eeec31`
 - Training job:
-  `spkc83/6a6a113eb36a6516e969f750`
+  `spkc83/6a6a19a1b36a6516e969f78b`
 - Dataset revision:
-  `fcf065dbb524f387d456f731dd708fba6da0f361`
+  `c0e0be08f9d56f382e3c85a6bca1e4f4090eacac`
 - Dataset fingerprint:
-  `bea295674348caffc3561474635c8af8b55836041c81296b46940456610e01af`
+  `d8014d6e7eda0d30f403461395c17882719fbe6b5b2c8f1ad4fe44deb25cd270`
 - Parameters: 8,791,592,960
 - Architecture: dense decoder-only causal transformer
 - Tool format: Granite native tagged JSON

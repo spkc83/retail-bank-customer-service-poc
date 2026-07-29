@@ -245,14 +245,14 @@ def test_cli_dry_run_writes_json_report(tmp_path: Path) -> None:
 
 
 def test_generated_sft_records_have_evaluable_expected_tool_calls() -> None:
-    records = generate_records(pilot_count=18)
+    records = generate_records(pilot_count=36)
     tool_records = [
         record for record in records if record["expected"]["requires_tool"]
     ]
     outputs = {}
     for record in records:
         calls = record["expected"]["tool_calls"]
-        outputs[record["record_id"]] = "".join(
+        tool_output = "".join(
             "<tool_call>"
             + json.dumps(
                 {"name": call["name"], "arguments": call["arguments"]},
@@ -260,7 +260,12 @@ def test_generated_sft_records_have_evaluable_expected_tool_calls() -> None:
             )
             + "</tool_call>"
             for call in calls
-        ) or str(record["messages"][-1]["content"])
+        )
+        outputs[record["record_id"]] = "\n".join(
+            part
+            for part in (tool_output, str(record["messages"][-1]["content"]))
+            if part
+        )
 
     report = evaluate_records(
         records,
@@ -274,3 +279,11 @@ def test_generated_sft_records_have_evaluable_expected_tool_calls() -> None:
     assert expected_denominator > 0
     assert report["metrics"]["tool_name_accuracy"]["denominator"] == expected_denominator
     assert report["metrics"]["tool_argument_accuracy"]["denominator"] == expected_denominator
+    assert report["metrics"]["tool_name_accuracy"]["score"] == 1.0
+    assert report["metrics"]["tool_argument_accuracy"]["score"] == 1.0
+    assert report["metrics"]["executable_tool_success"]["score"] == 1.0
+    assert report["metrics"]["grounded_final_factuality"]["score"] == 1.0
+    assert report["metrics"]["clarification_appropriateness"]["score"] == 1.0
+    assert report["metrics"]["no_tool_faq_quality"]["score"] == 1.0
+    assert report["metrics"]["ood_small_talk_response_path"]["score"] == 1.0
+    assert report["metrics"]["ood_false_accept"]["score"] == 0.0
