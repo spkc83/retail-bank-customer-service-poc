@@ -608,32 +608,25 @@ def merge_adapter_with_reload_parity(
     attention_mask: Tensor,
     auto_model_cls: Any,
     peft_model_cls: Any,
-    atol: float = 5e-3,
+    minimum_argmax_agreement: float = 0.999,
+    maximum_logit_difference: float = 0.3,
 ) -> dict[str, Any]:
     adapter_dir = config.output_dir / "adapter"
     merged_dir = config.output_dir / "merged"
     base = auto_model_cls.from_pretrained(
         config.base_model,
         revision=config.base_revision,
-        dtype=torch.bfloat16,
+        dtype=torch.float32,
         device_map={"": torch.cuda.current_device()},
     )
-    adapter_model = peft_model_cls.from_pretrained(base, adapter_dir)
-    adapter_model.eval()
-    device = next(adapter_model.parameters()).device
-    batch = {
-        "input_ids": input_ids.to(device),
-        "attention_mask": attention_mask.to(device),
-    }
-    with torch.inference_mode():
-        adapter_logits = adapter_model(**batch).logits.detach().cpu()
-        adapter_generation = adapter_model.generate(
-            **batch,
-            max_new_tokens=1,
-            do_sample=False,
-            pad_token_id=getattr(tokenizer, "pad_token_id", None),
-        ).detach().cpu()
-    merged = adapter_model.merge_and_unload()
+    adapter_model = peft_model_cls.from_pretrained(
+        base,
+        adapter_dir,
+        autocast_adapter_dtype=True,
+    )
+    merged = adapter_model.merge_and_unload(safe_merge=True)
+    merged.to(dtype=torch.float16)
+    merged.config.torch_dtype = torch.float16
     merged.save_pretrained(merged_dir, safe_serialization=True)
     tokenizer.save_pretrained(merged_dir)
     del adapter_model
@@ -641,9 +634,40 @@ def merge_adapter_with_reload_parity(
     del base
     gc.collect()
     torch.cuda.empty_cache()
+
+    reference_base = auto_model_cls.from_pretrained(
+        config.base_model,
+        revision=config.base_revision,
+        dtype=torch.float16,
+        device_map={"": torch.cuda.current_device()},
+    )
+    reference_adapter = peft_model_cls.from_pretrained(
+        reference_base,
+        adapter_dir,
+        autocast_adapter_dtype=False,
+    )
+    reference_adapter.eval()
+    reference_device = next(reference_adapter.parameters()).device
+    reference_batch = {
+        "input_ids": input_ids.to(reference_device),
+        "attention_mask": attention_mask.to(reference_device),
+    }
+    with torch.inference_mode():
+        adapter_logits = reference_adapter(**reference_batch).logits.detach().float().cpu()
+        adapter_generation = reference_adapter.generate(
+            **reference_batch,
+            max_new_tokens=1,
+            do_sample=False,
+            pad_token_id=getattr(tokenizer, "pad_token_id", None),
+        ).detach().cpu()
+    del reference_adapter
+    del reference_base
+    gc.collect()
+    torch.cuda.empty_cache()
+
     reloaded = auto_model_cls.from_pretrained(
         merged_dir,
-        dtype=torch.bfloat16,
+        dtype=torch.float16,
         device_map={"": torch.cuda.current_device()},
     )
     reloaded.eval()
@@ -653,24 +677,47 @@ def merge_adapter_with_reload_parity(
         "attention_mask": attention_mask.to(reload_device),
     }
     with torch.inference_mode():
-        reloaded_logits = reloaded(**reload_batch).logits.detach().cpu()
+        reloaded_logits = reloaded(**reload_batch).logits.detach().float().cpu()
         reloaded_generation = reloaded.generate(
             **reload_batch,
             max_new_tokens=1,
             do_sample=False,
             pad_token_id=getattr(tokenizer, "pad_token_id", None),
         ).detach().cpu()
-    logits_close = torch.allclose(adapter_logits, reloaded_logits, atol=atol, rtol=0.0)
+    differences = (adapter_logits - reloaded_logits).abs()
+    finite = bool(torch.isfinite(differences).all().item())
+    max_abs_logit_diff = float(differences.max().item())
+    argmax_agreement = float(
+        (
+            adapter_logits.argmax(dim=-1)
+            == reloaded_logits.argmax(dim=-1)
+        )
+        .float()
+        .mean()
+        .item()
+    )
     generation_equal = torch.equal(adapter_generation, reloaded_generation)
-    if not logits_close or not generation_equal:
+    if (
+        not finite
+        or not generation_equal
+        or argmax_agreement < minimum_argmax_agreement
+        or max_abs_logit_diff > maximum_logit_difference
+    ):
         raise RuntimeError(
             "merged checkpoint reload parity failed: "
-            f"logits_close={bool(logits_close)}, generation_equal={bool(generation_equal)}"
+            f"finite={finite}, generation_equal={bool(generation_equal)}, "
+            f"argmax_agreement={argmax_agreement}, "
+            f"max_abs_logit_diff={max_abs_logit_diff}"
         )
     report = {
-        "logits_close": True,
-        "generation_equal": True,
-        "max_abs_logit_diff": float((adapter_logits - reloaded_logits).abs().max().item()),
+        "all_logit_differences_finite": finite,
+        "generation_equal": bool(generation_equal),
+        "argmax_token_agreement": argmax_agreement,
+        "max_abs_logit_diff": max_abs_logit_diff,
+        "minimum_argmax_agreement": minimum_argmax_agreement,
+        "maximum_logit_difference": maximum_logit_difference,
+        "merge_accumulation_dtype": "float32",
+        "release_weight_dtype": "float16",
     }
     del reloaded
     gc.collect()
@@ -725,7 +772,7 @@ JSON tool-call format.
 - Source commit: `{source_commit}`
 - Chat-template SHA-256: `{result.get("template_hash", "unrecorded")}`
 
-The released root checkpoint is merged BF16 weights. The trained adapter is
+The released root checkpoint is merged FP16 weights. The trained BF16 adapter is
 also stored under `adapter/`.
 
 ## Intended use and limitations

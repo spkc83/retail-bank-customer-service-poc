@@ -3,7 +3,7 @@
 Training, evaluation, and public demonstration code for a model-driven
 retail-bank customer-service agent.
 
-The active generative model is a merged BF16 LoRA adaptation of
+The active generative model is a merged FP16 LoRA adaptation of
 `ibm-granite/granite-4.1-8b` at a pinned base revision. It has 8.79 billion
 parameters, uses Granite's native tagged-JSON tool-call format, and is trained
 on 5,000 governed synthetic conversations. The earlier custom Qwen2-MoE model
@@ -55,7 +55,8 @@ access or modify real accounts.
 - Adaptation: BF16 LoRA over attention and MLP projections
 - Tool wire: native tagged JSON
 - Maximum training sequence: 2,048 tokens
-- Deployment artifact: merged BF16 checkpoint plus a separate adapter copy
+- Deployment artifact: FP32-accumulated, merged FP16 checkpoint plus a separate
+  BF16 adapter copy
 
 The governed corpus contains 3,502 training, 748 validation, and 750 frozen
 test conversations. It covers all nine mock-bank tools, tool errors,

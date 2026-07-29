@@ -25,8 +25,11 @@ customer-specific questions from memory or assumptions. You own the tool choice 
 arguments. The classifier information below is advisory: reason from the full
 conversation and override its predicted intent when appropriate. If a requested
 banking capability has no tool, explain that limitation naturally. After tool
-results, answer the customer using those results. Do not invent tool results or
-claim an action occurred unless a successful tool result says it did."""
+results, answer the customer using those results. When a later action depends on
+an earlier lookup result, call the lookup tool first, wait for its result, then
+call the dependent action tool with the discovered customer-facing argument. Do not
+invent tool results or claim an action occurred unless a successful tool result
+says it did."""
 
 REFLECTION_PROMPT = """You are a second-pass tool-use reviewer for the same
 authenticated synthetic-bank conversation. Audit the base draft in the final
@@ -420,41 +423,67 @@ class ConversationalBankingAgent:
             response_path = "base_tool"
 
         _validate_tool_calls(calls)
-        call_message = self.tool_adapter.render_assistant_tool_calls(calls)
-        result_messages: list[dict[str, Any]] = []
+        with_tools = [*current]
+        all_calls: list[ToolCall] = []
         results: list[dict[str, Any]] = []
-        for call in calls:
-            result = self._execute_tool(username, session_hash, call)
-            results.append(result)
-            result_messages.append(self.tool_adapter.render_tool_result(call, result))
-        with_tools = [*current, call_message, *result_messages]
+        pending_calls = calls
+        post_tool_passes = 0
         serving_tools = self.tool_adapter.render_tools(MODEL_TOOLS)
         try:
-            second_context = select_token_budgeted_context(
-                system,
-                with_tools,
-                tools=serving_tools,
-                token_counter=self.model.count_tokens,
-                input_budget=self.input_budget,
-            )
-            final_output, final_trace = self._generate_pass(
-                "grounded_final",
-                second_context,
-                serving_tools,
-            )
-            model_passes.append(final_trace)
-            if not final_output:
-                raise AgentProtocolError("model returned an empty second response")
-            if self.tool_adapter.parse_assistant(
-                final_output,
-                turn_key=final_trace.prompt_sha256,
-            ):
-                raise AgentProtocolError("second model response attempted another tool call")
+            while True:
+                _validate_tool_calls(pending_calls)
+                if len(all_calls) + len(pending_calls) > MAX_TOOL_CALLS:
+                    raise AgentProtocolError(
+                        f"model attempted more than {MAX_TOOL_CALLS} total tool calls"
+                    )
+                call_message = self.tool_adapter.render_assistant_tool_calls(
+                    pending_calls
+                )
+                with_tools.append(call_message)
+                all_calls.extend(pending_calls)
+                for call in pending_calls:
+                    result = self._execute_tool(username, session_hash, call)
+                    results.append(result)
+                    with_tools.append(
+                        self.tool_adapter.render_tool_result(call, result)
+                    )
+
+                post_tool_passes += 1
+                followup_context = select_token_budgeted_context(
+                    system,
+                    with_tools,
+                    tools=serving_tools,
+                    token_counter=self.model.count_tokens,
+                    input_budget=self.input_budget,
+                )
+                pass_label = (
+                    "grounded_final"
+                    if post_tool_passes == 1
+                    else f"tool_followup_{post_tool_passes}"
+                )
+                followup_output, followup_trace = self._generate_pass(
+                    pass_label,
+                    followup_context,
+                    serving_tools,
+                )
+                model_passes.append(followup_trace)
+                if not followup_output:
+                    raise AgentProtocolError("model returned an empty follow-up response")
+                next_calls = self.tool_adapter.parse_assistant(
+                    followup_output,
+                    turn_key=followup_trace.prompt_sha256,
+                )
+                if not next_calls:
+                    final_output = followup_output
+                    break
+                pending_calls = next_calls
+                if not response_path.endswith("_chain"):
+                    response_path = f"{response_path}_chain"
         except (AgentProtocolError, RuntimeError, TypeError, ValueError) as error:
             raise AgentExecutionError(
                 str(error),
                 conversation=with_tools,
-                tool_calls=calls,
+                tool_calls=tuple(all_calls),
                 tool_results=tuple(results),
                 snapshot=self.bank.snapshot(username, session_hash),
                 model_passes=tuple(model_passes),
@@ -463,7 +492,7 @@ class ConversationalBankingAgent:
         return AgentTurnResult(
             response=final_output,
             conversation=completed,
-            tool_calls=calls,
+            tool_calls=tuple(all_calls),
             tool_results=tuple(results),
             snapshot=self.bank.snapshot(username, session_hash),
             response_path=response_path,

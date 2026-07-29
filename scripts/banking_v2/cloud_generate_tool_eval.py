@@ -79,6 +79,8 @@ class EvalConfig:
     dtype: str
     max_new_tokens_first: int
     max_new_tokens_final: int
+    max_tool_passes: int
+    max_tool_calls: int
     limit: int | None
     trust_remote_code: bool
     push_to_hub: bool
@@ -101,6 +103,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dtype", choices=("bf16", "fp16", "fp32"), default="fp16")
     parser.add_argument("--max-new-tokens-first", type=int, default=192)
     parser.add_argument("--max-new-tokens-final", type=int, default=220)
+    parser.add_argument("--max-tool-passes", type=int, default=4)
+    parser.add_argument("--max-tool-calls", type=int, default=6)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--push-to-hub", action="store_true")
@@ -124,6 +128,8 @@ def config_from_args(args: argparse.Namespace) -> EvalConfig:
         dtype=str(args.dtype),
         max_new_tokens_first=int(args.max_new_tokens_first),
         max_new_tokens_final=int(args.max_new_tokens_final),
+        max_tool_passes=int(args.max_tool_passes),
+        max_tool_calls=int(args.max_tool_calls),
         limit=int(args.limit) if args.limit is not None else None,
         trust_remote_code=bool(args.trust_remote_code),
         push_to_hub=bool(args.push_to_hub),
@@ -174,6 +180,8 @@ def run_eval(config: EvalConfig, backend: GenerationBackend | None = None) -> di
                     record,
                     max_new_tokens_first=config.max_new_tokens_first,
                     max_new_tokens_final=config.max_new_tokens_final,
+                    max_tool_passes=config.max_tool_passes,
+                    max_tool_calls=config.max_tool_calls,
                 )
                 handle.write(json.dumps(row, sort_keys=True) + "\n")
                 handle.flush()
@@ -220,6 +228,10 @@ def validate_config(config: EvalConfig) -> None:
         raise ToolEvalGenerationError("--max-new-tokens-first must be at least 1")
     if config.max_new_tokens_final < 1:
         raise ToolEvalGenerationError("--max-new-tokens-final must be at least 1")
+    if config.max_tool_passes < 1:
+        raise ToolEvalGenerationError("--max-tool-passes must be at least 1")
+    if config.max_tool_calls < 1:
+        raise ToolEvalGenerationError("--max-tool-calls must be at least 1")
     if config.limit is not None and config.limit < 1:
         raise ToolEvalGenerationError("--limit must be at least 1")
 
@@ -341,26 +353,19 @@ def generate_record_prediction_row(
     *,
     max_new_tokens_first: int,
     max_new_tokens_final: int,
+    max_tool_passes: int,
+    max_tool_calls: int,
 ) -> dict[str, Any]:
     expected = record.get("expected", {})
-    first_messages = first_phase_messages(record)
-    first_raw = backend.generate_text(
-        first_messages,
-        max_new_tokens=max_new_tokens_first,
+    trajectory = generate_iterative_trajectory(
+        backend,
+        adapter,
+        record,
+        max_new_tokens_first=max_new_tokens_first,
+        max_new_tokens_final=max_new_tokens_final,
+        max_tool_passes=max_tool_passes,
+        max_tool_calls=max_tool_calls,
     )
-    first_parsed, first_parse_error = parse_or_error(adapter, first_raw)
-    final_raw: str | None = None
-    final_parsed: dict[str, Any] | None = None
-    final_parse_error: str | None = None
-    final_message_count = 0
-    if expected_requires_tool(record):
-        final_messages = grounded_final_phase_messages(record)
-        final_message_count = len(final_messages)
-        final_raw = backend.generate_text(
-            final_messages,
-            max_new_tokens=max_new_tokens_final,
-        )
-        final_parsed, final_parse_error = parse_or_error(adapter, final_raw)
     requires_tool = (
         bool(expected.get("requires_tool")) if isinstance(expected, Mapping) else None
     )
@@ -378,16 +383,176 @@ def generate_record_prediction_row(
         "expected_path": expected_path,
         "expected_tool_calls": expected_tool_calls,
         "expected_grounding_facts": expected_grounding_facts,
-        "first_assistant_prompt_message_count": len(first_messages),
-        "grounded_final_prompt_message_count": final_message_count,
-        "first_assistant_raw_output": first_raw,
-        "grounded_final_raw_output": final_raw,
-        "raw_output": f"{first_raw}\n{final_raw}" if final_raw is not None else first_raw,
-        "first_assistant_parsed": first_parsed,
-        "first_assistant_parse_error": first_parse_error,
-        "grounded_final_parsed": final_parsed,
-        "grounded_final_parse_error": final_parse_error,
+        **trajectory,
         "created_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def generate_iterative_trajectory(
+    backend: GenerationBackend,
+    adapter: ToolWireAdapter,
+    record: Mapping[str, Any],
+    *,
+    max_new_tokens_first: int,
+    max_new_tokens_final: int,
+    max_tool_passes: int,
+    max_tool_calls: int,
+) -> dict[str, Any]:
+    transcript = first_phase_messages(record)
+    expected_calls = expected_tool_calls(record)
+    canonical_results = canonical_tool_results(record)
+    raw_passes: list[str] = []
+    pass_reports: list[dict[str, Any]] = []
+    ordered_calls: list[dict[str, Any]] = []
+    appended_results: list[dict[str, Any]] = []
+    next_expected_index = 0
+    stop_reason = "max_tool_passes"
+    final_raw: str | None = None
+    final_parsed: dict[str, Any] | None = None
+    final_parse_error: str | None = None
+    requires_tool = expected_requires_tool(record)
+
+    for pass_index in range(max_tool_passes):
+        max_new_tokens = (
+            max_new_tokens_first if pass_index == 0 else max_new_tokens_final
+        )
+        prompt_count = len(transcript)
+        raw = backend.generate_text(transcript, max_new_tokens=max_new_tokens)
+        parsed, parse_error = parse_or_error(adapter, raw)
+        raw_passes.append(raw)
+        pass_report: dict[str, Any] = {
+            "pass_index": pass_index,
+            "prompt_message_count": prompt_count,
+            "raw_output": raw,
+            "parsed_assistant": parsed,
+            "parse_error": parse_error,
+            "appended_result_indexes": [],
+        }
+        pass_reports.append(pass_report)
+        if parse_error is not None or parsed is None:
+            stop_reason = "parse_error"
+            break
+
+        tool_calls = list(parsed.get("tool_calls", []) or [])
+        if not tool_calls:
+            final_raw = raw
+            final_parsed = parsed
+            stop_reason = "final_answer"
+            break
+
+        transcript.append(parsed)
+        all_pass_calls_matched = True
+        for call in tool_calls:
+            simplified = simplify_tool_call(call)
+            ordered_calls.append(simplified)
+            if len(ordered_calls) > max_tool_calls:
+                stop_reason = "max_tool_calls"
+                all_pass_calls_matched = False
+                break
+            expected_call = (
+                expected_calls[next_expected_index]
+                if next_expected_index < len(expected_calls)
+                else None
+            )
+            if expected_call is None or simplified != expected_call:
+                stop_reason = "unmatched_tool_call"
+                all_pass_calls_matched = False
+                break
+            if next_expected_index >= len(canonical_results):
+                stop_reason = "missing_canonical_tool_result"
+                all_pass_calls_matched = False
+                break
+            result = rebind_tool_result(canonical_results[next_expected_index], call)
+            transcript.append(result)
+            appended_results.append(
+                {
+                    "expected_index": next_expected_index,
+                    "tool_call_id": result["tool_call_id"],
+                    "name": result["name"],
+                    "content": result["content"],
+                }
+            )
+            pass_report["appended_result_indexes"].append(next_expected_index)
+            next_expected_index += 1
+        if not all_pass_calls_matched:
+            break
+
+    if final_raw is None and final_parse_error is None:
+        final_parse_error = (
+            pass_reports[-1]["parse_error"] if pass_reports else "no_generation_pass"
+        )
+    return {
+        "first_assistant_prompt_message_count": (
+            pass_reports[0]["prompt_message_count"] if pass_reports else len(transcript)
+        ),
+        "grounded_final_prompt_message_count": (
+            pass_reports[-1]["prompt_message_count"]
+            if requires_tool and final_raw is not None
+            else 0
+        ),
+        "first_assistant_raw_output": raw_passes[0] if raw_passes else "",
+        "grounded_final_raw_output": final_raw if requires_tool else None,
+        "raw_output": "\n".join(raw_passes),
+        "raw_passes": raw_passes,
+        "pass_reports": pass_reports,
+        "ordered_emitted_tool_calls": ordered_calls,
+        "appended_tool_results": appended_results,
+        "matched_expected_tool_call_count": next_expected_index,
+        "stop_reason": stop_reason,
+        "first_assistant_parsed": (
+            pass_reports[0]["parsed_assistant"] if pass_reports else None
+        ),
+        "first_assistant_parse_error": (
+            pass_reports[0]["parse_error"] if pass_reports else "no_generation_pass"
+        ),
+        "grounded_final_parsed": final_parsed if requires_tool else None,
+        "grounded_final_parse_error": final_parse_error if requires_tool else None,
+    }
+
+
+def expected_tool_calls(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    expected = record.get("expected", {})
+    if not isinstance(expected, Mapping):
+        return []
+    calls = expected.get("tool_calls", [])
+    return [
+        {"name": str(call["name"]), "arguments": dict(call.get("arguments", {}))}
+        for call in calls
+        if isinstance(call, Mapping)
+    ]
+
+
+def canonical_tool_results(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return [
+        dict(message)
+        for message in messages_list(record)
+        if message.get("role") == "tool"
+    ]
+
+
+def simplify_tool_call(call: Mapping[str, Any]) -> dict[str, Any]:
+    function = call.get("function", {})
+    if not isinstance(function, Mapping):
+        return {"name": "", "arguments": {}}
+    arguments = function.get("arguments", {})
+    return {
+        "name": str(function.get("name", "")),
+        "arguments": dict(arguments) if isinstance(arguments, Mapping) else {},
+    }
+
+
+def rebind_tool_result(
+    canonical_result: Mapping[str, Any],
+    emitted_call: Mapping[str, Any],
+) -> dict[str, Any]:
+    function = emitted_call.get("function", {})
+    name = function.get("name") if isinstance(function, Mapping) else canonical_result["name"]
+    return {
+        "role": "tool",
+        "tool_call_id": str(emitted_call["id"]),
+        "name": str(name),
+        "content": canonical_result.get("content"),
+        "loss": False,
     }
 
 
@@ -546,6 +711,8 @@ def build_metadata(
             "do_sample": False,
             "max_new_tokens_first": config.max_new_tokens_first,
             "max_new_tokens_final": config.max_new_tokens_final,
+            "max_tool_passes": config.max_tool_passes,
+            "max_tool_calls": config.max_tool_calls,
             "dtype": config.dtype,
             "device": config.device,
         },
@@ -567,7 +734,8 @@ def build_metadata(
         "read_only_contract": {
             "tool_execution": False,
             "deterministic_output_repair": False,
-            "teacher_forced_canonical_tool_results_for_grounded_final": True,
+            "canonical_results_only_for_exact_emitted_calls": True,
+            "teacher_forced_unseen_assistant_tool_calls": False,
         },
     }
 

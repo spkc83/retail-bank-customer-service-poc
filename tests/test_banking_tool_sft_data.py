@@ -99,6 +99,63 @@ def test_tool_calls_have_stable_ids_typed_args_and_replay_hashes() -> None:
             assert record["expected"]["final_state_hash"].startswith("sha256:")
 
 
+def test_multi_call_plan_is_serialized_as_causal_tool_steps() -> None:
+    record = next(
+        record
+        for record in generate_records(pilot_count=18, split_seed=711)
+        if record["record_id"] == "multi_tool_freeze"
+    )
+
+    assert record["expected"]["ordered_calls"] == [
+        "call_multi_tool_freeze_0",
+        "call_multi_tool_freeze_1",
+    ]
+    assert [call["name"] for call in record["expected"]["tool_calls"]] == [
+        "list_cards",
+        "freeze_card",
+    ]
+    assert [message["role"] for message in record["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+
+    first_call_message = record["messages"][2]
+    first_tool_result = record["messages"][3]
+    second_call_message = record["messages"][4]
+    second_tool_result = record["messages"][5]
+
+    call_counts = [
+        len(message["tool_calls"]) for message in (first_call_message, second_call_message)
+    ]
+    assert call_counts == [1, 1]
+    assert first_call_message["tool_calls"][0]["function"]["name"] == "list_cards"
+    assert first_tool_result["tool_call_id"] == first_call_message["tool_calls"][0]["id"]
+    second_function = second_call_message["tool_calls"][0]["function"]
+    assert second_function["name"] == "freeze_card"
+    assert second_function == record["expected"]["tool_calls"][1]
+    assert second_tool_result["tool_call_id"] == second_call_message["tool_calls"][0]["id"]
+
+
+def test_second_tool_call_arguments_are_observable_from_prior_tool_result() -> None:
+    record = next(
+        record
+        for record in generate_records(pilot_count=18, split_seed=711)
+        if record["record_id"] == "multi_tool_freeze"
+    )
+    first_tool_result = record["messages"][3]["content"]
+    second_call = record["messages"][4]["tool_calls"][0]
+
+    assert second_call["function"]["name"] == "freeze_card"
+    second_last4 = second_call["function"]["arguments"]["last4"]
+    assert isinstance(second_last4, str)
+    assert second_last4 in json.dumps(first_tool_result, sort_keys=True)
+
+
 def test_prepare_writes_manifest_report_and_is_split_isolated(tmp_path: Path) -> None:
     report = prepare(output_dir=tmp_path / "tool-sft", pilot_count=120, split_seed=1234)
     second_report = prepare(output_dir=tmp_path / "tool-sft", pilot_count=120, split_seed=1234)
@@ -223,6 +280,13 @@ def test_pilot_realizer_uses_natural_text_and_varied_state_slots() -> None:
         }
     }
     assert all("last four digits" in response.lower() for response in by_path["clarification"])
+    assert all(
+        all(
+            forbidden not in response.lower()
+            for forbidden in ("account number", "customer id", "password", "pin")
+        )
+        for response in by_path["clarification"]
+    )
     assert all("overdraft" in response.lower() for response in by_path["no_tool_banking_faq"])
     assert all("retail banking" in response.lower() for response in by_path["ood"])
     assert all(

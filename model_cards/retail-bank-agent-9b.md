@@ -14,7 +14,7 @@ tags:
 # Retail Bank Agent 9B
 
 Retail Bank Agent 9B is an experimental customer-service and tool-use model for
-the linked synthetic retail-bank demonstration. It is a merged BF16 LoRA
+the linked synthetic retail-bank demonstration. It is a merged FP16 LoRA
 adaptation of `ibm-granite/granite-4.1-8b`.
 
 - Source: https://github.com/spkc83/retail-bank-servicing
@@ -26,13 +26,20 @@ adaptation of `ibm-granite/granite-4.1-8b`.
 ## Artifact identity
 
 - Model repository: `spkc83/retail-bank-agent-9b`
-- Released model revision: `PIN_AFTER_TRAINING`
+- Immutable weights revision:
+  `32f327ba162ef8988255017694dd6b8983d3af34`
+- Training/provenance head:
+  `53e4d50367b0013c3ad47d3404f04c46fa27570e`
 - Base revision:
   `1504002f650e656a0a3789d99574df12e3e94ed0`
 - Source revision:
   `3a6a7efe22b9ea2a104712cbeff5648df3eeec31`
 - Training job:
   `spkc83/6a6a19a1b36a6516e969f78b`
+- FP32-to-FP16 remerge job:
+  `spkc83/6a6a2b4f23ed89c748ec3b2a`
+- Merge-parity job:
+  `spkc83/6a6a2be323ed89c748ec3b36`
 - Dataset revision:
   `c0e0be08f9d56f382e3c85a6bca1e4f4090eacac`
 - Dataset fingerprint:
@@ -51,11 +58,26 @@ adaptation of `ibm-granite/granite-4.1-8b`.
 - 2,048-token maximum training sequence
 - learning rate `1e-4`
 - effective batch size 4
-- merged BF16 root checkpoint
+- FP32-accumulated, merged FP16 root checkpoint
 - unmerged adapter retained under `adapter/`
 
-Final optimizer, validation, merge-parity, and release-evaluation values are
-filled from the completed training artifact before release.
+## Training and merge results
+
+- 3,000 optimizer steps in 3,570.523 seconds
+- aggregate training loss: `0.0507329`
+- final validation loss: `0.0184957`
+- final validation token accuracy: `0.996323`
+- eight representative 32-token parity generations: `8/8` exact
+- FP16 adapter/merged argmax agreement: `1.0`
+- mean absolute logit drift: `0.00833845`
+- p99 / p999 absolute logit drift: `0.0390625` / `0.0644531`
+- maximum absolute logit drift: `0.28125`
+
+The initial direct BF16 merge was rejected because it changed one of eight
+representative generations and only reached `0.972763` argmax agreement. The
+released weights were therefore merged in FP32 and cast to FP16. The full
+frozen generation evaluation remains the release-quality gate; logit parity is
+not presented as bitwise equality.
 
 ## Intended use
 

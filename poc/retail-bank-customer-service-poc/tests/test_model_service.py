@@ -510,33 +510,65 @@ def test_duplicate_model_tool_call_ids_are_protocol_failures() -> None:
     assert len(model.calls) == 1
 
 
-def test_second_pass_tool_call_is_a_protocol_error_after_tool_already_executed() -> None:
+def test_model_can_chain_tool_calls_after_observing_tool_results() -> None:
     model = RecordingModel(
         [
-            '<tool_call>{"name": "freeze_card", "arguments": {"last4": "4821"}}</tool_call>',
             '<tool_call>{"name": "list_cards", "arguments": {}}</tool_call>',
+            '<tool_call>{"name": "freeze_card", "arguments": {"last4": "4821"}}</tool_call>',
+            "I found your active Everyday Visa Debit card ending in 4821 and froze it.",
         ]
     )
     registry = bank()
     agent = ConversationalBankingAgent(bank=registry, model=model)
 
-    with pytest.raises(AgentExecutionError, match="second") as failure:
+    result = agent.run_turn(
+        username="alex.demo",
+        session_hash="session",
+        message="Find my active card and freeze it.",
+        conversation=[],
+        router_result=router_guidance(),
+    )
+
+    assert result.response_path == "base_tool_chain"
+    assert [call.name for call in result.tool_calls] == ["list_cards", "freeze_card"]
+    assert result.tool_calls[1].arguments == {"last4": "4821"}
+    assert [item.label for item in result.model_passes] == [
+        "base",
+        "grounded_final",
+        "tool_followup_2",
+    ]
+    assert [item["role"] for item in result.conversation] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+    assert model.calls[1]["messages"][-1]["name"] == "list_cards"
+    assert model.calls[2]["messages"][-1]["name"] == "freeze_card"
+    assert registry.snapshot("alex.demo", "session")["cards"][0]["status"] == "frozen"
+
+
+def test_tool_chain_stops_at_total_call_limit() -> None:
+    repeated_card_call = '<tool_call>{"name": "list_cards", "arguments": {}}</tool_call>'
+    model = RecordingModel([repeated_card_call] * 9)
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
+
+    with pytest.raises(
+        AgentExecutionError,
+        match="more than 8 total tool calls",
+    ) as failure:
         agent.run_turn(
             username="alex.demo",
             session_hash="session",
-            message="Freeze card 4821.",
+            message="Keep checking my cards.",
             conversation=[],
             router_result=router_guidance(),
         )
 
-    assert failure.value.tool_calls[0].name == "freeze_card"
-    assert failure.value.tool_results[0]["ok"] is True
-    assert [item["role"] for item in failure.value.conversation] == [
-        "user",
-        "assistant",
-        "tool",
-    ]
-    assert registry.snapshot("alex.demo", "session")["cards"][0]["status"] == "frozen"
+    assert len(failure.value.tool_calls) == 8
+    assert len(failure.value.tool_results) == 8
 
 
 def test_token_budget_keeps_latest_complete_tool_chain_and_newest_fitting_turns() -> None:

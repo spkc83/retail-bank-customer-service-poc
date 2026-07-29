@@ -17,7 +17,7 @@ from hello_slm.config import canonical_json_bytes, file_sha256
 BANKING_TOOL_SFT_CONTRACT = "banking-tool-sft/v1"
 BANKING_TOOL_SFT_MANIFEST_CONTRACT = "banking-tool-sft-manifest"
 CREATED_AT = "2026-07-29T00:00:00Z"
-GENERATOR_VERSION = "banking-tool-sft/v1"
+GENERATOR_VERSION = "banking-tool-sft/v1.1-sequential"
 DEFAULT_OUTPUT_DIR = Path("data/banking-v3-tool-sft")
 DEFAULT_SYNTHETIC_BANK_PATH = Path("poc/retail-bank-customer-service-poc/synthetic_bank.json")
 SPLITS = ("train", "validation", "test")
@@ -44,6 +44,7 @@ SYSTEM_PROMPT = (
     "You are the conversational customer-service agent for a fictional retail-bank "
     "demonstration. The customer is already authenticated. Use the supplied tools for "
     "customer-specific banking records or actions, use tool results for final answers, "
+    "call dependent tools one at a time so each later call can use the earlier result, "
     "and never ask for account numbers, customer IDs, passwords, PINs, or private IDs."
 )
 NO_TOOL_OOD_RESPONSE = (
@@ -521,9 +522,16 @@ def validate_records(
         tool_call_ids: list[str] = []
         canonical_calls: list[dict[str, Any]] = []
         tool_result_ids: list[str] = []
+        pending_tool_call_id: str | None = None
         for message in record.get("messages", []):
             role = message.get("role")
             if role == "assistant" and message.get("tool_calls"):
+                if pending_tool_call_id is not None:
+                    raise BankingToolSftDataError(f"{record_id} tool result correlation mismatch")
+                if len(message["tool_calls"]) != 1:
+                    raise BankingToolSftDataError(
+                        f"{record_id} tool-call assistant must contain exactly one call"
+                    )
                 if message.get("content") is not None:
                     raise BankingToolSftDataError(f"{record_id} tool-call assistant has content")
                 if message.get("loss") is not True:
@@ -546,6 +554,7 @@ def validate_records(
                             f"{record_id} unsupported arguments for {name}: {sorted(extras)}"
                         )
                     tool_call_ids.append(call_id)
+                    pending_tool_call_id = call_id
                     canonical_calls.append(
                         {
                             "name": str(name),
@@ -564,15 +573,25 @@ def validate_records(
                     raise BankingToolSftDataError(f"{record_id} error envelope is invalid")
                 if content.get("ok") not in {True, False}:
                     raise BankingToolSftDataError(f"{record_id} tool envelope missing ok")
-                tool_result_ids.append(_required_str(message, "tool_call_id"))
+                tool_call_id = _required_str(message, "tool_call_id")
+                if pending_tool_call_id != tool_call_id:
+                    raise BankingToolSftDataError(f"{record_id} tool result correlation mismatch")
+                tool_result_ids.append(tool_call_id)
+                pending_tool_call_id = None
             elif role == "assistant":
+                if pending_tool_call_id is not None:
+                    raise BankingToolSftDataError(f"{record_id} tool result correlation mismatch")
                 if message.get("loss") is not True:
                     raise BankingToolSftDataError(f"{record_id} final assistant is not labeled")
             elif role in {"system", "user"}:
+                if pending_tool_call_id is not None:
+                    raise BankingToolSftDataError(f"{record_id} tool result correlation mismatch")
                 if message.get("loss") is not False:
                     raise BankingToolSftDataError(f"{record_id} context message is labeled")
             else:
                 raise BankingToolSftDataError(f"{record_id} has invalid role {role!r}")
+        if pending_tool_call_id is not None:
+            raise BankingToolSftDataError(f"{record_id} tool result correlation mismatch")
         if tool_call_ids != ordered_calls:
             raise BankingToolSftDataError(f"{record_id} ordered_calls mismatch")
         if canonical_calls != expected_calls:
@@ -781,7 +800,8 @@ def _base_scenarios() -> tuple[Scenario, ...]:
             "synthetic-customer-alex",
             "state-alex-001",
             "Replace my card.",
-            "Which card should I replace? Please provide the last four digits shown in the app.",
+            "Which card should I replace? Please provide only the last four digits shown in "
+            "the app; no other identifier is needed.",
             "clarification",
             grounding_facts=("missing_field=last4",),
         ),
@@ -1240,7 +1260,6 @@ def _scenario_to_record(scenario: Scenario, *, bank_path: Path) -> dict[str, Any
     ordered_calls = []
     expected_calls = []
     if scenario.tool_plan:
-        tool_calls = []
         for index, call in enumerate(scenario.tool_plan):
             call_id = f"call_{record_id}_{index}"
             ordered_calls.append(call_id)
@@ -1250,21 +1269,19 @@ def _scenario_to_record(scenario: Scenario, *, bank_path: Path) -> dict[str, Any
                     "arguments": dict(call.arguments),
                 }
             )
-            tool_calls.append(
-                {
-                    "id": call_id,
-                    "index": index,
-                    "type": "function",
-                    "function": {
-                        "name": call.name,
-                        "arguments": dict(call.arguments),
-                    },
-                }
+            tool_call = {
+                "id": call_id,
+                "index": index,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": dict(call.arguments),
+                },
+            }
+            messages.append(
+                {"role": "assistant", "content": None, "loss": True, "tool_calls": [tool_call]}
             )
-        messages.append(
-            {"role": "assistant", "content": None, "loss": True, "tool_calls": tool_calls}
-        )
-        messages.extend(tool_messages)
+            messages.append(tool_messages[index])
     messages.append(_message("assistant", scenario.final_response, loss=True))
 
     return {

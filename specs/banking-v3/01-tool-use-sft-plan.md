@@ -293,7 +293,7 @@ precision switch. Full-parameter Adam training is out of scope.
 The final artifact includes:
 
 - the adapter checkpoint;
-- the merged BF16 checkpoint;
+- the FP32-accumulated, merged FP16 checkpoint;
 - tokenizer and tool template;
 - base, data, package, and template fingerprints;
 - resume state and evaluation report.

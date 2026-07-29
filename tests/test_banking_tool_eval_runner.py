@@ -103,6 +103,43 @@ class RecordingBackend:
         return "Please provide the last four digits."
 
 
+class OneThenFinalBackend:
+    tokenizer = TemplateTokenizer()
+
+    def generate_text(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_new_tokens: int,
+    ) -> str:
+        del max_new_tokens
+        if not any(message.get("role") == "tool" for message in messages):
+            return '<tool_call>{"name":"list_accounts","arguments":{}}</tool_call>'
+        return "Done. You have account ending in 1792."
+
+
+class TwoStepBackend:
+    tokenizer = TemplateTokenizer()
+
+    def __init__(self) -> None:
+        self.calls: list[list[dict[str, Any]]] = []
+
+    def generate_text(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_new_tokens: int,
+    ) -> str:
+        del max_new_tokens
+        self.calls.append([dict(message) for message in messages])
+        result_count = sum(1 for message in messages if message.get("role") == "tool")
+        if result_count == 0:
+            return '<tool_call>{"name":"list_accounts","arguments":{}}</tool_call>'
+        if result_count == 1:
+            return '<tool_call>{"name":"list_cards","arguments":{}}</tool_call>'
+        return "Done. I checked your accounts and cards."
+
+
 def _tool_record() -> dict[str, Any]:
     return {
         "schema_version": "banking-tool-sft/v1",
@@ -143,6 +180,40 @@ def _tool_record() -> dict[str, Any]:
             "grounding_facts": ["account.last4=1792"],
         },
     }
+
+
+def _two_tool_record() -> dict[str, Any]:
+    record = _tool_record()
+    record["record_id"] = "two_tool_record"
+    record["messages"][2]["tool_calls"].append(
+        {
+            "id": "call_cards_1",
+            "index": 1,
+            "type": "function",
+            "function": {"name": "list_cards", "arguments": {}},
+        }
+    )
+    record["messages"].insert(
+        4,
+        {
+            "role": "tool",
+            "tool_call_id": "call_cards_1",
+            "name": "list_cards",
+            "content": {"ok": True, "result": {"cards": [{"last4": "4821"}]}},
+            "loss": False,
+        },
+    )
+    record["expected"] = {
+        "requires_tool": True,
+        "path": "tool_success",
+        "tool_calls": [
+            {"name": "list_accounts", "arguments": {}},
+            {"name": "list_cards", "arguments": {}},
+        ],
+        "grounding_facts": ["account.last4=1792"],
+        "multi_tool": True,
+    }
+    return record
 
 
 def _no_tool_record() -> dict[str, Any]:
@@ -196,11 +267,26 @@ def _config(tmp_path: Path) -> Any:
         dtype="fp32",
         max_new_tokens_first=8,
         max_new_tokens_final=9,
+        max_tool_passes=4,
+        max_tool_calls=6,
         limit=None,
         trust_remote_code=False,
         push_to_hub=False,
         token=None,
     )
+
+
+def _single_record_config(tmp_path: Path, record: dict[str, Any]) -> Any:
+    base = _config(tmp_path)
+    manifest_path = base.manifest
+    assert manifest_path is not None
+    data_path = manifest_path.parent / "test.jsonl"
+    data_path.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps({"tool_sft": [{"name": "test", "path": "test.jsonl"}]}),
+        encoding="utf-8",
+    )
+    return base
 
 
 def test_runner_generates_two_isolated_phases_and_metadata(tmp_path: Path) -> None:
@@ -217,11 +303,16 @@ def test_runner_generates_two_isolated_phases_and_metadata(tmp_path: Path) -> No
     assert [row["record_id"] for row in rows] == ["tool_record", "no_tool_record"]
     assert rows[0]["first_assistant_parsed"]["tool_calls"][0]["function"]["name"] == "list_accounts"
     assert rows[0]["grounded_final_parsed"]["content"].endswith("1792.")
-    assert rows[0]["raw_output"] == (
-        rows[0]["first_assistant_raw_output"]
-        + "\n"
-        + rows[0]["grounded_final_raw_output"]
-    )
+    assert rows[0]["raw_passes"] == [
+        rows[0]["first_assistant_raw_output"],
+        rows[0]["grounded_final_raw_output"],
+    ]
+    assert rows[0]["raw_output"] == "\n".join(rows[0]["raw_passes"])
+    assert rows[0]["ordered_emitted_tool_calls"] == [
+        {"name": "list_accounts", "arguments": {}}
+    ]
+    assert rows[0]["appended_tool_results"][0]["name"] == "list_accounts"
+    assert rows[0]["stop_reason"] == "final_answer"
     assert rows[1]["first_assistant_parsed"]["content"] == "Please provide the last four digits."
     assert rows[1]["grounded_final_raw_output"] is None
     assert rows[1]["raw_output"] == rows[1]["first_assistant_raw_output"]
@@ -239,7 +330,8 @@ def test_runner_generates_two_isolated_phases_and_metadata(tmp_path: Path) -> No
     assert metadata["read_only_contract"] == {
         "tool_execution": False,
         "deterministic_output_repair": False,
-        "teacher_forced_canonical_tool_results_for_grounded_final": True,
+        "canonical_results_only_for_exact_emitted_calls": True,
+        "teacher_forced_unseen_assistant_tool_calls": False,
     }
     report = json.loads(
         Path(metadata["outputs"]["report_json"]).read_text(encoding="utf-8")
@@ -247,6 +339,54 @@ def test_runner_generates_two_isolated_phases_and_metadata(tmp_path: Path) -> No
     assert report["checkpoint_revision"] == "a" * 40
     assert report["metrics"]["tool_name_accuracy"]["score"] == 1.0
     assert report["metrics"]["grounded_final_factuality"]["score"] == 1.0
+
+
+def test_runner_requires_model_to_emit_subsequent_tool_calls(tmp_path: Path) -> None:
+    config = _single_record_config(tmp_path, _two_tool_record())
+
+    metadata = runner.run_eval(config, backend=OneThenFinalBackend())
+    row = json.loads(
+        Path(metadata["outputs"]["predictions_jsonl"]).read_text(encoding="utf-8")
+    )
+    report = json.loads(
+        Path(metadata["outputs"]["report_json"]).read_text(encoding="utf-8")
+    )
+
+    assert row["raw_passes"] == [
+        '<tool_call>{"name":"list_accounts","arguments":{}}</tool_call>',
+        "Done. You have account ending in 1792.",
+    ]
+    assert row["ordered_emitted_tool_calls"] == [
+        {"name": "list_accounts", "arguments": {}}
+    ]
+    assert "list_cards" not in row["raw_output"]
+    assert row["matched_expected_tool_call_count"] == 1
+    assert report["metrics"]["tool_name_accuracy"]["numerator"] == 0
+    assert report["metrics"]["tool_name_accuracy"]["denominator"] == 2
+
+
+def test_runner_allows_model_owned_followup_tool_calls(tmp_path: Path) -> None:
+    backend = TwoStepBackend()
+    config = _single_record_config(tmp_path, _two_tool_record())
+
+    metadata = runner.run_eval(config, backend=backend)
+    row = json.loads(
+        Path(metadata["outputs"]["predictions_jsonl"]).read_text(encoding="utf-8")
+    )
+
+    assert row["ordered_emitted_tool_calls"] == [
+        {"name": "list_accounts", "arguments": {}},
+        {"name": "list_cards", "arguments": {}},
+    ]
+    assert row["matched_expected_tool_call_count"] == 2
+    assert len(row["appended_tool_results"]) == 2
+    assert [message["role"] for message in backend.calls[1]] == [
+        "system",
+        "user",
+        "assistant",
+        "tool",
+    ]
+    assert row["stop_reason"] == "final_answer"
 
 
 def test_runner_resumes_existing_prediction_jsonl_without_duplicates(tmp_path: Path) -> None:
