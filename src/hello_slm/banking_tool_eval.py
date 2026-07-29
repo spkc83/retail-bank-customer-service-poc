@@ -1,0 +1,509 @@
+from __future__ import annotations
+
+import argparse
+import copy
+import hashlib
+import json
+import re
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Protocol
+
+PUBLIC_TOOL_ARGUMENTS: dict[str, frozenset[str]] = {
+    "list_accounts": frozenset(),
+    "list_cards": frozenset(),
+    "list_service_cases": frozenset(),
+    "list_transactions": frozenset({"limit"}),
+    "list_transfers": frozenset(),
+    "cancel_transfer": frozenset({"recipient"}),
+    "dispute_transaction": frozenset({"description"}),
+    "freeze_card": frozenset({"last4"}),
+    "replace_card": frozenset({"last4"}),
+}
+PRIVATE_ARGUMENTS = frozenset(
+    {
+        "account_id",
+        "card_id",
+        "customer_id",
+        "password",
+        "pin",
+        "transaction_id",
+        "transfer_id",
+    }
+)
+_TOOL_CALL_BLOCK = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", flags=re.DOTALL)
+_CREDENTIAL_REQUEST = re.compile(
+    r"\b(account number|customer id|password|pin|verify your identity|social security|ssn)\b",
+    flags=re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class AssistantPrediction:
+    content: str
+    tool_calls: tuple[ToolCall, ...]
+    parse_failure: str | None = None
+
+
+class ToolModel(Protocol):
+    def generate(self, record: Mapping[str, Any]) -> str:
+        ...
+
+
+class AssistantAdapter(Protocol):
+    @property
+    def template_hash(self) -> str:
+        ...
+
+    def parse_assistant(self, raw_output: str) -> AssistantPrediction:
+        ...
+
+
+class StaticPredictionModel:
+    def __init__(self, outputs: Mapping[str, str]) -> None:
+        self._outputs = dict(outputs)
+
+    def generate(self, record: Mapping[str, Any]) -> str:
+        return self._outputs[str(record["record_id"])]
+
+
+class QwenXmlToolAdapter:
+    def __init__(self, *, template_hash: str = "sha256:qwen-xml-tool-call-v1") -> None:
+        self._template_hash = template_hash
+
+    @property
+    def template_hash(self) -> str:
+        return self._template_hash
+
+    def parse_assistant(self, raw_output: str) -> AssistantPrediction:
+        blocks = _TOOL_CALL_BLOCK.findall(raw_output)
+        has_marker = "<tool_call" in raw_output or "</tool_call>" in raw_output
+        if has_marker and not blocks:
+            return AssistantPrediction(raw_output, (), "malformed tool-call block")
+        calls: list[ToolCall] = []
+        for block in blocks:
+            try:
+                payload = json.loads(block)
+            except json.JSONDecodeError:
+                return AssistantPrediction(raw_output, (), "tool call is not valid JSON")
+            if not isinstance(payload, dict):
+                return AssistantPrediction(raw_output, (), "tool call must be a JSON object")
+            name = payload.get("name")
+            arguments = payload.get("arguments", {})
+            if not isinstance(name, str) or not name.strip():
+                return AssistantPrediction(raw_output, (), "tool call requires a function name")
+            if not isinstance(arguments, dict):
+                return AssistantPrediction(raw_output, (), "tool-call arguments must be an object")
+            calls.append(ToolCall(name=name.strip(), arguments=dict(arguments)))
+        content = _TOOL_CALL_BLOCK.sub("", raw_output).strip()
+        return AssistantPrediction(content=content, tool_calls=tuple(calls))
+
+
+@dataclass
+class _Counter:
+    numerator: int = 0
+    denominator: int = 0
+
+    def add(self, passed: bool, *, denominator: int = 1) -> None:
+        self.denominator += denominator
+        if passed:
+            self.numerator += denominator
+
+    def add_count(self, numerator: int, denominator: int) -> None:
+        self.numerator += numerator
+        self.denominator += denominator
+
+    def as_report(self) -> dict[str, Any]:
+        score = None if self.denominator == 0 else self.numerator / self.denominator
+        return {
+            "numerator": self.numerator,
+            "denominator": self.denominator,
+            "score": score,
+        }
+
+
+def evaluate_records(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    model: ToolModel,
+    adapter: AssistantAdapter,
+    checkpoint_revision: str = "unversioned-local",
+) -> dict[str, Any]:
+    metrics = {
+        "tool_name_accuracy": _Counter(),
+        "tool_argument_accuracy": _Counter(),
+        "executable_tool_success": _Counter(),
+        "multi_tool_exact_sequence": _Counter(),
+        "clarification_appropriateness": _Counter(),
+        "grounded_final_factuality": _Counter(),
+        "malformed_tool_call_rate": _Counter(),
+        "unsupported_private_arguments": _Counter(),
+        "credential_request_rate": _Counter(),
+        "no_tool_faq_quality": _Counter(),
+        "ood_small_talk_response_path": _Counter(),
+        "in_domain_false_refusal": _Counter(),
+        "ood_false_accept": _Counter(),
+    }
+    record_reports: dict[str, Any] = {}
+    parse_failures = 0
+
+    for record in records:
+        record_id = str(record["record_id"])
+        expected = _expected(record)
+        raw_output = model.generate(record)
+        prediction = adapter.parse_assistant(raw_output)
+        expected_calls = _expected_calls(expected)
+        parsed_calls = prediction.tool_calls if prediction.parse_failure is None else ()
+        manifest_failures = _manifest_failures(parsed_calls)
+
+        if prediction.parse_failure is not None:
+            parse_failures += 1
+        metrics["malformed_tool_call_rate"].add(prediction.parse_failure is not None)
+        if parsed_calls:
+            metrics["unsupported_private_arguments"].add_count(
+                len(manifest_failures),
+                len(parsed_calls),
+            )
+
+        name_pass = _exact_names(expected_calls, parsed_calls) and prediction.parse_failure is None
+        args_pass = _exact_calls(expected_calls, parsed_calls) and prediction.parse_failure is None
+        if expected_calls:
+            metrics["tool_name_accuracy"].add_count(
+                len(expected_calls) if name_pass else 0,
+                len(expected_calls),
+            )
+            metrics["tool_argument_accuracy"].add_count(
+                len(expected_calls) if args_pass else 0,
+                len(expected_calls),
+            )
+
+        if len(expected_calls) > 1 or expected.get("multi_tool"):
+            metrics["multi_tool_exact_sequence"].add(args_pass)
+
+        executable_success = None
+        final_state = None
+        if expected.get("executable"):
+            final_state = replay_state(record.get("initial_state", {}), parsed_calls)
+            executable_success = (
+                prediction.parse_failure is None
+                and not manifest_failures
+                and args_pass
+                and state_hash(final_state) == expected.get("final_state_hash")
+            )
+            metrics["executable_tool_success"].add(bool(executable_success))
+
+        grounding_pass = _fact_pass(
+            prediction.content,
+            expected.get("grounding_facts", ()),
+            expected.get("forbidden_facts", ()),
+        )
+        if expected.get("grounding_facts"):
+            metrics["grounded_final_factuality"].add(
+                grounding_pass and not prediction.parse_failure
+            )
+
+        response_path = expected.get("response_path")
+        clarification_pass = _clarification_pass(prediction, expected)
+        if response_path == "clarification":
+            metrics["clarification_appropriateness"].add(clarification_pass)
+
+        faq_pass = _fact_pass(
+            prediction.content,
+            expected.get("faq_facts", ()),
+            expected.get("forbidden_facts", ()),
+        )
+        if response_path == "faq":
+            metrics["no_tool_faq_quality"].add(
+                faq_pass and not parsed_calls and prediction.parse_failure is None
+            )
+
+        path_pass = _path_pass(prediction, expected)
+        if response_path in {"ood", "small_talk"}:
+            metrics["ood_small_talk_response_path"].add(path_pass)
+
+        credential_request = _credential_request(prediction.content)
+        if expected.get("credential_check", True):
+            metrics["credential_request_rate"].add(credential_request)
+
+        if expected.get("requires_tool") is True:
+            metrics["in_domain_false_refusal"].add(
+                not parsed_calls and prediction.parse_failure is None
+            )
+        if response_path == "ood":
+            metrics["ood_false_accept"].add(bool(parsed_calls))
+
+        record_reports[record_id] = {
+            "raw_output_sha256": _sha256(raw_output.encode("utf-8")),
+            "parse_failure": prediction.parse_failure,
+            "manifest_failures": manifest_failures,
+            "predicted_calls": [_call_to_json(call) for call in parsed_calls],
+            "expected_calls": [_call_to_json(call) for call in expected_calls],
+            "tool_name_accuracy": name_pass,
+            "tool_argument_accuracy": args_pass,
+            "executable_tool_success": executable_success,
+            "final_state_hash": None if final_state is None else state_hash(final_state),
+            "grounded_final_factuality": (
+                grounding_pass if expected.get("grounding_facts") else None
+            ),
+            "clarification_appropriateness": (
+                clarification_pass if response_path == "clarification" else None
+            ),
+            "no_tool_faq_quality": faq_pass if response_path == "faq" else None,
+            "response_path": response_path,
+            "response_path_pass": path_pass if response_path in {"ood", "small_talk"} else None,
+            "credential_request": credential_request,
+        }
+
+    return {
+        "schema_version": "banking-tool-eval-report/v1",
+        "dataset_fingerprint": fingerprint_records(records),
+        "adapter_template_hash": adapter.template_hash,
+        "checkpoint_revision": checkpoint_revision,
+        "record_count": len(records),
+        "parse_failures": parse_failures,
+        "metrics": {name: counter.as_report() for name, counter in metrics.items()},
+        "records": record_reports,
+    }
+
+
+def replay_state(initial_state: Mapping[str, Any], calls: Sequence[ToolCall]) -> dict[str, Any]:
+    state = copy.deepcopy(dict(initial_state))
+    for call in calls:
+        if call.name == "freeze_card":
+            _set_card_status(state, call.arguments.get("last4"), "frozen")
+        elif call.name == "replace_card":
+            _set_card_status(state, call.arguments.get("last4"), "replacement_pending")
+        elif call.name == "cancel_transfer":
+            _set_transfer_status(state, call.arguments.get("recipient"), "cancelled")
+        elif call.name == "dispute_transaction":
+            _set_transaction_disputed(state, call.arguments.get("description"))
+    return state
+
+
+def state_hash(state: Mapping[str, Any]) -> str:
+    return "sha256:" + _sha256(_canonical_json(state).encode("utf-8"))
+
+
+def fingerprint_records(records: Sequence[Mapping[str, Any]]) -> str:
+    payload = [_jsonable(record) for record in records]
+    return "sha256:" + _sha256(_canonical_json(payload).encode("utf-8"))
+
+
+def load_jsonl(path: str | Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            rows.append(json.loads(line))
+    return rows
+
+
+def load_predictions_jsonl(path: str | Path) -> dict[str, str]:
+    outputs: dict[str, str] = {}
+    for row in load_jsonl(path):
+        outputs[str(row["record_id"])] = str(row["raw_output"])
+    return outputs
+
+
+def dry_run_records_and_predictions() -> tuple[list[dict[str, Any]], dict[str, str]]:
+    final_hash = state_hash({"cards": [{"last4": "4821", "status": "frozen"}]})
+    records = [
+        {
+            "schema_version": "banking-tool-eval/v1",
+            "record_id": "dry_freeze",
+            "messages": [{"role": "user", "content": "Freeze my card ending in 4821."}],
+            "initial_state": {"cards": [{"last4": "4821", "status": "active"}]},
+            "expected": {
+                "requires_tool": True,
+                "tool_calls": [{"name": "freeze_card", "arguments": {"last4": "4821"}}],
+                "executable": True,
+                "final_state_hash": final_hash,
+                "grounding_facts": ["4821", "frozen"],
+            },
+        },
+        {
+            "schema_version": "banking-tool-eval/v1",
+            "record_id": "dry_ood",
+            "messages": [{"role": "user", "content": "Write a poem."}],
+            "expected": {
+                "requires_tool": False,
+                "response_path": "ood",
+                "path_markers": ["retail banking"],
+            },
+        },
+    ]
+    predictions = {
+        "dry_freeze": (
+            '<tool_call>{"name":"freeze_card","arguments":{"last4":"4821"}}</tool_call>\n'
+            "Your card ending in 4821 is frozen."
+        ),
+        "dry_ood": "I can only help with retail banking questions.",
+    }
+    return records, predictions
+
+
+def run_cli(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Evaluate frozen banking-v3 tool-use outputs.")
+    parser.add_argument("--records", type=Path, help="Canonical eval records JSONL.")
+    parser.add_argument(
+        "--predictions",
+        type=Path,
+        help="JSONL rows with record_id and raw_output.",
+    )
+    parser.add_argument("--output", type=Path, help="Write JSON report to this path.")
+    parser.add_argument("--checkpoint-revision", default="unversioned-local")
+    parser.add_argument("--template-hash", default="sha256:qwen-xml-tool-call-v1")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run deterministic in-memory fixture.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.dry_run:
+        records, predictions = dry_run_records_and_predictions()
+    else:
+        if args.records is None or args.predictions is None:
+            parser.error("--records and --predictions are required unless --dry-run is set")
+        records = load_jsonl(args.records)
+        predictions = load_predictions_jsonl(args.predictions)
+
+    report = evaluate_records(
+        records,
+        model=StaticPredictionModel(predictions),
+        adapter=QwenXmlToolAdapter(template_hash=args.template_hash),
+        checkpoint_revision=args.checkpoint_revision,
+    )
+    serialized = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if args.output is not None:
+        args.output.write_text(serialized, encoding="utf-8")
+    print(serialized, end="")
+    return 0
+
+
+def _expected(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    expected = record.get("expected", {})
+    if not isinstance(expected, Mapping):
+        raise ValueError(f"{record.get('record_id')} expected must be an object")
+    return expected
+
+
+def _expected_calls(expected: Mapping[str, Any]) -> tuple[ToolCall, ...]:
+    calls = expected.get("tool_calls", expected.get("expected_tool_calls", ()))
+    if not isinstance(calls, Sequence) or isinstance(calls, str | bytes):
+        return ()
+    return tuple(_call_from_json(call) for call in calls if isinstance(call, Mapping))
+
+
+def _call_from_json(payload: Mapping[str, Any]) -> ToolCall:
+    return ToolCall(name=str(payload.get("name", "")), arguments=dict(payload.get("arguments", {})))
+
+
+def _call_to_json(call: ToolCall) -> dict[str, Any]:
+    return {"name": call.name, "arguments": _normalize_args(call.arguments)}
+
+
+def _exact_names(expected: Sequence[ToolCall], actual: Sequence[ToolCall]) -> bool:
+    return [call.name for call in actual] == [call.name for call in expected]
+
+
+def _exact_calls(expected: Sequence[ToolCall], actual: Sequence[ToolCall]) -> bool:
+    return [_call_to_json(call) for call in actual] == [_call_to_json(call) for call in expected]
+
+
+def _normalize_args(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): arguments[key] for key in sorted(arguments)}
+
+
+def _manifest_failures(calls: Sequence[ToolCall]) -> list[str]:
+    failures: list[str] = []
+    for call in calls:
+        allowed = PUBLIC_TOOL_ARGUMENTS.get(call.name)
+        if allowed is None:
+            failures.append(f"unsupported tool: {call.name}")
+            continue
+        unsupported = sorted(
+            (set(call.arguments) - set(allowed)) | (set(call.arguments) & PRIVATE_ARGUMENTS)
+        )
+        if unsupported:
+            failures.append(f"{call.name} unsupported/private args: {unsupported}")
+    return failures
+
+
+def _fact_pass(content: str, required: Iterable[Any], forbidden: Iterable[Any]) -> bool:
+    normalized = _norm(content)
+    return all(_norm(str(fact)) in normalized for fact in required) and not any(
+        _norm(str(fact)) in normalized for fact in forbidden
+    )
+
+
+def _clarification_pass(prediction: AssistantPrediction, expected: Mapping[str, Any]) -> bool:
+    missing_field = expected.get("clarification_missing_field")
+    if not missing_field:
+        return False
+    return (
+        prediction.parse_failure is None
+        and not prediction.tool_calls
+        and _norm(str(missing_field)) in _norm(prediction.content)
+        and not _credential_request(prediction.content)
+    )
+
+
+def _path_pass(prediction: AssistantPrediction, expected: Mapping[str, Any]) -> bool:
+    markers = expected.get("path_markers", ())
+    if not isinstance(markers, Sequence) or isinstance(markers, str | bytes):
+        markers = (markers,)
+    return prediction.parse_failure is None and not prediction.tool_calls and _fact_pass(
+        prediction.content,
+        markers,
+        expected.get("forbidden_facts", ()),
+    )
+
+
+def _credential_request(content: str) -> bool:
+    return bool(_CREDENTIAL_REQUEST.search(content))
+
+
+def _set_card_status(state: dict[str, Any], last4: Any, status: str) -> None:
+    for card in state.get("cards", []):
+        if last4 is None or str(card.get("last4")) == str(last4):
+            card["status"] = status
+            return
+
+
+def _set_transfer_status(state: dict[str, Any], recipient: Any, status: str) -> None:
+    for transfer in state.get("transfers", []):
+        if recipient is None or _norm(str(transfer.get("recipient"))) == _norm(str(recipient)):
+            transfer["status"] = status
+            return
+
+
+def _set_transaction_disputed(state: dict[str, Any], description: Any) -> None:
+    for transaction in state.get("transactions", []):
+        if description is None or _norm(str(transaction.get("description"))) == _norm(
+            str(description)
+        ):
+            transaction["disputed"] = True
+            return
+
+
+def _jsonable(value: Any) -> Any:
+    return json.loads(json.dumps(value, sort_keys=True))
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(_jsonable(value), sort_keys=True, separators=(",", ":"))
+
+
+def _sha256(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.casefold().split())

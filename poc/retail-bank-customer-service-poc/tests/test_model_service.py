@@ -102,6 +102,11 @@ def test_qwen_tool_call_parser_accepts_multiple_ordered_calls_and_ignores_prose(
     )
 
     assert [call.name for call in calls] == ["list_transfers", "list_transactions"]
+    assert calls[0].id.startswith("call_")
+    assert calls[0].id.endswith("_0_list_transfers")
+    assert calls[1].id.endswith("_1_list_transactions")
+    assert calls[0].id != calls[1].id
+    assert [call.index for call in calls] == [0, 1]
     assert calls[1].arguments == {"limit": 3}
 
 
@@ -186,6 +191,11 @@ def test_reflection_can_recover_a_missing_tool_call_without_hiding_base_output()
         "tool",
         "assistant",
     ]
+    assert result.conversation[1]["tool_calls"][0]["id"].endswith("_0_list_accounts")
+    assert (
+        result.conversation[2]["tool_call_id"]
+        == result.conversation[1]["tool_calls"][0]["id"]
+    )
     assert len(model.calls) == 3
     reflection_messages = model.calls[1]["messages"]
     assert reflection_messages[-1]["role"] == "user"
@@ -194,7 +204,7 @@ def test_reflection_can_recover_a_missing_tool_call_without_hiding_base_output()
     assert "Please provide your account number" in reflection_messages[-1]["content"]
 
 
-def test_invalid_reflection_output_preserves_the_unmodified_base_answer() -> None:
+def test_invalid_reflection_output_cannot_approve_the_base_answer() -> None:
     model = RecordingModel(
         [
             "I can explain how savings interest works.",
@@ -203,18 +213,37 @@ def test_invalid_reflection_output_preserves_the_unmodified_base_answer() -> Non
     )
     agent = ConversationalBankingAgent(bank=bank(), model=model)
 
-    result = agent.run_turn(
-        username="alex.demo",
-        session_hash="session",
-        message="How does savings interest work?",
-        conversation=[],
-        router_result=router_guidance(),
-    )
-
-    assert result.response == "I can explain how savings interest works."
-    assert result.response_path == "reflection_invalid_use_original"
-    assert result.tool_calls == ()
+    with pytest.raises(
+        AgentProtocolError,
+        match="must be <use_original/> or a valid tool call",
+    ):
+        agent.run_turn(
+            username="alex.demo",
+            session_hash="session",
+            message="How does savings interest work?",
+            conversation=[],
+            router_result=router_guidance(),
+        )
     assert len(model.calls) == 2
+
+
+def test_malformed_reflection_cannot_approve_customer_specific_no_tool_answer() -> None:
+    model = RecordingModel(
+        [
+            "Your checking account balance is $1,000.",
+            "<tool_call>not-json</tool_call>",
+        ]
+    )
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
+
+    with pytest.raises(AgentProtocolError, match="malformed tool-call syntax"):
+        agent.run_turn(
+            username="alex.demo",
+            session_hash="session",
+            message="What is my checking account balance?",
+            conversation=[],
+            router_result=router_guidance(),
+        )
 
 
 def test_tool_calls_execute_in_order_and_second_model_pass_writes_final_answer() -> None:
@@ -246,10 +275,15 @@ def test_tool_calls_execute_in_order_and_second_model_pass_writes_final_answer()
         "list_transactions",
     ]
     assert len(result.tool_results) == 2
+    assert all(set(item) == {"ok", "result"} for item in result.tool_results)
     assert all(item["ok"] is True for item in result.tool_results)
     assert len(model.calls) == 2
     assert model.calls[0]["tools"] == MODEL_TOOLS
     assert model.calls[1]["tools"] is None
+    assert result.tool_calls[0].id.endswith("_0_list_transfers")
+    assert result.tool_calls[1].id.endswith("_1_list_transactions")
+    assert model.calls[1]["messages"][-2]["tool_call_id"] == result.tool_calls[0].id
+    assert model.calls[1]["messages"][-1]["tool_call_id"] == result.tool_calls[1].id
     transfer_result = model.calls[1]["messages"][-2]["content"]
     assert '"amount": "USD 450.00"' in transfer_result
     assert "amount_cents" not in transfer_result
@@ -290,21 +324,19 @@ def test_model_selected_write_uses_friendly_argument_without_authorization_layer
     )
 
     assert result.tool_results[0]["ok"] is True
+    assert set(result.tool_results[0]) == {"ok", "result"}
     assert registry.snapshot("alex.demo", "session")["transfers"][0]["status"] == "cancelled"
 
 
-def test_unknown_tool_and_backend_error_return_to_model_as_tool_results() -> None:
+def test_backend_error_returns_safe_canonical_tool_result_to_model() -> None:
     model = RecordingModel(
         [
             """
 <tool_call>
-{"name": "close_account", "arguments": {}}
-</tool_call>
-<tool_call>
 {"name": "cancel_transfer", "arguments": {"recipient": "Nobody"}}
 </tool_call>
 """,
-            "I could not complete either requested operation.",
+            "I could not complete that operation because I could not find a matching transfer.",
         ]
     )
     agent = ConversationalBankingAgent(bank=bank(), model=model)
@@ -317,16 +349,164 @@ def test_unknown_tool_and_backend_error_return_to_model_as_tool_results() -> Non
         router_result=router_guidance(),
     )
 
-    assert [item["ok"] for item in result.tool_results] == [False, False]
-    assert all(item["action_completed"] is False for item in result.tool_results)
-    assert all(item["status"] == "error" for item in result.tool_results)
-    assert all(
-        "do not claim success" in item["response_requirement"]
-        for item in result.tool_results
+    assert result.tool_results == (
+        {
+            "ok": False,
+            "error": {
+                "code": "record_match_count",
+                "message": "The request did not match exactly one synthetic banking record.",
+            },
+        },
     )
-    assert "unsupported tool" in result.tool_results[0]["error"]
-    assert "matching" in result.tool_results[1]["error"]
+    assert result.conversation[2]["tool_call_id"].endswith("_0_cancel_transfer")
+    assert json.loads(model.calls[1]["messages"][-1]["content"]) == result.tool_results[0]
     assert len(model.calls) == 2
+
+
+def test_invalid_model_arguments_remain_protocol_failures_without_repair() -> None:
+    model = RecordingModel(
+        [
+            '<tool_call>{"name": "list_transactions", "arguments": {"limit": "two"}}</tool_call>',
+        ]
+    )
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
+
+    with pytest.raises(AgentProtocolError, match="invalid type"):
+        agent.run_turn(
+            username="alex.demo",
+            session_hash="session",
+            message="Show my latest two transactions.",
+            conversation=[],
+            router_result=router_guidance(),
+        )
+
+    assert len(model.calls) == 1
+
+
+def test_unknown_model_tool_remains_protocol_failure_without_fallback() -> None:
+    model = RecordingModel(
+        [
+            '<tool_call>{"name": "close_account", "arguments": {}}</tool_call>',
+        ]
+    )
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
+
+    with pytest.raises(AgentProtocolError, match="unsupported tool"):
+        agent.run_turn(
+            username="alex.demo",
+            session_hash="session",
+            message="Close my account.",
+            conversation=[],
+            router_result=router_guidance(),
+        )
+
+    assert len(model.calls) == 1
+
+
+def test_repeated_same_name_calls_keep_distinct_tool_call_ids() -> None:
+    model = RecordingModel(
+        [
+            """
+<tool_call>
+{"name": "list_transactions", "arguments": {"limit": 1}}
+</tool_call>
+<tool_call>
+{"name": "list_transactions", "arguments": {"limit": 2}}
+</tool_call>
+""",
+            "Here are the requested transaction views.",
+        ]
+    )
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
+
+    result = agent.run_turn(
+        username="alex.demo",
+        session_hash="session",
+        message="Show my latest transaction, then show my latest two transactions.",
+        conversation=[],
+        router_result=router_guidance(),
+    )
+
+    assert [call.name for call in result.tool_calls] == [
+        "list_transactions",
+        "list_transactions",
+    ]
+    assert result.tool_calls[0].id.endswith("_0_list_transactions")
+    assert result.tool_calls[1].id.endswith("_1_list_transactions")
+    assert result.tool_calls[0].id != result.tool_calls[1].id
+    assert [
+        item["tool_call_id"]
+        for item in model.calls[1]["messages"]
+        if item["role"] == "tool"
+    ] == [call.id for call in result.tool_calls]
+    assert all(item["ok"] is True for item in result.tool_results)
+
+
+def test_fallback_tool_call_ids_do_not_collide_across_retained_turns() -> None:
+    tool_output = '<tool_call>{"name": "list_transfers", "arguments": {}}</tool_call>'
+    model = RecordingModel(
+        [
+            tool_output,
+            "You have a pending River Consulting transfer.",
+            tool_output,
+            "You still have a pending River Consulting transfer.",
+        ]
+    )
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
+
+    first = agent.run_turn(
+        username="alex.demo",
+        session_hash="session",
+        message="Show my transfers.",
+        conversation=[],
+        router_result=router_guidance(),
+    )
+    second = agent.run_turn(
+        username="alex.demo",
+        session_hash="session",
+        message="Show my transfers again.",
+        conversation=first.conversation,
+        router_result=router_guidance(),
+    )
+
+    first_id = first.tool_calls[0].id
+    second_id = second.tool_calls[0].id
+    assert first_id.endswith("_0_list_transfers")
+    assert second_id.endswith("_0_list_transfers")
+    assert first_id != second_id
+    retained_tool_ids = [
+        item["tool_call_id"]
+        for item in second.conversation
+        if item["role"] == "tool"
+    ]
+    assert retained_tool_ids == [first_id, second_id]
+
+
+def test_duplicate_model_tool_call_ids_are_protocol_failures() -> None:
+    model = RecordingModel(
+        [
+            """
+<tool_call>
+{"id": "call_duplicate", "index": 0, "name": "list_accounts", "arguments": {}}
+</tool_call>
+<tool_call>
+{"id": "call_duplicate", "index": 1, "name": "list_cards", "arguments": {}}
+</tool_call>
+""",
+        ]
+    )
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
+
+    with pytest.raises(AgentProtocolError, match="IDs must be unique"):
+        agent.run_turn(
+            username="alex.demo",
+            session_hash="session",
+            message="Show my accounts and cards.",
+            conversation=[],
+            router_result=router_guidance(),
+        )
+
+    assert len(model.calls) == 1
 
 
 def test_second_pass_tool_call_is_a_protocol_error_after_tool_already_executed() -> None:
@@ -375,12 +555,19 @@ def test_token_budget_keeps_latest_complete_tool_chain_and_newest_fitting_turns(
             "content": "",
             "tool_calls": [
                 {
+                    "id": "call_context_0_list_transfers",
+                    "index": 0,
                     "type": "function",
                     "function": {"name": "list_transfers", "arguments": {}},
                 }
             ],
         },
-        {"role": "tool", "name": "list_transfers", "content": '{"ok": true}'},
+        {
+            "role": "tool",
+            "tool_call_id": "call_context_0_list_transfers",
+            "name": "list_transfers",
+            "content": '{"ok": true}',
+        },
     ]
 
     selected = select_token_budgeted_context(
@@ -388,7 +575,7 @@ def test_token_budget_keeps_latest_complete_tool_chain_and_newest_fitting_turns(
         [*old, *middle, *latest],
         tools=MODEL_TOOLS,
         token_counter=lambda messages, _tools: len(json.dumps(messages)),
-        input_budget=430,
+        input_budget=540,
     )
 
     assert selected[0] == system

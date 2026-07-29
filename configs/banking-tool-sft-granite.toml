@@ -1,0 +1,34 @@
+[run]
+name = "banking-tool-sft-granite"
+description = "Guarded banking-v3 tool-use SFT candidate for Granite 4.1 8B."
+format = "banking_v3_tool_sft_config"
+hub_dest = "spkc83/retail-bank-agent-9b"
+private_hub_repo = false
+push_to_hub_default = false
+
+[model]
+base_model = "ibm-granite/granite-4.1-8b"
+base_revision = "1504002f650e656a0a3789d99574df12e3e94ed0"
+family = "granite"
+parameter_tier = "approximately_9b"
+
+[dataset]
+name = "data/banking-v3-tool-sft/manifest.json"
+schema_version = "banking-tool-sft/v1"
+tool_manifest = "public_banking_poc_nine_tools"
+task = "model_owned_banking_tool_use_sft"
+
+[training]
+stack = "trl_sfttrainer_peft_bf16_lora"
+precision = "bf16"
+max_train_seconds = 14400
+max_wallclock_hours = 5
+checkpoint_every_steps = 250
+merge_adapter = true
+push_to_hub = false
+
+[lora]
+r = 32
+alpha = 64
+dropout = 0.05
+target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]

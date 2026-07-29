@@ -1,0 +1,34 @@
+[run]
+name = "banking-tool-sft-ministral"
+description = "Optional guarded banking-v3 tool-use SFT candidate for Ministral 3 8B."
+format = "banking_v3_tool_sft_config"
+hub_dest = "spkc83/retail-bank-agent-9b-ministral"
+private_hub_repo = false
+push_to_hub_default = false
+
+[model]
+base_model = "mistralai/Ministral-3-8B-Instruct-2512"
+base_revision = "5b26027e7b19eeb4b7352e1fed3926375dd2cb4d"
+family = "ministral"
+parameter_tier = "optional_release_band_candidate"
+
+[dataset]
+name = "data/banking-v3-tool-sft/manifest.json"
+schema_version = "banking-tool-sft/v1"
+tool_manifest = "public_banking_poc_nine_tools"
+task = "model_owned_banking_tool_use_sft"
+
+[training]
+stack = "trl_sfttrainer_peft_bf16_lora"
+precision = "bf16"
+max_train_seconds = 14400
+max_wallclock_hours = 5
+checkpoint_every_steps = 250
+merge_adapter = true
+push_to_hub = false
+
+[lora]
+r = 32
+alpha = 64
+dropout = 0.05
+target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]

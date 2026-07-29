@@ -3,8 +3,11 @@ from __future__ import annotations
 import os
 from typing import Any
 
-MODEL_ID = "spkc83/retail-bank-servicing-moe-9b"
-MODEL_REVISION = "b2466ca4b157f420432a5e20a14573e83954deae"
+MODEL_ID = os.environ.get("RETAIL_BANK_MODEL_ID", "spkc83/retail-bank-agent-9b")
+MODEL_REVISION = os.environ.get(
+    "RETAIL_BANK_MODEL_REVISION",
+    "PIN_AFTER_TRAINING",
+)
 SKIP_MODEL_LOAD = os.environ.get("POC_SKIP_MODEL_LOAD") == "1"
 
 if SKIP_MODEL_LOAD:
@@ -27,16 +30,20 @@ else:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     spaces_runtime = spaces
+    if MODEL_REVISION == "PIN_AFTER_TRAINING":
+        raise RuntimeError(
+            "Set RETAIL_BANK_MODEL_REVISION to the verified merged model commit."
+        )
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_ID,
         revision=MODEL_REVISION,
         dtype=torch.bfloat16,
-        experts_implementation="eager",
         low_cpu_mem_usage=True,
     )
     model.to("cuda")
-    model.config.output_router_logits = False
     model.eval()
 
 

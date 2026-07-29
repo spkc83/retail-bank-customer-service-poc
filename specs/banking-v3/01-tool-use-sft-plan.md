@@ -1,9 +1,10 @@
 # Banking v3 tool-use SFT plan
 
-Status: reviewed implementation proposal on branch `feat/tool-use-sft-v3`.
+Status: implementation contract on branch `feat/tool-use-sft-v3`.
 
-This document plans the next model iteration. It does not authorize a paid
-training job, Hub publication, or production deployment.
+The user authorized end-to-end implementation, public Hub publication, a
+single RTX PRO 6000 training job capped at five hours, and deployment to the
+existing public ZeroGPU demonstration.
 
 ## Outcome
 
@@ -26,8 +27,8 @@ tool trajectories.
 
 1. Replace prompt-only repair with governed tool-use SFT.
 2. Prefer a natively pretrained model in the 8.75B-9.25B release band.
-3. Use QLoRA or, if its backend fails, memory-gated BF16 LoRA. Do not use a
-   full-parameter Adam fine-tune on one 48GB GPU.
+3. Use BF16 LoRA on the actual 96GB RTX PRO 6000 Jobs flavor. Keep QLoRA as an
+   explicit fallback. Do not use full-parameter Adam on one GPU.
 4. Merge the selected adapter into the base before ZeroGPU deployment.
 5. Generate semantic scenarios deterministically and use a teacher LLM only
    for linguistic realization.
@@ -81,9 +82,12 @@ tool, add an argument, modify a result, or claim an action succeeded.
 
 ### Scale and mixture
 
-Generate a 1,200-2,000-record pilot first. The full target is 35,000-60,000
-validated conversations, but the selected count is computed from measured
-training throughput before full teacher realization.
+The validated corpus contains 5,000 conversations: 3,502 train, 748
+validation, and 750 test. The original 35,000-60,000 aspirational range was
+rejected after the generator's duplicate-text gate proved that scaling beyond
+the natural realization space would add repeated prompts. The accepted corpus
+contains about 4.25 million rendered tokens; three-plus training epochs remain
+inside the bounded run while preserving unique normalized user turns.
 
 | Slice | Target share |
 | --- | ---: |
@@ -243,7 +247,8 @@ Every candidate must pass:
 2. Pinned Transformers, PEFT, TRL, Accelerate, and CUDA compatibility.
 3. Public tool-template round trip.
 4. Zero-shot held-out tool evaluation.
-5. One QLoRA optimizer step.
+5. One Trainer/tokenization optimizer smoke and an in-job BF16 LoRA startup
+   gate.
 6. Adapter save/reload and merged-checkpoint reload.
 7. Text-only load and memory proof for multimodal-wrapper candidates.
 8. ZeroGPU model/tool round trip through the POC.
@@ -258,8 +263,8 @@ Primary stack:
 
 - Transformers and Accelerate;
 - TRL `SFTTrainer`;
-- PEFT;
-- `bitsandbytes` 4-bit NF4 with double quantization and BF16 compute.
+- PEFT BF16 LoRA;
+- optional `bitsandbytes` 4-bit NF4 QLoRA fallback.
 
 The candidate smoke resolves and pins exact package versions, CUDA version,
 base/tokenizer revisions, and template hash. Full jobs may not depend on an
@@ -275,15 +280,15 @@ Starting ranges:
 | Target modules | Attention and MLP projections |
 | Sequence length | 2,048-4,096 |
 | Micro-batch | 1-2 |
-| Effective batch | 16-64 through accumulation |
+| Effective batch | 4 through accumulation |
 | Learning rate | 5e-5 to 2e-4; start at 1e-4 |
 | Warmup | 3%-5% |
-| Epochs | 1-2, bounded by measured token budget |
+| Epochs | Approximately 3.4 at the 3,000-step ceiling |
 | Checkpoints | Every 250-500 optimizer steps |
 
-If the 4-bit backend fails, BF16 LoRA is allowed only when a measured run stays
-below 43GB peak GPU memory and retains the 20% time margin. Otherwise the
-candidate is rejected. Full-parameter Adam training is out of scope.
+The Jobs hardware inventory reports 96GB VRAM for `rtx-pro-6000`, so BF16 LoRA
+is the lower-risk primary lane. QLoRA remains available through an explicit
+precision switch. Full-parameter Adam training is out of scope.
 
 The final artifact includes:
 
@@ -295,21 +300,17 @@ The final artifact includes:
 
 ## Token and five-hour budget
 
-Before generating the full teacher-realized corpus:
+Measured corpus budget:
 
-1. Tokenize the pilot with each surviving adapter.
-2. Measure effective training tokens per second, including accumulation,
-   validation, and checkpoint overhead.
-3. Reserve one hour of the five-hour job for startup, evaluation, merge,
-   checkpointing, and upload.
-4. Compute `max_train_tokens = floor(tokens_per_second * 14,400)`.
-5. Require requested corpus tokens times epochs to be no more than 80% of that
-   maximum.
-6. Select and stratify the final 35,000-60,000 conversation count from the
-   measured tokens per conversation.
-
-If 35,000 conversations do not fit after reducing to one epoch and 2,048-token
-chains, stop and revise the scope. Do not silently extend the time cap.
+1. Granite template hash:
+   `6727ca16a39df05c41af54eb651aa618b50a29967ad3951a31b90c4e385573fc`.
+2. Training split: 2,975,472 input tokens and 124,303 labeled assistant tokens.
+3. Validation split: 637,376 input tokens.
+4. Test split: 636,843 input tokens.
+5. The worker stops optimizer work after 14,400 seconds even if the 3,000-step
+   ceiling is not reached.
+6. The outer Hugging Face Job timeout remains five hours, leaving one hour for
+   startup, validation, fresh-base merge, reload parity, and Hub upload.
 
 ## Evaluation contract
 
@@ -348,8 +349,10 @@ fails any hard gate cannot win through an averaged score.
 5. Implement family wire adapters and assistant-only tokenization.
 6. Run the local/low-cost candidate bakeoff.
 7. Generate only the throughput-supported full corpus.
-8. Run a small remote pilot and evaluate it.
-9. Request explicit approval before the paid full SFT job.
+8. Run the guarded full job with startup, wall-clock, checkpoint, and parity
+   gates.
+9. Evaluate the resulting checkpoint and retain it only if the frozen metrics
+   improve on the control.
 10. Merge, validate, and deploy only a checkpoint that passes all gates.
 
 Likely implementation files:
@@ -364,8 +367,8 @@ Likely implementation files:
 
 ## Stop rules
 
-- Do not start a paid full run before data, adapter, one-step QLoRA,
-  merge/reload, ZeroGPU, and throughput gates pass.
+- Do not start the paid run before data replay, adapter/tokenizer, exact TRL
+  construction, one-step offline Trainer, job packaging, and Hub inputs pass.
 - Stop a pilot on unsupported/private arguments, credential-request regression,
   adapter merge parity failure, or projected runtime beyond the cap.
 - Stop if tool validation worsens at two consecutive checkpoints.

@@ -19,6 +19,7 @@ app = [
 ]
 scale = [
   "accelerate>=1.12,<2",
+  "bitsandbytes==0.50.0",
   "datasets>=4.4,<5",
   "huggingface-hub>=1.4,<2",
   "peft>=0.18,<0.19",
@@ -56,10 +57,14 @@ follow_imports = "skip"
 module = [
   "accelerate",
   "accelerate.*",
+  "bitsandbytes",
+  "bitsandbytes.*",
   "datasets",
   "datasets.*",
   "peft",
   "peft.*",
+  "trackio",
+  "trackio.*",
   "transformers",
   "transformers.*",
   "trl",

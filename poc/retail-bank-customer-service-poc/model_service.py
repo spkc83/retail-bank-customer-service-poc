@@ -37,7 +37,7 @@ Return exactly one of:
 1. <use_original/> when the base draft is appropriate without customer-specific
    backend data or action, including greetings, thanks, general explanations, and
    necessary clarifying questions.
-2. One or more Qwen <tool_call> JSON blocks when the base draft should have used a
+2. One or more tagged-JSON <tool_call> blocks when the base draft should have used a
    supplied tool. Do not add prose around tool calls.
 
 Examples:
@@ -212,17 +212,100 @@ class ModelRuntime(Protocol):
 
 @dataclass(frozen=True)
 class ToolCall:
+    id: str
+    index: int
     name: str
     arguments: dict[str, Any]
 
     def as_message_call(self) -> dict[str, Any]:
         return {
+            "id": self.id,
+            "index": self.index,
             "type": "function",
             "function": {
                 "name": self.name,
                 "arguments": self.arguments,
             },
         }
+
+
+class ToolSyntaxAdapter(Protocol):
+    family: str
+
+    def render_tools(
+        self,
+        public_tool_manifest: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        ...
+
+    def parse_assistant(
+        self,
+        output: str,
+        *,
+        turn_key: str | None = None,
+    ) -> tuple[ToolCall, ...]:
+        ...
+
+    def render_assistant_tool_calls(
+        self,
+        calls: tuple[ToolCall, ...],
+    ) -> dict[str, Any]:
+        ...
+
+    def render_tool_result(
+        self,
+        call: ToolCall,
+        content: dict[str, Any],
+    ) -> dict[str, Any]:
+        ...
+
+
+class TaggedJsonToolSyntaxAdapter:
+    family = "tagged-json"
+
+    def render_tools(
+        self,
+        public_tool_manifest: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return public_tool_manifest
+
+    def parse_assistant(
+        self,
+        output: str,
+        *,
+        turn_key: str | None = None,
+    ) -> tuple[ToolCall, ...]:
+        return _parse_tagged_json_tool_calls(output, turn_key=turn_key)
+
+    def render_assistant_tool_calls(
+        self,
+        calls: tuple[ToolCall, ...],
+    ) -> dict[str, Any]:
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [call.as_message_call() for call in calls],
+        }
+
+    def render_tool_result(
+        self,
+        call: ToolCall,
+        content: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "role": "tool",
+            "tool_call_id": call.id,
+            "name": call.name,
+            "content": json.dumps(content, sort_keys=True),
+        }
+
+
+class GraniteToolSyntaxAdapter(TaggedJsonToolSyntaxAdapter):
+    family = "granite"
+
+
+class QwenToolSyntaxAdapter(TaggedJsonToolSyntaxAdapter):
+    family = "qwen"
 
 
 @dataclass(frozen=True)
@@ -242,10 +325,12 @@ class ConversationalBankingAgent:
         *,
         bank: SessionBankRegistry,
         model: ModelRuntime,
+        tool_adapter: ToolSyntaxAdapter | None = None,
         input_budget: int = INPUT_TOKEN_BUDGET,
     ) -> None:
         self.bank = bank
         self.model = model
+        self.tool_adapter = tool_adapter or GraniteToolSyntaxAdapter()
         self.input_budget = input_budget
 
     def run_turn(
@@ -265,7 +350,7 @@ class ConversationalBankingAgent:
         first_context = select_token_budgeted_context(
             system,
             current,
-            tools=MODEL_TOOLS,
+            tools=self.tool_adapter.render_tools(MODEL_TOOLS),
             token_counter=self.model.count_tokens,
             input_budget=self.input_budget,
         )
@@ -273,12 +358,15 @@ class ConversationalBankingAgent:
         first_output, first_trace = self._generate_pass(
             "base",
             first_context,
-            MODEL_TOOLS,
+            self.tool_adapter.render_tools(MODEL_TOOLS),
         )
         model_passes.append(first_trace)
         if not first_output:
             raise AgentProtocolError("model returned an empty first response")
-        calls = parse_tool_calls(first_output)
+        calls = self.tool_adapter.parse_assistant(
+            first_output,
+            turn_key=first_trace.prompt_sha256,
+        )
         if not calls:
             reflection_messages = [
                 *current,
@@ -291,14 +379,14 @@ class ConversationalBankingAgent:
             reflection_context = select_token_budgeted_context(
                 _reflection_system_message(router_result),
                 reflection_messages,
-                tools=MODEL_TOOLS,
+                tools=self.tool_adapter.render_tools(MODEL_TOOLS),
                 token_counter=self.model.count_tokens,
                 input_budget=self.input_budget,
             )
             reflection_output, reflection_trace = self._generate_pass(
                 "reflection",
                 reflection_context,
-                MODEL_TOOLS,
+                self.tool_adapter.render_tools(MODEL_TOOLS),
             )
             model_passes.append(reflection_trace)
             if reflection_output == USE_ORIGINAL_MARKER:
@@ -311,39 +399,30 @@ class ConversationalBankingAgent:
                     model_passes=model_passes,
                 )
             try:
-                calls = parse_tool_calls(reflection_output)
-            except AgentProtocolError:
-                calls = ()
+                calls = self.tool_adapter.parse_assistant(
+                    reflection_output,
+                    turn_key=reflection_trace.prompt_sha256,
+                )
+            except AgentProtocolError as error:
+                raise AgentProtocolError(
+                    "reflection response used malformed tool-call syntax"
+                ) from error
             if not calls:
-                return self._complete_without_tools(
-                    username=username,
-                    session_hash=session_hash,
-                    current=current,
-                    first_output=first_output,
-                    response_path="reflection_invalid_use_original",
-                    model_passes=model_passes,
+                raise AgentProtocolError(
+                    "reflection response must be <use_original/> or a valid tool call"
                 )
             response_path = "reflection_tool"
         else:
             response_path = "base_tool"
 
-        call_message = {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [call.as_message_call() for call in calls],
-        }
+        _validate_tool_calls(calls)
+        call_message = self.tool_adapter.render_assistant_tool_calls(calls)
         result_messages: list[dict[str, Any]] = []
         results: list[dict[str, Any]] = []
         for call in calls:
             result = self._execute_tool(username, session_hash, call)
             results.append(result)
-            result_messages.append(
-                {
-                    "role": "tool",
-                    "name": call.name,
-                    "content": json.dumps(result, sort_keys=True),
-                }
-            )
+            result_messages.append(self.tool_adapter.render_tool_result(call, result))
         with_tools = [*current, call_message, *result_messages]
         try:
             second_context = select_token_budgeted_context(
@@ -361,7 +440,10 @@ class ConversationalBankingAgent:
             model_passes.append(final_trace)
             if not final_output:
                 raise AgentProtocolError("model returned an empty second response")
-            if parse_tool_calls(final_output):
+            if self.tool_adapter.parse_assistant(
+                final_output,
+                turn_key=final_trace.prompt_sha256,
+            ):
                 raise AgentProtocolError("second model response attempted another tool call")
         except (AgentProtocolError, RuntimeError, TypeError, ValueError) as error:
             raise AgentExecutionError(
@@ -453,25 +535,23 @@ class ConversationalBankingAgent:
         except (RuntimeError, TypeError, ValueError) as error:
             return {
                 "ok": False,
-                "status": "error",
-                "action_completed": False,
-                "name": call.name,
-                "error": str(error),
-                "response_requirement": (
-                    "The requested action was not completed. Tell the customer it "
-                    "failed and explain this error; do not claim success."
-                ),
+                "error": _safe_tool_error(error),
             }
         return {
             "ok": True,
-            "status": "success",
-            "action_completed": True,
-            "name": call.name,
             "result": _model_friendly_result(result),
         }
 
 
 def parse_tool_calls(output: str) -> tuple[ToolCall, ...]:
+    return GraniteToolSyntaxAdapter().parse_assistant(output)
+
+
+def _parse_tagged_json_tool_calls(
+    output: str,
+    *,
+    turn_key: str | None = None,
+) -> tuple[ToolCall, ...]:
     if not isinstance(output, str):
         raise AgentProtocolError("model output must be text")
     blocks = _TOOL_CALL_BLOCK.findall(output)
@@ -481,7 +561,7 @@ def parse_tool_calls(output: str) -> tuple[ToolCall, ...]:
     if len(blocks) > MAX_TOOL_CALLS:
         raise AgentProtocolError(f"model returned more than {MAX_TOOL_CALLS} tool calls")
     calls: list[ToolCall] = []
-    for block in blocks:
+    for index, block in enumerate(blocks):
         try:
             payload = json.loads(block)
         except json.JSONDecodeError as error:
@@ -494,8 +574,155 @@ def parse_tool_calls(output: str) -> tuple[ToolCall, ...]:
             raise AgentProtocolError("model tool call requires a function name")
         if not isinstance(arguments, dict):
             raise AgentProtocolError("model tool-call arguments must be an object")
-        calls.append(ToolCall(name=name.strip(), arguments=arguments))
+        explicit_id = payload.get("id")
+        call_id = (
+            explicit_id.strip()
+            if isinstance(explicit_id, str) and explicit_id.strip()
+            else _stable_tool_call_id(index, name, output, turn_key)
+        )
+        explicit_index = payload.get("index")
+        if explicit_index is not None and (
+            not isinstance(explicit_index, int) or isinstance(explicit_index, bool)
+        ):
+            raise AgentProtocolError("model tool-call index must be an integer")
+        call_index = explicit_index if explicit_index is not None else index
+        calls.append(
+            ToolCall(
+                id=call_id,
+                index=call_index,
+                name=name.strip(),
+                arguments=arguments,
+            )
+        )
     return tuple(calls)
+
+
+def _stable_tool_call_id(
+    index: int,
+    name: str,
+    output: str,
+    turn_key: str | None,
+) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_]+", "_", name.strip()).strip("_") or "tool"
+    digest_payload = f"{turn_key or ''}\0{output}".encode()
+    digest = hashlib.sha256(digest_payload).hexdigest()[:10]
+    return f"call_{digest}_{index}_{slug}"
+
+
+def _validate_tool_calls(calls: tuple[ToolCall, ...]) -> None:
+    schemas = {
+        tool["function"]["name"]: tool["function"]["parameters"]
+        for tool in MODEL_TOOLS
+    }
+    seen_ids: set[str] = set()
+    for expected_index, call in enumerate(calls):
+        if call.index != expected_index:
+            raise AgentProtocolError("model tool-call indexes must be ordered from zero")
+        if call.id in seen_ids:
+            raise AgentProtocolError("model tool-call IDs must be unique")
+        seen_ids.add(call.id)
+        schema = schemas.get(call.name)
+        if schema is None:
+            raise AgentProtocolError(f"model selected unsupported tool: {call.name}")
+        _validate_arguments(call.name, call.arguments, schema)
+
+
+def _validate_arguments(
+    tool_name: str,
+    arguments: dict[str, Any],
+    schema: dict[str, Any],
+) -> None:
+    properties = schema.get("properties")
+    allowed = properties if isinstance(properties, dict) else {}
+    extras = set(arguments) - set(allowed)
+    if extras and schema.get("additionalProperties") is False:
+        raise AgentProtocolError(
+            f"model supplied unsupported arguments for {tool_name}: {sorted(extras)}"
+        )
+    for name, value in arguments.items():
+        subschema = allowed.get(name)
+        if not isinstance(subschema, dict):
+            continue
+        expected = subschema.get("type")
+        expected_types = expected if isinstance(expected, list) else [expected]
+        if not _value_matches_json_types(value, expected_types):
+            raise AgentProtocolError(
+                f"model supplied invalid type for {tool_name}.{name}"
+            )
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and isinstance(subschema.get("minimum"), int)
+            and value < subschema["minimum"]
+        ):
+            raise AgentProtocolError(
+                f"model supplied value below minimum for {tool_name}.{name}"
+            )
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and isinstance(subschema.get("maximum"), int)
+            and value > subschema["maximum"]
+        ):
+            raise AgentProtocolError(
+                f"model supplied value above maximum for {tool_name}.{name}"
+            )
+
+
+def _value_matches_json_types(value: Any, expected_types: list[Any]) -> bool:
+    for expected in expected_types:
+        if expected == "null" and value is None:
+            return True
+        if expected == "string" and isinstance(value, str):
+            return True
+        if (
+            expected == "integer"
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+        ):
+            return True
+        if (
+            expected == "number"
+            and isinstance(value, int | float)
+            and not isinstance(value, bool)
+        ):
+            return True
+        if expected == "boolean" and isinstance(value, bool):
+            return True
+        if expected == "object" and isinstance(value, dict):
+            return True
+        if expected == "array" and isinstance(value, list):
+            return True
+    return False
+
+
+def _safe_tool_error(error: Exception) -> dict[str, str]:
+    message = str(error) or error.__class__.__name__
+    if message.startswith("unsupported tool:"):
+        code = "unsupported_tool"
+        safe_message = "The requested tool is not available."
+    elif message.startswith("unsupported arguments"):
+        code = "invalid_arguments"
+        safe_message = "The tool arguments are not valid for this tool."
+    elif message.startswith("select a transaction by ID or description"):
+        code = "ambiguous_transaction_selector"
+        safe_message = "Select a transaction by either ID or description, not both."
+    elif message.startswith("select a transfer by ID or recipient"):
+        code = "ambiguous_transfer_selector"
+        safe_message = "Select a transfer by either ID or recipient, not both."
+    elif message.startswith("expected exactly one matching synthetic"):
+        code = "record_match_count"
+        safe_message = "The request did not match exactly one synthetic banking record."
+    elif message == "no matching synthetic banking record":
+        code = "record_not_found"
+        safe_message = "No matching synthetic banking record was found."
+    else:
+        code = "backend_error"
+        safe_message = "The synthetic banking backend could not complete the request."
+    return {
+        "code": code,
+        "message": safe_message,
+    }
 
 
 def _model_friendly_result(value: Any, currency: str | None = None) -> Any:
@@ -589,13 +816,15 @@ def canonical_conversation(
             and isinstance(item.get("name"), str)
             and isinstance(content, str)
         ):
-            canonical.append(
-                {
-                    "role": "tool",
-                    "name": str(item["name"]),
-                    "content": content,
-                }
-            )
+            canonical_tool = {
+                "role": "tool",
+                "name": str(item["name"]),
+                "content": content,
+            }
+            tool_call_id = item.get("tool_call_id")
+            if isinstance(tool_call_id, str) and tool_call_id.strip():
+                canonical_tool["tool_call_id"] = tool_call_id.strip()
+            canonical.append(canonical_tool)
     return canonical
 
 

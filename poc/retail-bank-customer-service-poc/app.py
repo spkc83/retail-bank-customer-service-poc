@@ -514,15 +514,22 @@ def _render_diagnostics(
     )
     call_text = (
         "\n".join(
-            f"- `{call.name}` `{json.dumps(call.arguments, sort_keys=True)}`"
+            (
+                f"- `{call.id}` `{call.name}` "
+                f"`{json.dumps(call.arguments, sort_keys=True)}`"
+            )
             for call in calls
         )
         or "- None"
     )
     result_text = (
         "\n".join(
-            f"- `{item.get('name')}`: {'success' if item.get('ok') else 'error'}"
-            for item in results
+            (
+                f"- `{call.id}` `{call.name}`: "
+                f"{'success' if result.get('ok') else 'error'}"
+                f"{_diagnostic_error_suffix(result)}"
+            )
+            for call, result in zip(calls, results, strict=False)
         )
         or "- None"
     )
@@ -566,6 +573,16 @@ def _render_diagnostics(
         f"- Registered execution boundary: `ZeroGPU large`\n"
         f"- Visible response SHA-256: `{visible_hash}`"
     )
+
+
+def _diagnostic_error_suffix(result: dict[str, Any]) -> str:
+    if result.get("ok"):
+        return ""
+    error = result.get("error")
+    if not isinstance(error, dict):
+        return ""
+    code = error.get("code")
+    return f" (`{code}`)" if isinstance(code, str) and code else ""
 
 
 with gr.Blocks(
