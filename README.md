@@ -31,6 +31,7 @@ Authenticated request
   → CPU-resident dual-head router gates OOD requests
   → intent probabilities guide the ZeroGPU 9B MoE agent
   → 9B model responds directly or emits Qwen tool calls
+  → a no-tool draft receives a labeled 9B tool-use reflection pass
   → session-isolated synthetic SQLite executes generated calls
   → tool results return to the 9B model for its final response
 ```
@@ -41,6 +42,9 @@ bypasses the 9B model. For allowed and uncertain turns, the 9B model owns
 conversation, clarification, tool selection, tool arguments, and final wording.
 The runtime performs mechanical parsing and direct mock-tool execution; it does
 not replace the model's answer with a deterministic banking response.
+Short follow-ups may be classified with the immediately preceding banking
+exchange. The reflection pass can emit a valid tool call or explicitly retain
+the untouched base answer; it does not map classifier intents to tools.
 
 The application is synthetic. It has no connection to a bank and cannot access
 or modify real accounts.
@@ -182,10 +186,11 @@ The deployable Gradio source is in
   top-three intent guidance;
 - CPU session-isolated synthetic SQLite state;
 - ZeroGPU 9B-owned conversation and Qwen tool calling;
+- an experimental labeled 9B reflection pass after a no-tool base draft;
 - an 8,192-token input budget retaining complete user/assistant/tool
   interactions without splitting a turn;
 - diagnostics for route probabilities, intent candidates, generated tool calls,
-  tool results, and response path;
+  tool results, response path, and per-generation prompt/output hashes;
 - preset read, write, multi-turn, sensitive-data, and OOD cases.
 
 The hidden conversation state stores complete user, assistant, tool-call, and

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -98,21 +99,42 @@ class LearnedBankingRouter:
     ) -> dict[str, Any]:
         if not isinstance(message, str) or not message.strip():
             raise ValueError("message must be a non-empty string")
-        prior_users = [
-            str(item["content"]).strip()
-            for item in (history or [])
-            if isinstance(item, dict)
-            and item.get("role") == "user"
-            and isinstance(item.get("content"), str)
-        ]
-        current = self._predict(f"[CURRENT]\n{message.strip()}")
+        normalized_message = message.strip()
+        current = self._predict(f"[CURRENT]\n{normalized_message}")
+        current["context_applied"] = False
         if current["route"] == "in_domain":
             return current
-        if not prior_users or not _has_contextual_reference(message):
+
+        exchange = _latest_exchange(history)
+        if exchange is None:
             return current
-        return self._predict(
-            f"[CURRENT]\n{message.strip()}\n[PREVIOUS_USER]\n{prior_users[-1]}"
+        previous_user, previous_assistant = exchange
+        if _has_contextual_reference(normalized_message):
+            context_reason = "contextual_reference"
+        elif _is_short_follow_up(normalized_message) and _invites_follow_up(
+            previous_assistant
+        ):
+            context_reason = "short_follow_up"
+        else:
+            return current
+
+        previous = self._predict(f"[CURRENT]\n{previous_user}")
+        if previous["route"] == "out_of_domain":
+            return current
+
+        contextual = self._predict(
+            f"[CURRENT]\n{normalized_message}\n"
+            f"[PREVIOUS_ASSISTANT]\n{previous_assistant}\n"
+            f"[PREVIOUS_USER]\n{previous_user}"
         )
+        if contextual["route"] == "out_of_domain":
+            contextual["route"] = "uncertain"
+            contextual["context_route_override"] = (
+                "Active banking follow-up was retained for 9B adjudication."
+            )
+        contextual["context_applied"] = True
+        contextual["context_reason"] = context_reason
+        return contextual
 
     def _predict(self, rendered: str) -> dict[str, Any]:
         encoded = self.tokenizer(
@@ -206,6 +228,47 @@ def _has_contextual_reference(text: str) -> bool:
             "this",
             "those",
         }
+    )
+
+
+def _latest_exchange(
+    history: list[dict[str, Any]] | None,
+) -> tuple[str, str] | None:
+    messages = [
+        (str(item.get("role")), str(item.get("content")).strip())
+        for item in (history or [])
+        if isinstance(item, dict)
+        and item.get("role") in {"user", "assistant"}
+        and isinstance(item.get("content"), str)
+        and str(item["content"]).strip()
+    ]
+    if not messages or messages[-1][0] != "assistant":
+        return None
+    previous_assistant = messages[-1][1]
+    for role, content in reversed(messages[:-1]):
+        if role == "user":
+            return content, previous_assistant
+    return None
+
+
+def _is_short_follow_up(text: str) -> bool:
+    words = re.findall(r"[A-Za-z0-9]+", text)
+    return 0 < len(words) <= 6 and len(text) <= 64
+
+
+def _invites_follow_up(text: str) -> bool:
+    normalized = text.casefold()
+    return "?" in text or any(
+        phrase in normalized
+        for phrase in (
+            "please provide",
+            "please tell me",
+            "which one",
+            "what are",
+            "could you provide",
+            "can you provide",
+            "need the",
+        )
     )
 
 

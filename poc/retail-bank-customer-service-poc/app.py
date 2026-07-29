@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import os
 from typing import Any
@@ -13,6 +14,7 @@ from typing import Any
 if os.environ.get("POC_SKIP_MODEL_LOAD") == "1":
     from zero_gpu_runtime import (
         MODEL_REVISION,
+        MODEL_ID,
         count_tokens,
         generate_text,
         spaces_runtime as spaces,
@@ -20,7 +22,7 @@ if os.environ.get("POC_SKIP_MODEL_LOAD") == "1":
 else:
     import spaces
 
-    from zero_gpu_runtime import MODEL_REVISION, count_tokens, generate_text
+    from zero_gpu_runtime import MODEL_ID, MODEL_REVISION, count_tokens, generate_text
 
 import gradio as gr
 
@@ -29,6 +31,7 @@ from model_service import (
     AgentExecutionError,
     AgentProtocolError,
     ConversationalBankingAgent,
+    ModelPassTrace,
     ModelRuntime,
     ToolCall,
     canonical_conversation,
@@ -180,6 +183,7 @@ def run_model_turn(
                     error.tool_calls,
                     error.tool_results,
                     '9B second-pass failure',
+                    error.model_passes,
                 )}\n\n"
                 f"Failure type: `{type(error.__cause__).__name__}`"
             ),
@@ -219,18 +223,23 @@ def run_model_turn(
         result.conversation,
         render_snapshot(result.snapshot),
         (
-            "The 9B model authored the response directly."
-            if not result.tool_calls
-            else (
+            (
                 "The 9B model selected and called the synthetic tools, then authored "
                 "the final response from their results."
+            )
+            if result.tool_calls
+            else (
+                "The 9B model authored the base answer, which was retained after "
+                "the labeled reflection pass."
             )
         ),
         _render_diagnostics(
             route,
             result.tool_calls,
             result.tool_results,
-            "9B model-authored",
+            f"9B {result.response_path}",
+            result.model_passes,
+            result.response,
         ),
         enabled,
         enabled,
@@ -480,6 +489,8 @@ def _render_diagnostics(
     calls: tuple[ToolCall, ...],
     results: tuple[dict[str, Any], ...],
     response_path: str,
+    model_passes: tuple[ModelPassTrace, ...] = (),
+    visible_response: str | None = None,
 ) -> str:
     candidates = route.get("intent_candidates")
     candidate_text = (
@@ -505,16 +516,40 @@ def _render_diagnostics(
         )
         or "- None"
     )
+    pass_text = (
+        "\n".join(
+            (
+                f"- `{item.label}` — input tokens `{item.input_tokens}`, "
+                f"prompt SHA-256 `{item.prompt_sha256}`, output characters "
+                f"`{item.output_chars}`, raw output SHA-256 `{item.output_sha256}`"
+            )
+            for item in model_passes
+        )
+        or "- None; the 9B generator was not invoked."
+    )
+    visible_hash = (
+        hashlib.sha256(visible_response.encode("utf-8")).hexdigest()
+        if isinstance(visible_response, str)
+        else "not recorded"
+    )
+    space_commit = os.environ.get("SPACE_COMMIT_SHA", "unavailable")
     return (
         "### Experiment diagnostics\n\n"
         f"- Route: `{route.get('route')}`\n"
         f"- In-domain probability: `{route.get('banking_probability')}`\n"
         f"- OOD probability: `{route.get('ood_probability')}`\n"
+        f"- Conversation context applied: `{route.get('context_applied', False)}`\n"
+        f"- Context reason: `{route.get('context_reason')}`\n"
         f"- Response path: `{response_path}`\n\n"
         f"**Top intents**\n{candidate_text or '- None'}\n\n"
         f"**9B tool calls**\n{call_text}\n\n"
         f"**Tool results**\n{result_text}\n\n"
-        f"Model revision: `{MODEL_REVISION[:12]}…`"
+        f"**9B generation provenance**\n{pass_text}\n\n"
+        f"- Model: `{MODEL_ID}`\n"
+        f"- Exact model revision: `{MODEL_REVISION}`\n"
+        f"- Space commit: `{space_commit}`\n"
+        f"- Registered execution boundary: `ZeroGPU large`\n"
+        f"- Visible response SHA-256: `{visible_hash}`"
     )
 
 

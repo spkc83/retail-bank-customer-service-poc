@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from mock_bank import SessionBankRegistry
 INPUT_TOKEN_BUDGET = 8192
 MAX_NEW_TOKENS = 512
 MAX_TOOL_CALLS = 8
+USE_ORIGINAL_MARKER = "<use_original/>"
 
 AGENT_SYSTEM_PROMPT = """You are the conversational customer-service agent for a
 fictional retail-bank demonstration. All customer records and actions are synthetic.
@@ -25,6 +27,28 @@ conversation and override its predicted intent when appropriate. If a requested
 banking capability has no tool, explain that limitation naturally. After tool
 results, answer the customer using those results. Do not invent tool results or
 claim an action occurred unless a successful tool result says it did."""
+
+REFLECTION_PROMPT = """You are a second-pass tool-use reviewer for the same
+authenticated synthetic-bank conversation. Audit the BASE DRAFT against the latest
+customer request and the supplied tool schemas. This is a decision pass, not the
+customer-facing answer.
+
+Return exactly one of:
+1. <use_original/> when the base draft is appropriate without customer-specific
+   backend data or action, including greetings, thanks, general explanations, and
+   necessary clarifying questions.
+2. One or more Qwen <tool_call> JSON blocks when the base draft should have used a
+   supplied tool. Do not add prose around tool calls.
+
+Examples:
+- Greeting, with a friendly base draft: <use_original/>
+- "How many accounts do I have?", with a draft asking for an account number:
+  <tool_call>{"name":"list_accounts","arguments":{}}</tool_call>
+- General question about how savings interest works: <use_original/>
+
+Do not copy an example merely because it is present. Decide from the complete
+conversation. Never invent a tool and never ask the customer for an account number,
+customer ID, password, PIN, or identity verification."""
 
 MODEL_TOOLS: list[dict[str, Any]] = [
     {
@@ -134,6 +158,16 @@ _TOOL_CALL_BLOCK = re.compile(
 )
 
 
+@dataclass(frozen=True)
+class ModelPassTrace:
+    label: str
+    input_tokens: int
+    prompt_sha256: str
+    output_chars: int
+    output_sha256: str
+    raw_output: str
+
+
 class AgentProtocolError(ValueError):
     pass
 
@@ -147,12 +181,14 @@ class AgentExecutionError(AgentProtocolError):
         tool_calls: tuple[ToolCall, ...],
         tool_results: tuple[dict[str, Any], ...],
         snapshot: dict[str, Any],
+        model_passes: tuple[ModelPassTrace, ...],
     ) -> None:
         super().__init__(message)
         self.conversation = conversation
         self.tool_calls = tool_calls
         self.tool_results = tool_results
         self.snapshot = snapshot
+        self.model_passes = model_passes
 
 
 class ModelRuntime(Protocol):
@@ -194,6 +230,8 @@ class AgentTurnResult:
     tool_calls: tuple[ToolCall, ...]
     tool_results: tuple[dict[str, Any], ...]
     snapshot: dict[str, Any]
+    response_path: str
+    model_passes: tuple[ModelPassTrace, ...]
 
 
 class ConversationalBankingAgent:
@@ -229,23 +267,55 @@ class ConversationalBankingAgent:
             token_counter=self.model.count_tokens,
             input_budget=self.input_budget,
         )
-        first_output = self.model.generate(
+        model_passes: list[ModelPassTrace] = []
+        first_output, first_trace = self._generate_pass(
+            "base",
             first_context,
             MODEL_TOOLS,
-            MAX_NEW_TOKENS,
-        ).strip()
+        )
+        model_passes.append(first_trace)
         if not first_output:
             raise AgentProtocolError("model returned an empty first response")
         calls = parse_tool_calls(first_output)
         if not calls:
-            completed = [*current, {"role": "assistant", "content": first_output}]
-            return AgentTurnResult(
-                response=first_output,
-                conversation=completed,
-                tool_calls=(),
-                tool_results=(),
-                snapshot=self.bank.snapshot(username, session_hash),
+            reflection_context = select_token_budgeted_context(
+                _reflection_system_message(router_result, first_output),
+                current,
+                tools=MODEL_TOOLS,
+                token_counter=self.model.count_tokens,
+                input_budget=self.input_budget,
             )
+            reflection_output, reflection_trace = self._generate_pass(
+                "reflection",
+                reflection_context,
+                MODEL_TOOLS,
+            )
+            model_passes.append(reflection_trace)
+            if reflection_output == USE_ORIGINAL_MARKER:
+                return self._complete_without_tools(
+                    username=username,
+                    session_hash=session_hash,
+                    current=current,
+                    first_output=first_output,
+                    response_path="reflection_use_original",
+                    model_passes=model_passes,
+                )
+            try:
+                calls = parse_tool_calls(reflection_output)
+            except AgentProtocolError:
+                calls = ()
+            if not calls:
+                return self._complete_without_tools(
+                    username=username,
+                    session_hash=session_hash,
+                    current=current,
+                    first_output=first_output,
+                    response_path="reflection_invalid_use_original",
+                    model_passes=model_passes,
+                )
+            response_path = "reflection_tool"
+        else:
+            response_path = "base_tool"
 
         call_message = {
             "role": "assistant",
@@ -273,11 +343,12 @@ class ConversationalBankingAgent:
                 token_counter=self.model.count_tokens,
                 input_budget=self.input_budget,
             )
-            final_output = self.model.generate(
+            final_output, final_trace = self._generate_pass(
+                "grounded_final",
                 second_context,
                 None,
-                MAX_NEW_TOKENS,
-            ).strip()
+            )
+            model_passes.append(final_trace)
             if not final_output:
                 raise AgentProtocolError("model returned an empty second response")
             if parse_tool_calls(final_output):
@@ -289,6 +360,7 @@ class ConversationalBankingAgent:
                 tool_calls=calls,
                 tool_results=tuple(results),
                 snapshot=self.bank.snapshot(username, session_hash),
+                model_passes=tuple(model_passes),
             ) from error
         completed = [*with_tools, {"role": "assistant", "content": final_output}]
         return AgentTurnResult(
@@ -297,6 +369,58 @@ class ConversationalBankingAgent:
             tool_calls=calls,
             tool_results=tuple(results),
             snapshot=self.bank.snapshot(username, session_hash),
+            response_path=response_path,
+            model_passes=tuple(model_passes),
+        )
+
+    def _complete_without_tools(
+        self,
+        *,
+        username: str,
+        session_hash: str,
+        current: list[dict[str, Any]],
+        first_output: str,
+        response_path: str,
+        model_passes: list[ModelPassTrace],
+    ) -> AgentTurnResult:
+        completed = [*current, {"role": "assistant", "content": first_output}]
+        return AgentTurnResult(
+            response=first_output,
+            conversation=completed,
+            tool_calls=(),
+            tool_results=(),
+            snapshot=self.bank.snapshot(username, session_hash),
+            response_path=response_path,
+            model_passes=tuple(model_passes),
+        )
+
+    def _generate_pass(
+        self,
+        label: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+    ) -> tuple[str, ModelPassTrace]:
+        input_tokens = self.model.count_tokens(messages, tools)
+        prompt_payload = json.dumps(
+            {"messages": messages, "tools": tools},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        output = self.model.generate(
+            messages,
+            tools,
+            MAX_NEW_TOKENS,
+        ).strip()
+        return output, ModelPassTrace(
+            label=label,
+            input_tokens=input_tokens,
+            prompt_sha256=hashlib.sha256(
+                prompt_payload.encode("utf-8")
+            ).hexdigest(),
+            output_chars=len(output),
+            output_sha256=hashlib.sha256(output.encode("utf-8")).hexdigest(),
+            raw_output=output,
         )
 
     def _execute_tool(
@@ -488,5 +612,20 @@ def _system_message(router_result: dict[str, Any]) -> dict[str, str]:
             f"{AGENT_SYSTEM_PROMPT}\n\n"
             "CURRENT DUAL-HEAD CLASSIFIER GUIDANCE:\n"
             f"{json.dumps(guidance, sort_keys=True)}"
+        ),
+    }
+
+
+def _reflection_system_message(
+    router_result: dict[str, Any],
+    first_output: str,
+) -> dict[str, str]:
+    base_system = _system_message(router_result)["content"]
+    return {
+        "role": "system",
+        "content": (
+            f"{base_system}\n\n"
+            f"{REFLECTION_PROMPT}\n\n"
+            f"BASE DRAFT JSON:\n{json.dumps(first_output)}"
         ),
     }

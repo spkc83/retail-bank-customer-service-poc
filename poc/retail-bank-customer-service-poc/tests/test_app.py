@@ -179,6 +179,39 @@ def test_model_selects_transfer_tool_and_receives_full_tool_history(
     assert "list_transfers" in result[5]
 
 
+def test_reflection_tool_recovery_is_labeled_with_per_pass_provenance(
+    app_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outputs = iter(
+        [
+            "Please provide your account number.",
+            '<tool_call>{"name": "list_accounts", "arguments": {}}</tool_call>',
+            "You have two accounts.",
+        ]
+    )
+    monkeypatch.setattr(app_module, "count_tokens", lambda *_args: 100)
+    monkeypatch.setattr(app_module, "generate_text", lambda *_args: next(outputs))
+    monkeypatch.setattr(app_module, "route_query", lambda *_args: route())
+
+    result = app_module.run_model_turn(
+        "How many accounts do I have?",
+        [],
+        [],
+        request(),
+    )
+
+    assert result[1][-1]["content"] == "You have two accounts."
+    assert "9B reflection_tool" in result[5]
+    assert "`base`" in result[5]
+    assert "`reflection`" in result[5]
+    assert "`grounded_final`" in result[5]
+    assert "prompt SHA-256" in result[5]
+    assert "raw output SHA-256" in result[5]
+    assert app_module.MODEL_ID in result[5]
+    assert app_module.MODEL_REVISION in result[5]
+
+
 def test_gpu_failure_never_generates_cpu_servicing_answer(
     app_module,
 ) -> None:

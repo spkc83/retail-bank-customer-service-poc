@@ -120,7 +120,12 @@ def test_qwen_tool_call_parser_rejects_malformed_protocol(output: str) -> None:
 
 
 def test_plain_first_pass_text_is_a_model_authored_conversational_answer() -> None:
-    model = RecordingModel(["Hey! What can I help you with today?"])
+    model = RecordingModel(
+        [
+            "Hey! What can I help you with today?",
+            "<use_original/>",
+        ]
+    )
     agent = ConversationalBankingAgent(bank=bank(), model=model)
 
     result = agent.run_turn(
@@ -137,8 +142,74 @@ def test_plain_first_pass_text_is_a_model_authored_conversational_answer() -> No
         {"role": "user", "content": "yo, sup?"},
         {"role": "assistant", "content": result.response},
     ]
-    assert len(model.calls) == 1
+    assert result.response_path == "reflection_use_original"
+    assert [item.label for item in result.model_passes] == ["base", "reflection"]
+    assert result.model_passes[0].raw_output == result.response
+    assert len(model.calls) == 2
     assert model.calls[0]["tools"] == MODEL_TOOLS
+    assert model.calls[1]["tools"] == MODEL_TOOLS
+
+
+def test_reflection_can_recover_a_missing_tool_call_without_hiding_base_output() -> None:
+    model = RecordingModel(
+        [
+            "Please provide your account number so I can check.",
+            '<tool_call>{"name": "list_accounts", "arguments": {}}</tool_call>',
+            "You have checking and savings accounts.",
+        ]
+    )
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
+
+    result = agent.run_turn(
+        username="alex.demo",
+        session_hash="session",
+        message="How many accounts do I have?",
+        conversation=[],
+        router_result=router_guidance(),
+    )
+
+    assert result.response == "You have checking and savings accounts."
+    assert result.response_path == "reflection_tool"
+    assert [item.label for item in result.model_passes] == [
+        "base",
+        "reflection",
+        "grounded_final",
+    ]
+    assert (
+        result.model_passes[0].raw_output
+        == "Please provide your account number so I can check."
+    )
+    assert [call.name for call in result.tool_calls] == ["list_accounts"]
+    assert [item["role"] for item in result.conversation] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
+    assert len(model.calls) == 3
+
+
+def test_invalid_reflection_output_preserves_the_unmodified_base_answer() -> None:
+    model = RecordingModel(
+        [
+            "I can explain how savings interest works.",
+            "I think the draft is fine.",
+        ]
+    )
+    agent = ConversationalBankingAgent(bank=bank(), model=model)
+
+    result = agent.run_turn(
+        username="alex.demo",
+        session_hash="session",
+        message="How does savings interest work?",
+        conversation=[],
+        router_result=router_guidance(),
+    )
+
+    assert result.response == "I can explain how savings interest works."
+    assert result.response_path == "reflection_invalid_use_original"
+    assert result.tool_calls == ()
+    assert len(model.calls) == 2
 
 
 def test_tool_calls_execute_in_order_and_second_model_pass_writes_final_answer() -> None:
