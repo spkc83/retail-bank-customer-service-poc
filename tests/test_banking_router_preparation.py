@@ -8,7 +8,7 @@ import pytest
 
 
 def load_preparation_module() -> ModuleType:
-    path = Path("scripts/banking_v2/prepare_dual_head_router_data.py")
+    path = Path("scripts/retail_bank/prepare_dual_head_router_data.py")
     spec = importlib.util.spec_from_file_location("banking_router_preparation", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

@@ -6,7 +6,7 @@ LoRA adaptation of IBM Granite for a synthetic retail-bank tool-use POC.
 The source of truth for released identity and metrics is
 [../model_cards/retail-bank-agent-9b.md](../model_cards/retail-bank-agent-9b.md).
 The source of truth for local training defaults is
-[../scripts/banking_v2/cloud_train_tool_sft.py](../scripts/banking_v2/cloud_train_tool_sft.py)
+[../scripts/retail_bank/cloud_train_tool_sft.py](../scripts/retail_bank/cloud_train_tool_sft.py)
 and [../configs/banking-tool-sft-granite.toml](../configs/banking-tool-sft-granite.toml).
 
 ## Base Model Identity
@@ -29,7 +29,7 @@ The live POC loads that model repo and revision by default in
 Training uses LoRA through PEFT and TRL SFTTrainer. The primary lane is BF16
 LoRA over the pinned base model.
 
-Defaults in [../scripts/banking_v2/cloud_train_tool_sft.py](../scripts/banking_v2/cloud_train_tool_sft.py):
+Defaults in [../scripts/retail_bank/cloud_train_tool_sft.py](../scripts/retail_bank/cloud_train_tool_sft.py):
 
 | Setting | Value |
 | --- | --- |
@@ -55,7 +55,7 @@ LoRA target modules:
 - `down_proj`
 
 These names are declared in `LORA_TARGET_MODULES` in
-[../scripts/banking_v2/cloud_train_tool_sft.py](../scripts/banking_v2/cloud_train_tool_sft.py)
+[../scripts/retail_bank/cloud_train_tool_sft.py](../scripts/retail_bank/cloud_train_tool_sft.py)
 and mirrored by the local TOML configuration.
 
 ## Training Record Rendering
@@ -74,7 +74,7 @@ That adapter is responsible for:
   template hash.
 
 The training worker pre-tokenizes records through `tokenize_records()` in
-[../scripts/banking_v2/cloud_train_tool_sft.py](../scripts/banking_v2/cloud_train_tool_sft.py).
+[../scripts/retail_bank/cloud_train_tool_sft.py](../scripts/retail_bank/cloud_train_tool_sft.py).
 
 ## Granite Tool Wire
 
@@ -112,14 +112,14 @@ flags prints a dry-run plan and does not download the 8.79B base model, start a
 paid job, merge weights, or push to Hugging Face:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
+PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
   --manifest data/banking-v3-tool-sft/manifest.json
 ```
 
 The local tiny smoke path uses small offline stand-ins:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
+PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
   --run-tiny-smoke \
   --family granite \
   --max-steps 1 \
@@ -139,8 +139,8 @@ Full remote execution requires all of these safeguards:
 - `RETAIL_BANK_ALLOW_REMOTE_TOOL_SFT=banking-v3-tool-sft`
 
 The guarded wrapper is
-[../scripts/banking_v2/run_remote_training_job.sh](../scripts/banking_v2/run_remote_training_job.sh).
-It submits [../scripts/banking_v2/hf_job_tool_sft.py](../scripts/banking_v2/hf_job_tool_sft.py)
+[../scripts/retail_bank/run_remote_training_job.sh](../scripts/retail_bank/run_remote_training_job.sh).
+It submits [../scripts/retail_bank/hf_job_tool_sft.py](../scripts/retail_bank/hf_job_tool_sft.py)
 to Hugging Face Jobs with:
 
 - exact source commit;
@@ -157,7 +157,7 @@ snapshot, then calls the guarded local worker with push-to-Hub enabled.
 ## Checkpoints And Fingerprints
 
 `training_fingerprint()` in
-[../scripts/banking_v2/cloud_train_tool_sft.py](../scripts/banking_v2/cloud_train_tool_sft.py)
+[../scripts/retail_bank/cloud_train_tool_sft.py](../scripts/retail_bank/cloud_train_tool_sft.py)
 captures:
 
 - base model and revision;
@@ -180,10 +180,10 @@ The release keeps two forms:
 - `adapter/`: retained unmerged LoRA adapter.
 
 `merge_adapter_with_reload_parity()` in
-[../scripts/banking_v2/cloud_train_tool_sft.py](../scripts/banking_v2/cloud_train_tool_sft.py)
+[../scripts/retail_bank/cloud_train_tool_sft.py](../scripts/retail_bank/cloud_train_tool_sft.py)
 merges the adapter, reloads the merged model, and compares adapter-vs-merged
 outputs. The release helper
-[../scripts/banking_v2/hf_job_finalize_tool_sft.py](../scripts/banking_v2/hf_job_finalize_tool_sft.py)
+[../scripts/retail_bank/hf_job_finalize_tool_sft.py](../scripts/retail_bank/hf_job_finalize_tool_sft.py)
 checks parity reports before publication.
 
 The public model card reports the active release metrics:
@@ -215,7 +215,7 @@ The model card records that the released checkpoint passed the frozen
   false refusals, or OOD false accepts.
 
 The evaluator code is [../src/hello_slm/banking_tool_eval.py](../src/hello_slm/banking_tool_eval.py).
-The remote evaluator entry points live under [../scripts/banking_v2](../scripts/banking_v2).
+The remote evaluator entry points live under [../scripts/retail_bank](../scripts/retail_bank).
 
 ## Related Tests
 

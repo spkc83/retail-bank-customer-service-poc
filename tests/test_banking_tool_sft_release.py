@@ -8,7 +8,7 @@ import pytest
 
 
 def load_finalizer() -> ModuleType:
-    path = Path("scripts/banking_v2/hf_job_finalize_tool_sft.py")
+    path = Path("scripts/retail_bank/hf_job_finalize_tool_sft.py")
     spec = importlib.util.spec_from_file_location("hf_job_finalize_tool_sft", path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"could not load {path}")

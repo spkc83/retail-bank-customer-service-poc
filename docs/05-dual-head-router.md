@@ -8,16 +8,16 @@ This guide covers the active CPU router: governed Banking77 plus CLINC preparati
 | --- | --- | --- |
 | Router repo | `spkc83/retail-bank-domain-intent-router` | [`src/hello_slm/banking_dual_head_router.py`](../src/hello_slm/banking_dual_head_router.py) |
 | Router revision | `136ee159d19cda7f585dd122907bbeb1ef4ec4db` | [`src/hello_slm/banking_dual_head_router.py`](../src/hello_slm/banking_dual_head_router.py) |
-| Router dataset repo | `spkc83/retail-bank-router-training-data` | [`scripts/banking_v2/train_dual_head_router.py`](../scripts/banking_v2/train_dual_head_router.py) |
-| Router dataset revision | `54ff186a03501d76dc643dbed3d82729267ce811` | [`scripts/banking_v2/train_dual_head_router.py`](../scripts/banking_v2/train_dual_head_router.py) |
-| Base encoder | `distilbert/distilbert-base-uncased` | [`scripts/banking_v2/train_dual_head_router.py`](../scripts/banking_v2/train_dual_head_router.py) |
-| Base encoder revision | `12040accade4e8a0f71eabdb258fecc2e7e948be` | [`scripts/banking_v2/train_dual_head_router.py`](../scripts/banking_v2/train_dual_head_router.py) |
+| Router dataset repo | `spkc83/retail-bank-router-training-data` | [`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py) |
+| Router dataset revision | `54ff186a03501d76dc643dbed3d82729267ce811` | [`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py) |
+| Base encoder | `distilbert/distilbert-base-uncased` | [`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py) |
+| Base encoder revision | `12040accade4e8a0f71eabdb258fecc2e7e948be` | [`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py) |
 
 The public dataset card is [`data_cards/retail-bank-router-training-data.md`](../data_cards/retail-bank-router-training-data.md). The public model card is [`model_cards/retail-bank-domain-intent-router.md`](../model_cards/retail-bank-domain-intent-router.md).
 
 ## Architecture
 
-[`scripts/banking_v2/train_dual_head_router.py`](../scripts/banking_v2/train_dual_head_router.py) trains one shared DistilBERT encoder with two heads:
+[`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py) trains one shared DistilBERT encoder with two heads:
 
 - a binary domain head for supported retail banking vs out-of-domain;
 - a 77-way Banking77 intent head.
@@ -37,7 +37,7 @@ The runtime input format is:
 
 ## Data Preparation
 
-The preparation script is [`scripts/banking_v2/prepare_dual_head_router_data.py`](../scripts/banking_v2/prepare_dual_head_router_data.py). It downloads:
+The preparation script is [`scripts/retail_bank/prepare_dual_head_router_data.py`](../scripts/retail_bank/prepare_dual_head_router_data.py). It downloads:
 
 | Source | Revision or checksum | Use |
 | --- | --- | --- |
@@ -51,7 +51,7 @@ The preparation script is [`scripts/banking_v2/prepare_dual_head_router_data.py`
 Prepare and reproduce the released split digests:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/prepare_dual_head_router_data.py \
+PYTHONPATH=src python scripts/retail_bank/prepare_dual_head_router_data.py \
   --output-dir data/banking-router-v1 \
   --expected-release-lock data/sources/banking-router-v1.lock.json \
   --validation-fraction 0.15 \
@@ -91,12 +91,12 @@ Tests for this policy live in [`tests/test_banking_router_data.py`](../tests/tes
 The trainer has no CLI flags. It is a publish path that requires `HF_TOKEN`.
 
 ```bash
-HF_TOKEN=... uv run scripts/banking_v2/train_dual_head_router.py
+HF_TOKEN=... uv run scripts/retail_bank/train_dual_head_router.py
 ```
 
 Use a token with read access to `spkc83/retail-bank-router-training-data`, read access to `distilbert/distilbert-base-uncased`, and write access to `spkc83/retail-bank-domain-intent-router`. Do not commit or paste the token into scripts, docs, or shell history.
 
-Training constants in [`scripts/banking_v2/train_dual_head_router.py`](../scripts/banking_v2/train_dual_head_router.py):
+Training constants in [`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py):
 
 | Setting | Value |
 | --- | --- |
@@ -110,7 +110,7 @@ Training constants in [`scripts/banking_v2/train_dual_head_router.py`](../script
 | Intent loss weight | `0.7` |
 | Conversational domain loss weight | `8.0` |
 
-After each epoch, the script predicts on validation, calibrates the domain threshold, and scores the epoch. [`calibrate_threshold`](../scripts/banking_v2/train_dual_head_router.py) searches thresholds from `0.005` to `0.995` and selects the best specificity while enforcing:
+After each epoch, the script predicts on validation, calibrates the domain threshold, and scores the epoch. [`calibrate_threshold`](../scripts/retail_bank/train_dual_head_router.py) searches thresholds from `0.005` to `0.995` and selects the best specificity while enforcing:
 
 - in-domain recall at least `0.98`;
 - conversational in-domain recall at least `0.95`.
@@ -119,7 +119,7 @@ The selected epoch is then evaluated once on the untouched test split.
 
 ## Release Gates
 
-[`release_gate_failures`](../scripts/banking_v2/train_dual_head_router.py) blocks publication unless the test metrics pass:
+[`release_gate_failures`](../scripts/retail_bank/train_dual_head_router.py) blocks publication unless the test metrics pass:
 
 | Metric | Gate |
 | --- | --- |
@@ -144,7 +144,7 @@ The released artifact reports:
 
 ## Publish Outputs
 
-On success, [`publish_artifact`](../scripts/banking_v2/train_dual_head_router.py) uploads:
+On success, [`publish_artifact`](../scripts/retail_bank/train_dual_head_router.py) uploads:
 
 - standard Transformers encoder files;
 - tokenizer files;

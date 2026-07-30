@@ -73,7 +73,7 @@ uv sync --extra dev --extra scale
 Generate a small, fully validated synthetic tool-use corpus:
 
 ```bash
-PYTHONPATH=src uv run python scripts/banking_v2/prepare_tool_sft_data.py \
+PYTHONPATH=src uv run python scripts/retail_bank/prepare_tool_sft_data.py \
   --output-dir /tmp/retail-bank-tool-sft-smoke \
   --pilot-count 120
 ```
@@ -83,14 +83,14 @@ Banking77 and CLINC sources. The command fails if any released split digest
 changes:
 
 ```bash
-PYTHONPATH=src uv run python scripts/banking_v2/prepare_dual_head_router_data.py
+PYTHONPATH=src uv run python scripts/retail_bank/prepare_dual_head_router_data.py
 ```
 
 Inspect the Granite training plan without allocating a GPU or submitting a
 job:
 
 ```bash
-PYTHONPATH=src uv run python scripts/banking_v2/cloud_train_tool_sft.py \
+PYTHONPATH=src uv run python scripts/retail_bank/cloud_train_tool_sft.py \
   --manifest data/banking-v3-tool-sft/manifest.json
 ```
 

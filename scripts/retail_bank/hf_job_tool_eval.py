@@ -81,7 +81,7 @@ def main() -> int:
         }
         command = [
             sys.executable,
-            str(source_root / "scripts/banking_v2/cloud_generate_tool_eval.py"),
+            str(source_root / "scripts/retail_bank/cloud_generate_tool_eval.py"),
             "--model-repo",
             args.model_repo,
             "--model-revision",

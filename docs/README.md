@@ -90,13 +90,13 @@ Use the [file map](reference/file-map.md) to jump from concepts to code and the
 | [../data_cards](../data_cards) | Public dataset documentation. |
 | [../model_cards](../model_cards) | Public model documentation. |
 | [../poc/retail-bank-customer-service-poc](../poc/retail-bank-customer-service-poc) | Gradio/ZeroGPU customer-service POC. |
-| [../scripts/banking_v2](../scripts/banking_v2) | Data, training, recovery, evaluation, and Hub job entry points. |
+| [../scripts/retail_bank](../scripts/retail_bank) | Data, training, recovery, evaluation, and Hub job entry points. |
 | [../src/hello_slm](../src/hello_slm) | Shared package code for data, tool wire, evaluator, and router. |
 | [../tests](../tests) | Repository regression tests. |
 
-The retained `scripts/banking_v2` and `data/banking-v3-tool-sft` names are
-published path and schema identifiers. They are part of the active Granite
-release workflow, not alternate model implementations.
+The active scripts use the non-versioned `scripts/retail_bank` path. The
+retained `data/banking-v3-tool-sft` name is a published dataset-schema
+identifier, not an alternate model implementation.
 
 ## Local Setup
 

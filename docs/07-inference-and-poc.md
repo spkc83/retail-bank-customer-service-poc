@@ -21,7 +21,7 @@ as `main` where these revisions are required.
 | Agent base | `ibm-granite/granite-4.1-8b` | `1504002f650e656a0a3789d99574df12e3e94ed0` | [`configs/banking-tool-sft-granite.toml`](../configs/banking-tool-sft-granite.toml), [`model card`](../model_cards/retail-bank-agent-9b.md) |
 | Tool-use SFT dataset | `spkc83/retail-bank-agent-sft` | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` | [`data card`](../data_cards/retail-bank-agent-sft.md), [`model card`](../model_cards/retail-bank-agent-9b.md) |
 | Dual-head router | `spkc83/retail-bank-domain-intent-router` | `136ee159d19cda7f585dd122907bbeb1ef4ec4db` | [`router.py`](../poc/retail-bank-customer-service-poc/router.py), [`router card`](../model_cards/retail-bank-domain-intent-router.md) |
-| Router dataset | `spkc83/retail-bank-router-training-data` | `54ff186a03501d76dc643dbed3d82729267ce811` | [`train_dual_head_router.py`](../scripts/banking_v2/train_dual_head_router.py), [`router card`](../model_cards/retail-bank-domain-intent-router.md) |
+| Router dataset | `spkc83/retail-bank-router-training-data` | `54ff186a03501d76dc643dbed3d82729267ce811` | [`train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py), [`router card`](../model_cards/retail-bank-domain-intent-router.md) |
 
 For the complete artifact ledger, see
 [`docs/reference/artifacts.md`](reference/artifacts.md).

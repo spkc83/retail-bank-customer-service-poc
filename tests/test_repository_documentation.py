@@ -26,14 +26,14 @@ OBSOLETE_FILES = (
     "src/hello_slm/banking_hf_generator.py",
     "src/hello_slm/banking_policy.py",
     "src/hello_slm/banking_shiny_app.py",
-    "scripts/banking_v2/cloud_train_banking_moe.py",
-    "scripts/banking_v2/train_banking_moe.py",
+    "scripts/retail_bank/cloud_train_banking_moe.py",
+    "scripts/retail_bank/train_banking_moe.py",
     "configs/banking-v2-moe-9b.toml",
     "configs/banking-v2-dense-adapter.toml",
     "model_cards/retail-bank-servicing-moe-9b.md",
 )
 
-OBSOLETE_FILE_TREES = ("specs", ".github/workflows")
+OBSOLETE_FILE_TREES = ("specs", ".github/workflows", "scripts/banking_v2")
 
 FORBIDDEN_HISTORY = (
     "custom Qwen2-MoE",

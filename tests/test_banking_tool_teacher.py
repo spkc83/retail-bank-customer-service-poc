@@ -10,7 +10,7 @@ import pytest
 
 
 def _load_teacher_module() -> ModuleType:
-    path = Path("scripts/banking_v2/realize_tool_sft_teacher.py")
+    path = Path("scripts/retail_bank/realize_tool_sft_teacher.py")
     spec = importlib.util.spec_from_file_location("realize_tool_sft_teacher", path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

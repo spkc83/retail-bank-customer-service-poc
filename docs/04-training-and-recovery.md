@@ -10,7 +10,7 @@ Use immutable 40-character revisions for every paid or published run. Branch nam
 | --- | --- | --- |
 | Base model | `ibm-granite/granite-4.1-8b` | [`configs/banking-tool-sft-granite.toml`](../configs/banking-tool-sft-granite.toml) |
 | Base revision | `1504002f650e656a0a3789d99574df12e3e94ed0` | [`configs/banking-tool-sft-granite.toml`](../configs/banking-tool-sft-granite.toml) |
-| Model repo | `spkc83/retail-bank-agent-9b` | [`scripts/banking_v2/hf_job_tool_sft.py`](../scripts/banking_v2/hf_job_tool_sft.py) |
+| Model repo | `spkc83/retail-bank-agent-9b` | [`scripts/retail_bank/hf_job_tool_sft.py`](../scripts/retail_bank/hf_job_tool_sft.py) |
 | Released weights revision | `085df3d089cfadd77424b548542da0390a54a23e` | [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md) |
 | Training dataset repo | `spkc83/retail-bank-agent-sft` | [`data_cards/retail-bank-agent-sft.md`](../data_cards/retail-bank-agent-sft.md) |
 | Training dataset revision | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` | [`data_cards/retail-bank-agent-sft.md`](../data_cards/retail-bank-agent-sft.md) |
@@ -21,7 +21,7 @@ Use immutable 40-character revisions for every paid or published run. Branch nam
 
 ## What Trains
 
-The worker [`scripts/banking_v2/cloud_train_tool_sft.py`](../scripts/banking_v2/cloud_train_tool_sft.py) loads the pinned Granite base and trains a BF16 LoRA adapter with TRL `SFTTrainer`. The retained hyperparameters are:
+The worker [`scripts/retail_bank/cloud_train_tool_sft.py`](../scripts/retail_bank/cloud_train_tool_sft.py) loads the pinned Granite base and trains a BF16 LoRA adapter with TRL `SFTTrainer`. The retained hyperparameters are:
 
 | Setting | Value |
 | --- | --- |
@@ -53,7 +53,7 @@ python -m pytest -q tests/test_banking_tool_sft_data.py \
 Check the training plan without downloading 9B weights, launching a job, merging, or pushing:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
+PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
   --manifest data/banking-v3-tool-sft/manifest.json \
   --base-revision 1504002f650e656a0a3789d99574df12e3e94ed0 \
   --family granite \
@@ -66,7 +66,7 @@ PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
 Run the local one-step smoke:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
+PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
   --run-tiny-smoke \
   --dry-run
 ```
@@ -75,14 +75,14 @@ The tiny smoke uses small offline stand-ins. It writes local smoke artifacts and
 
 ## Dry Run vs Paid HF Jobs
 
-Dry run is the default for [`cloud_train_tool_sft.py`](../scripts/banking_v2/cloud_train_tool_sft.py). It reports the intended stack and guard state. It refuses to:
+Dry run is the default for [`cloud_train_tool_sft.py`](../scripts/retail_bank/cloud_train_tool_sft.py). It reports the intended stack and guard state. It refuses to:
 
 - download the 9B Granite base weights;
 - start paid/cloud work;
 - write to Hugging Face Hub;
 - merge or publish a checkpoint.
 
-Paid execution is launched through [`scripts/banking_v2/run_remote_training_job.sh`](../scripts/banking_v2/run_remote_training_job.sh), which submits [`scripts/banking_v2/hf_job_tool_sft.py`](../scripts/banking_v2/hf_job_tool_sft.py) with:
+Paid execution is launched through [`scripts/retail_bank/run_remote_training_job.sh`](../scripts/retail_bank/run_remote_training_job.sh), which submits [`scripts/retail_bank/hf_job_tool_sft.py`](../scripts/retail_bank/hf_job_tool_sft.py) with:
 
 - `--flavor rtx-pro-6000`;
 - `--timeout 5h`;
@@ -93,34 +93,40 @@ Paid execution is launched through [`scripts/banking_v2/run_remote_training_job.
 The `HF_TOKEN` secret must have read access to the dataset and base, and write access to `spkc83/retail-bank-agent-9b`. Do not put tokens on the command line.
 
 ```bash
-scripts/banking_v2/run_remote_training_job.sh \
+scripts/retail_bank/run_remote_training_job.sh \
   "$(git rev-parse HEAD)" \
   183e7e1ed1aba9c3d7155e7b83b64dc854935055
 ```
 
 The mounted bucket persists under `/data`, so checkpoints survive job exit and can be reused by continuation or recovery. The wrapper builds the output path as `/data/retail-bank-agent-9b-${SOURCE_COMMIT:0:8}`.
 
+The current launchers resolve job bootstraps under `scripts/retail_bank`.
+When resuming a source commit created before the directory rename, they probe
+the pre-rename bootstrap URL only after the current path is absent. The old
+directory is not part of the current tree; this narrow URL fallback keeps
+immutable historical checkpoints recoverable.
+
 ## Resume Initial Training
 
 If the initial job exits after writing a valid checkpoint, resume with the same source and dataset revisions plus the checkpoint path under the persisted bucket:
 
 ```bash
-scripts/banking_v2/run_remote_training_job.sh \
+scripts/retail_bank/run_remote_training_job.sh \
   SOURCE_COMMIT_40_HEX \
   183e7e1ed1aba9c3d7155e7b83b64dc854935055 \
   /data/retail-bank-agent-9b-SOURCE8/checkpoint-STEP
 ```
 
-The resume flag is forwarded by [`hf_job_tool_sft.py`](../scripts/banking_v2/hf_job_tool_sft.py) to `cloud_train_tool_sft.py --resume-from`. Keep the source revision unchanged unless the purpose is an explicitly new run.
+The resume flag is forwarded by [`hf_job_tool_sft.py`](../scripts/retail_bank/hf_job_tool_sft.py) to `cloud_train_tool_sft.py --resume-from`. Keep the source revision unchanged unless the purpose is an explicitly new run.
 
 ## Continuation Training
 
-Continuation does not rerun the original SFT. [`scripts/banking_v2/cloud_continue_tool_sft.py`](../scripts/banking_v2/cloud_continue_tool_sft.py) loads the pinned Granite base plus the retained adapter from a pinned model revision, then oversamples sequential, clarification, and servicing-quality records while retaining single-tool, tool-error, FAQ, OOD, and hard-negative regression records. Its behavior is tested in [`tests/test_banking_tool_sft_continuation.py`](../tests/test_banking_tool_sft_continuation.py).
+Continuation does not rerun the original SFT. [`scripts/retail_bank/cloud_continue_tool_sft.py`](../scripts/retail_bank/cloud_continue_tool_sft.py) loads the pinned Granite base plus the retained adapter from a pinned model revision, then oversamples sequential, clarification, and servicing-quality records while retaining single-tool, tool-error, FAQ, OOD, and hard-negative regression records. Its behavior is tested in [`tests/test_banking_tool_sft_continuation.py`](../tests/test_banking_tool_sft_continuation.py).
 
 Dry-run the continuation plan:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/cloud_continue_tool_sft.py \
+PYTHONPATH=src python scripts/retail_bank/cloud_continue_tool_sft.py \
   --manifest data/banking-v3-tool-sft/manifest.json \
   --source-model-revision 085df3d089cfadd77424b548542da0390a54a23e \
   --base-revision 1504002f650e656a0a3789d99574df12e3e94ed0 \
@@ -133,22 +139,22 @@ PYTHONPATH=src python scripts/banking_v2/cloud_continue_tool_sft.py \
 Launch the paid continuation:
 
 ```bash
-scripts/banking_v2/run_remote_continuation_job.sh \
+scripts/retail_bank/run_remote_continuation_job.sh \
   SOURCE_COMMIT_40_HEX \
   183e7e1ed1aba9c3d7155e7b83b64dc854935055 \
   085df3d089cfadd77424b548542da0390a54a23e \
   600
 ```
 
-The wrapper mounts the same durable bucket and writes `/data/retail-bank-agent-9b-continuation-${SOURCE_COMMIT:0:8}-${SOURCE_MODEL_REVISION:0:8}`. The job secret remains `HF_TOKEN`. The remote worker requires `RETAIL_BANK_ALLOW_REMOTE_CONTINUATION_SFT=banking-v3-continuation-sft`, which [`hf_job_continue_tool_sft.py`](../scripts/banking_v2/hf_job_continue_tool_sft.py) sets inside the job.
+The wrapper mounts the same durable bucket and writes `/data/retail-bank-agent-9b-continuation-${SOURCE_COMMIT:0:8}-${SOURCE_MODEL_REVISION:0:8}`. The job secret remains `HF_TOKEN`. The remote worker requires `RETAIL_BANK_ALLOW_REMOTE_CONTINUATION_SFT=banking-v3-continuation-sft`, which [`hf_job_continue_tool_sft.py`](../scripts/retail_bank/hf_job_continue_tool_sft.py) sets inside the job.
 
 ## Remerge and Merge Parity
 
 The release path keeps the adapter and the merged root checkpoint separate:
 
-- [`scripts/banking_v2/hf_job_remerge_tool_sft.py`](../scripts/banking_v2/hf_job_remerge_tool_sft.py) rebuilds a merged FP16 checkpoint from the adapter and pinned Granite base.
-- [`scripts/banking_v2/hf_job_merge_parity.py`](../scripts/banking_v2/hf_job_merge_parity.py) compares adapter-vs-merged logits and deterministic generations on eight prompts.
-- [`scripts/banking_v2/hf_job_finalize_tool_sft.py`](../scripts/banking_v2/hf_job_finalize_tool_sft.py) validates the parity report and publishes allowlisted files.
+- [`scripts/retail_bank/hf_job_remerge_tool_sft.py`](../scripts/retail_bank/hf_job_remerge_tool_sft.py) rebuilds a merged FP16 checkpoint from the adapter and pinned Granite base.
+- [`scripts/retail_bank/hf_job_merge_parity.py`](../scripts/retail_bank/hf_job_merge_parity.py) compares adapter-vs-merged logits and deterministic generations on eight prompts.
+- [`scripts/retail_bank/hf_job_finalize_tool_sft.py`](../scripts/retail_bank/hf_job_finalize_tool_sft.py) validates the parity report and publishes allowlisted files.
 
 The finalizer gate, covered by [`tests/test_banking_tool_sft_release.py`](../tests/test_banking_tool_sft_release.py), requires:
 
@@ -165,10 +171,10 @@ The release model card records the accepted FP16-native continuation values: `8/
 
 ## Export Recovery
 
-Use export recovery when continuation training completed and wrote a good adapter to the bucket, but publication or final export failed. Recovery is export-only: it does not call `trainer.train`. The launcher is [`scripts/banking_v2/run_remote_continuation_export_recovery.sh`](../scripts/banking_v2/run_remote_continuation_export_recovery.sh), the job bootstrap is [`scripts/banking_v2/hf_job_recover_continuation_export.py`](../scripts/banking_v2/hf_job_recover_continuation_export.py), and the recovery worker is [`scripts/banking_v2/cloud_recover_continuation_export.py`](../scripts/banking_v2/cloud_recover_continuation_export.py).
+Use export recovery when continuation training completed and wrote a good adapter to the bucket, but publication or final export failed. Recovery is export-only: it does not call `trainer.train`. The launcher is [`scripts/retail_bank/run_remote_continuation_export_recovery.sh`](../scripts/retail_bank/run_remote_continuation_export_recovery.sh), the job bootstrap is [`scripts/retail_bank/hf_job_recover_continuation_export.py`](../scripts/retail_bank/hf_job_recover_continuation_export.py), and the recovery worker is [`scripts/retail_bank/cloud_recover_continuation_export.py`](../scripts/retail_bank/cloud_recover_continuation_export.py).
 
 ```bash
-scripts/banking_v2/run_remote_continuation_export_recovery.sh \
+scripts/retail_bank/run_remote_continuation_export_recovery.sh \
   RECOVERY_SOURCE_COMMIT_40_HEX \
   TRAINING_SOURCE_COMMIT_40_HEX \
   183e7e1ed1aba9c3d7155e7b83b64dc854935055 \

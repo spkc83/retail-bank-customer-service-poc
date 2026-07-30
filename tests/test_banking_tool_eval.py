@@ -270,7 +270,7 @@ def test_cli_dry_run_writes_json_report(tmp_path: Path) -> None:
     completed = subprocess.run(
         [
             sys.executable,
-            "scripts/banking_v2/evaluate_tool_model.py",
+            "scripts/retail_bank/evaluate_tool_model.py",
             "--dry-run",
             "--output",
             str(output_path),

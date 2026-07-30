@@ -64,17 +64,17 @@ This map links the current active retail-bank agent workflow to repo files.
 
 | Path | Purpose |
 | --- | --- |
-| [`../../scripts/banking_v2/prepare_tool_sft_data.py`](../../scripts/banking_v2/prepare_tool_sft_data.py) | CLI wrapper for tool-use SFT data preparation. |
-| [`../../scripts/banking_v2/prepare_dual_head_router_data.py`](../../scripts/banking_v2/prepare_dual_head_router_data.py) | CLI for governed Banking77 and CLINC150 router data preparation. |
-| [`../../scripts/banking_v2/train_dual_head_router.py`](../../scripts/banking_v2/train_dual_head_router.py) | Router train/calibrate/evaluate/publish script. |
-| [`../../scripts/banking_v2/cloud_train_tool_sft.py`](../../scripts/banking_v2/cloud_train_tool_sft.py) | Guarded local/remote Granite tool-SFT worker. |
-| [`../../scripts/banking_v2/hf_job_tool_sft.py`](../../scripts/banking_v2/hf_job_tool_sft.py) | Hugging Face Jobs bootstrap for paid Granite SFT. |
-| [`../../scripts/banking_v2/run_remote_training_job.sh`](../../scripts/banking_v2/run_remote_training_job.sh) | Paid Granite training job launcher. |
-| [`../../scripts/banking_v2/cloud_generate_tool_eval.py`](../../scripts/banking_v2/cloud_generate_tool_eval.py) | Frozen prediction generation and scoring worker. |
-| [`../../scripts/banking_v2/hf_job_tool_eval.py`](../../scripts/banking_v2/hf_job_tool_eval.py) | Hugging Face Jobs bootstrap for paid frozen eval. |
-| [`../../scripts/banking_v2/run_remote_tool_eval_job.sh`](../../scripts/banking_v2/run_remote_tool_eval_job.sh) | Paid frozen eval job launcher. |
-| [`../../scripts/banking_v2/hf_job_remerge_tool_sft.py`](../../scripts/banking_v2/hf_job_remerge_tool_sft.py) | Merge recovery helper used by release validation. |
-| [`../../scripts/banking_v2/hf_job_merge_parity.py`](../../scripts/banking_v2/hf_job_merge_parity.py) | Merge parity helper. |
+| [`../../scripts/retail_bank/prepare_tool_sft_data.py`](../../scripts/retail_bank/prepare_tool_sft_data.py) | CLI wrapper for tool-use SFT data preparation. |
+| [`../../scripts/retail_bank/prepare_dual_head_router_data.py`](../../scripts/retail_bank/prepare_dual_head_router_data.py) | CLI for governed Banking77 and CLINC150 router data preparation. |
+| [`../../scripts/retail_bank/train_dual_head_router.py`](../../scripts/retail_bank/train_dual_head_router.py) | Router train/calibrate/evaluate/publish script. |
+| [`../../scripts/retail_bank/cloud_train_tool_sft.py`](../../scripts/retail_bank/cloud_train_tool_sft.py) | Guarded local/remote Granite tool-SFT worker. |
+| [`../../scripts/retail_bank/hf_job_tool_sft.py`](../../scripts/retail_bank/hf_job_tool_sft.py) | Hugging Face Jobs bootstrap for paid Granite SFT. |
+| [`../../scripts/retail_bank/run_remote_training_job.sh`](../../scripts/retail_bank/run_remote_training_job.sh) | Paid Granite training job launcher. |
+| [`../../scripts/retail_bank/cloud_generate_tool_eval.py`](../../scripts/retail_bank/cloud_generate_tool_eval.py) | Frozen prediction generation and scoring worker. |
+| [`../../scripts/retail_bank/hf_job_tool_eval.py`](../../scripts/retail_bank/hf_job_tool_eval.py) | Hugging Face Jobs bootstrap for paid frozen eval. |
+| [`../../scripts/retail_bank/run_remote_tool_eval_job.sh`](../../scripts/retail_bank/run_remote_tool_eval_job.sh) | Paid frozen eval job launcher. |
+| [`../../scripts/retail_bank/hf_job_remerge_tool_sft.py`](../../scripts/retail_bank/hf_job_remerge_tool_sft.py) | Merge recovery helper used by release validation. |
+| [`../../scripts/retail_bank/hf_job_merge_parity.py`](../../scripts/retail_bank/hf_job_merge_parity.py) | Merge parity helper. |
 
 ## POC
 

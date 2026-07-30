@@ -8,11 +8,11 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-WORKER_PATH = Path("scripts/banking_v2/cloud_recover_continuation_export.py")
-REMERGE_PATH = Path("scripts/banking_v2/hf_job_remerge_tool_sft.py")
-JOB_PATH = Path("scripts/banking_v2/hf_job_recover_continuation_export.py")
+WORKER_PATH = Path("scripts/retail_bank/cloud_recover_continuation_export.py")
+REMERGE_PATH = Path("scripts/retail_bank/hf_job_remerge_tool_sft.py")
+JOB_PATH = Path("scripts/retail_bank/hf_job_recover_continuation_export.py")
 LAUNCHER_PATH = Path(
-    "scripts/banking_v2/run_remote_continuation_export_recovery.sh"
+    "scripts/retail_bank/run_remote_continuation_export_recovery.sh"
 )
 
 
@@ -104,6 +104,9 @@ def test_recovery_launcher_is_export_only_and_capped() -> None:
     assert '--selected-adapter-subdir "$selected_adapter_subdir"' in launcher
     assert '--selected-step "$selected_step"' in launcher
     assert 'output_root="$6"' in launcher
+    assert "/scripts/retail_bank/hf_job_recover_continuation_export.py" in launcher
+    assert "/scripts/banking_v2/hf_job_recover_continuation_export.py" in launcher
+    assert 'script_url="$legacy_script_url"' in launcher
 
 
 def test_recovery_rejects_symbolic_revisions() -> None:

@@ -14,7 +14,7 @@ from model_service import MODEL_TOOLS  # type: ignore[import-not-found]
 
 from hello_slm.banking_tool_sft_data import public_tool_manifest
 
-WORKER_PATH = Path("scripts/banking_v2/cloud_train_tool_sft.py")
+WORKER_PATH = Path("scripts/retail_bank/cloud_train_tool_sft.py")
 
 
 def _load_worker() -> ModuleType:
@@ -171,7 +171,7 @@ def test_tiny_smoke_cli_writes_checkpoint_and_parity_metadata(tmp_path: Path) ->
     result = subprocess.run(
         [
             sys.executable,
-            "scripts/banking_v2/cloud_train_tool_sft.py",
+            "scripts/retail_bank/cloud_train_tool_sft.py",
             "--run-tiny-smoke",
             "--output-dir",
             str(tmp_path / "worker"),
@@ -200,7 +200,7 @@ def test_tiny_smoke_cli_writes_checkpoint_and_parity_metadata(tmp_path: Path) ->
 
 def test_worker_cli_default_is_dry_run() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts/banking_v2/cloud_train_tool_sft.py"],
+        [sys.executable, "scripts/retail_bank/cloud_train_tool_sft.py"],
         check=True,
         text=True,
         capture_output=True,

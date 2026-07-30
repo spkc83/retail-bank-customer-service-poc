@@ -6,7 +6,7 @@ from types import ModuleType
 
 
 def load_training_module() -> ModuleType:
-    path = Path("scripts/banking_v2/train_dual_head_router.py")
+    path = Path("scripts/retail_bank/train_dual_head_router.py")
     spec = importlib.util.spec_from_file_location("banking_router_training", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

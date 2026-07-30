@@ -81,7 +81,7 @@ def main() -> int:
             sys.executable,
             str(
                 source_root
-                / "scripts/banking_v2/cloud_recover_continuation_export.py"
+                / "scripts/retail_bank/cloud_recover_continuation_export.py"
             ),
             "--output-root",
             args.output_root,

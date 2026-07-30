@@ -10,7 +10,8 @@ source_commit="$1"
 dataset_revision="$2"
 source_model_revision="$3"
 max_steps="${4:-600}"
-script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${source_commit}/scripts/banking_v2/hf_job_continue_tool_sft.py"
+script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${source_commit}/scripts/retail_bank/hf_job_continue_tool_sft.py"
+legacy_script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${source_commit}/scripts/banking_v2/hf_job_continue_tool_sft.py"
 
 if [[ ! "$source_commit" =~ ^[0-9a-f]{40}$ ]]; then
   echo "SOURCE_COMMIT must be the exact 40-character lowercase Git commit." >&2
@@ -27,7 +28,10 @@ if [[ ! "$source_model_revision" =~ ^[0-9a-f]{40}$ ]]; then
   exit 2
 fi
 
-curl --fail --silent --show-error --head "$script_url" >/dev/null
+if ! curl --fail --silent --head "$script_url" >/dev/null 2>&1; then
+  curl --fail --silent --show-error --head "$legacy_script_url" >/dev/null
+  script_url="$legacy_script_url"
+fi
 
 job_args=(
   --flavor rtx-pro-6000

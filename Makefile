@@ -4,16 +4,16 @@ install:
 	python -m pip install -e '.[dev]'
 
 prepare-data:
-	PYTHONPATH=src python scripts/banking_v2/prepare_tool_sft_data.py \
+	PYTHONPATH=src python scripts/retail_bank/prepare_tool_sft_data.py \
 		--output-dir data/banking-v3-tool-sft \
 		--pilot-count 5000
 
 model-plan:
-	PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
+	PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
 		--manifest data/banking-v3-tool-sft/manifest.json
 
 tiny-smoke:
-	PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
+	PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
 		--run-tiny-smoke \
 		--family granite \
 		--max-steps 1 \

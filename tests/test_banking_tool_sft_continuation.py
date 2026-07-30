@@ -8,9 +8,9 @@ from types import ModuleType
 
 import pytest
 
-WORKER_PATH = Path("scripts/banking_v2/cloud_continue_tool_sft.py")
-JOB_PATH = Path("scripts/banking_v2/hf_job_continue_tool_sft.py")
-LAUNCHER_PATH = Path("scripts/banking_v2/run_remote_continuation_job.sh")
+WORKER_PATH = Path("scripts/retail_bank/cloud_continue_tool_sft.py")
+JOB_PATH = Path("scripts/retail_bank/hf_job_continue_tool_sft.py")
+LAUNCHER_PATH = Path("scripts/retail_bank/run_remote_continuation_job.sh")
 
 
 def _load_worker() -> ModuleType:
@@ -219,6 +219,9 @@ def test_remote_continuation_launcher_mounts_durable_bucket_and_uses_five_hour_c
         "${source_model_revision:0:8}"
     ) in launcher
     assert "hf jobs uv run" in launcher
+    assert "/scripts/retail_bank/hf_job_continue_tool_sft.py" in launcher
+    assert "/scripts/banking_v2/hf_job_continue_tool_sft.py" in launcher
+    assert 'script_url="$legacy_script_url"' in launcher
     assert "rm " not in launcher
 
 

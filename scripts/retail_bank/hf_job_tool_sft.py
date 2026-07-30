@@ -95,7 +95,7 @@ def main() -> int:
         }
         command = [
             sys.executable,
-            str(source_root / "scripts/banking_v2/cloud_train_tool_sft.py"),
+            str(source_root / "scripts/retail_bank/cloud_train_tool_sft.py"),
             "--execute-remote",
             "--allow-remote-execution",
             "--push-to-hub",

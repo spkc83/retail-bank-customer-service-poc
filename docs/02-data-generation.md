@@ -19,7 +19,7 @@ Main files:
 | File | Purpose |
 | --- | --- |
 | [../src/hello_slm/banking_tool_sft_data.py](../src/hello_slm/banking_tool_sft_data.py) | Generates records, validates invariants, writes manifests and cards. |
-| [../scripts/banking_v2/prepare_tool_sft_data.py](../scripts/banking_v2/prepare_tool_sft_data.py) | CLI wrapper around the generator. |
+| [../scripts/retail_bank/prepare_tool_sft_data.py](../scripts/retail_bank/prepare_tool_sft_data.py) | CLI wrapper around the generator. |
 | [../poc/retail-bank-customer-service-poc/synthetic_bank.json](../poc/retail-bank-customer-service-poc/synthetic_bank.json) | Seed customer/account/card/transaction/transfer/service-case state. |
 | [../data/banking-v3-tool-sft/manifest.json](../data/banking-v3-tool-sft/manifest.json) | Local generated split manifest. |
 | [../data/banking-v3-tool-sft/DATA_CARD.md](../data/banking-v3-tool-sft/DATA_CARD.md) | Local generated dataset card. |
@@ -116,7 +116,7 @@ files, checks record counts, and validates all records.
 From the repository root:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/prepare_tool_sft_data.py \
+PYTHONPATH=src python scripts/retail_bank/prepare_tool_sft_data.py \
   --output-dir /tmp/retail-bank-tool-sft-check \
   --pilot-count 9000 \
   --split-seed 711
@@ -135,7 +135,7 @@ The command writes:
 Use a smaller pilot when testing the generator quickly:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/prepare_tool_sft_data.py \
+PYTHONPATH=src python scripts/retail_bank/prepare_tool_sft_data.py \
   --output-dir /tmp/retail-bank-tool-sft-smoke \
   --pilot-count 1200
 ```
@@ -150,7 +150,7 @@ copy.
 The generator can export teacher-realization requests:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/prepare_tool_sft_data.py \
+PYTHONPATH=src python scripts/retail_bank/prepare_tool_sft_data.py \
   --output-dir /tmp/retail-bank-tool-sft-teacher-check \
   --pilot-count 1200 \
   --export-teacher-requests /tmp/teacher-requests.jsonl
@@ -166,7 +166,7 @@ experiment with one, the realizer requires an explicitly selected model and an
 immutable revision:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/realize_tool_sft_teacher.py \
+PYTHONPATH=src python scripts/retail_bank/realize_tool_sft_teacher.py \
   --input-requests /tmp/teacher-requests.jsonl \
   --output-responses /tmp/teacher-responses.jsonl \
   --model MODEL_REPOSITORY \
@@ -185,7 +185,7 @@ Main files:
 | File | Purpose |
 | --- | --- |
 | [../src/hello_slm/banking_router_data.py](../src/hello_slm/banking_router_data.py) | Builds in-domain/OOD and Banking77 intent examples. |
-| [../scripts/banking_v2/prepare_dual_head_router_data.py](../scripts/banking_v2/prepare_dual_head_router_data.py) | Downloads pinned sources and writes governed splits. |
+| [../scripts/retail_bank/prepare_dual_head_router_data.py](../scripts/retail_bank/prepare_dual_head_router_data.py) | Downloads pinned sources and writes governed splits. |
 | [../data/banking-router-v1/manifest.json](../data/banking-router-v1/manifest.json) | Local generated router-data manifest. |
 | [../data/sources/banking-router-v1.lock.json](../data/sources/banking-router-v1.lock.json) | Tracked release lock for split digests. |
 | [../data_cards/retail-bank-router-training-data.md](../data_cards/retail-bank-router-training-data.md) | Public router dataset card. |
@@ -235,7 +235,7 @@ The POC router adds recent assistant context for ambiguous short follow-ups in
 From the repository root:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/prepare_dual_head_router_data.py \
+PYTHONPATH=src python scripts/retail_bank/prepare_dual_head_router_data.py \
   --output-dir /tmp/retail-bank-router-data-check \
   --source-lock /tmp/retail-bank-router-data-check/SOURCE_LOCK.json \
   --expected-release-lock data/sources/banking-router-v1.lock.json

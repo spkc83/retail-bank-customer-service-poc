@@ -6,9 +6,9 @@ This guide covers the active frozen evaluation for the Granite PEFT model. Evalu
 
 | Artifact | Value | Owner |
 | --- | --- | --- |
-| Model repo | `spkc83/retail-bank-agent-9b` | [`scripts/banking_v2/hf_job_tool_eval.py`](../scripts/banking_v2/hf_job_tool_eval.py) |
+| Model repo | `spkc83/retail-bank-agent-9b` | [`scripts/retail_bank/hf_job_tool_eval.py`](../scripts/retail_bank/hf_job_tool_eval.py) |
 | Model revision | `085df3d089cfadd77424b548542da0390a54a23e` | [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md) |
-| Dataset repo | `spkc83/retail-bank-agent-sft` | [`scripts/banking_v2/hf_job_tool_eval.py`](../scripts/banking_v2/hf_job_tool_eval.py) |
+| Dataset repo | `spkc83/retail-bank-agent-sft` | [`scripts/retail_bank/hf_job_tool_eval.py`](../scripts/retail_bank/hf_job_tool_eval.py) |
 | Dataset revision | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` | [`data_cards/retail-bank-agent-sft.md`](../data_cards/retail-bank-agent-sft.md) |
 | Frozen split | `test`, 1,347 records | [`data/banking-v3-tool-sft/preparation-report.json`](../data/banking-v3-tool-sft/preparation-report.json) |
 | Evaluation job | `spkc83/6a6a6c7cb36a6516e96a0ac4` | [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md) |
@@ -18,17 +18,17 @@ This guide covers the active frozen evaluation for the Granite PEFT model. Evalu
 
 | Component | Purpose |
 | --- | --- |
-| [`scripts/banking_v2/evaluate_tool_model.py`](../scripts/banking_v2/evaluate_tool_model.py) | Local static evaluator CLI wrapper |
+| [`scripts/retail_bank/evaluate_tool_model.py`](../scripts/retail_bank/evaluate_tool_model.py) | Local static evaluator CLI wrapper |
 | [`src/hello_slm/banking_tool_eval.py`](../src/hello_slm/banking_tool_eval.py) | Metrics, parser adapter, dry-run fixture, report writer |
-| [`scripts/banking_v2/cloud_generate_tool_eval.py`](../scripts/banking_v2/cloud_generate_tool_eval.py) | GPU prediction generator and scorer |
-| [`scripts/banking_v2/hf_job_tool_eval.py`](../scripts/banking_v2/hf_job_tool_eval.py) | Pinned Hugging Face Jobs bootstrap |
-| [`scripts/banking_v2/run_remote_tool_eval_job.sh`](../scripts/banking_v2/run_remote_tool_eval_job.sh) | Paid HF Jobs launcher |
+| [`scripts/retail_bank/cloud_generate_tool_eval.py`](../scripts/retail_bank/cloud_generate_tool_eval.py) | GPU prediction generator and scorer |
+| [`scripts/retail_bank/hf_job_tool_eval.py`](../scripts/retail_bank/hf_job_tool_eval.py) | Pinned Hugging Face Jobs bootstrap |
+| [`scripts/retail_bank/run_remote_tool_eval_job.sh`](../scripts/retail_bank/run_remote_tool_eval_job.sh) | Paid HF Jobs launcher |
 | [`tests/test_banking_tool_eval.py`](../tests/test_banking_tool_eval.py) | Metric and parser scoring tests |
 | [`tests/test_banking_tool_eval_runner.py`](../tests/test_banking_tool_eval_runner.py) | Two-phase generation, resume, and job wrapper tests |
 
 ## Two-Phase Contract
 
-[`cloud_generate_tool_eval.py`](../scripts/banking_v2/cloud_generate_tool_eval.py) runs deterministic generation with the Granite tagged-JSON tool adapter.
+[`cloud_generate_tool_eval.py`](../scripts/retail_bank/cloud_generate_tool_eval.py) runs deterministic generation with the Granite tagged-JSON tool adapter.
 
 Phase 1 asks the model for the first assistant response:
 
@@ -56,7 +56,7 @@ The runner resumes safely from an existing predictions JSONL and skips completed
 Use the static dry run to verify the scorer without GPU or Hub access:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/evaluate_tool_model.py \
+PYTHONPATH=src python scripts/retail_bank/evaluate_tool_model.py \
   --dry-run \
   --checkpoint-revision local-docs-smoke \
   --output /tmp/hello-slm-tool-eval-dry-run.json
@@ -76,7 +76,7 @@ python -m pytest -q tests/test_banking_tool_eval.py \
 Use the generator directly only when the machine has appropriate GPU memory and Hub access:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/cloud_generate_tool_eval.py \
+PYTHONPATH=src python scripts/retail_bank/cloud_generate_tool_eval.py \
   --model-repo spkc83/retail-bank-agent-9b \
   --model-revision 085df3d089cfadd77424b548542da0390a54a23e \
   --dataset-repo spkc83/retail-bank-agent-sft \
@@ -103,7 +103,7 @@ Expected local outputs use the slug `{model_revision[:12]}-{dataset_revision[:12
 
 ## Paid HF Jobs Evaluation
 
-The paid launcher is [`scripts/banking_v2/run_remote_tool_eval_job.sh`](../scripts/banking_v2/run_remote_tool_eval_job.sh). It validates exact source, model, and dataset revisions, checks that the pinned bootstrap URL exists, then launches:
+The paid launcher is [`scripts/retail_bank/run_remote_tool_eval_job.sh`](../scripts/retail_bank/run_remote_tool_eval_job.sh). It validates exact source, model, and dataset revisions, checks that the pinned bootstrap URL exists, then launches:
 
 - `hf jobs uv run`;
 - `--flavor rtx-pro-6000`;
@@ -113,7 +113,7 @@ The paid launcher is [`scripts/banking_v2/run_remote_tool_eval_job.sh`](../scrip
 - labels `project=retail-bank-agent-v3-eval` and `model=${MODEL_REVISION:0:8}`.
 
 ```bash
-bash scripts/banking_v2/run_remote_tool_eval_job.sh \
+bash scripts/retail_bank/run_remote_tool_eval_job.sh \
   SOURCE_COMMIT_40_HEX \
   085df3d089cfadd77424b548542da0390a54a23e \
   183e7e1ed1aba9c3d7155e7b83b64dc854935055
@@ -121,11 +121,11 @@ bash scripts/banking_v2/run_remote_tool_eval_job.sh \
 
 The `HF_TOKEN` secret must read the model and dataset and write evaluation artifacts to `spkc83/retail-bank-agent-9b`. The launcher writes to `/data/retail-bank-agent-eval-${MODEL_REVISION:0:8}-${DATASET_REVISION:0:8}` in the durable bucket.
 
-[`hf_job_tool_eval.py`](../scripts/banking_v2/hf_job_tool_eval.py) pins the runtime packages in its PEP 723 header, downloads the exact source commit, sets `PYTHONPATH`, exports revision metadata, and invokes [`cloud_generate_tool_eval.py`](../scripts/banking_v2/cloud_generate_tool_eval.py) with `--dtype fp16 --push-to-hub`.
+[`hf_job_tool_eval.py`](../scripts/retail_bank/hf_job_tool_eval.py) pins the runtime packages in its PEP 723 header, downloads the exact source commit, sets `PYTHONPATH`, exports revision metadata, and invokes [`cloud_generate_tool_eval.py`](../scripts/retail_bank/cloud_generate_tool_eval.py) with `--dtype fp16 --push-to-hub`.
 
 ## Published Outputs
 
-When `--push-to-hub` is set, [`publish_eval_artifacts`](../scripts/banking_v2/cloud_generate_tool_eval.py) uploads predictions, metadata, and report to:
+When `--push-to-hub` is set, [`publish_eval_artifacts`](../scripts/retail_bank/cloud_generate_tool_eval.py) uploads predictions, metadata, and report to:
 
 ```text
 evaluation/{model_revision[:12]}-{dataset_revision[:12]}/
@@ -170,7 +170,7 @@ The metadata records:
 | In-domain false refusal | supported turn wrongly refused |
 | OOD false accept | OOD turn generated banking tool calls |
 
-The release gates are enforced by the scorer and runner tests around [`src/hello_slm/banking_tool_eval.py`](../src/hello_slm/banking_tool_eval.py) and [`scripts/banking_v2/cloud_generate_tool_eval.py`](../scripts/banking_v2/cloud_generate_tool_eval.py). A candidate cannot pass by averaged score if a hard gate fails.
+The release gates are enforced by the scorer and runner tests around [`src/hello_slm/banking_tool_eval.py`](../src/hello_slm/banking_tool_eval.py) and [`scripts/retail_bank/cloud_generate_tool_eval.py`](../scripts/retail_bank/cloud_generate_tool_eval.py). A candidate cannot pass by averaged score if a hard gate fails.
 
 The released frozen evaluation passed:
 

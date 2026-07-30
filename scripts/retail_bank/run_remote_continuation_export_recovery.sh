@@ -16,7 +16,8 @@ training_job="$5"
 output_root="$6"
 selected_step="$7"
 selected_adapter_subdir="${8:-checkpoint-${selected_step}}"
-script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${recovery_source_commit}/scripts/banking_v2/hf_job_recover_continuation_export.py"
+script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${recovery_source_commit}/scripts/retail_bank/hf_job_recover_continuation_export.py"
+legacy_script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${recovery_source_commit}/scripts/banking_v2/hf_job_recover_continuation_export.py"
 
 for revision in "$recovery_source_commit" "$training_source_commit" "$dataset_revision" "$parent_model_revision"; do
   if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
@@ -35,7 +36,10 @@ if [[ ! "$selected_step" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
-curl --fail --silent --show-error --head "$script_url" >/dev/null
+if ! curl --fail --silent --head "$script_url" >/dev/null 2>&1; then
+  curl --fail --silent --show-error --head "$legacy_script_url" >/dev/null
+  script_url="$legacy_script_url"
+fi
 
 hf jobs uv run \
   --flavor rtx-pro-6000 \

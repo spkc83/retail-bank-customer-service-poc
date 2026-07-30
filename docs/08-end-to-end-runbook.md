@@ -60,7 +60,7 @@ If a command fails, fix that stage before moving downstream.
 ## 3. Prepare Router Data
 
 The router data script is
-[`scripts/banking_v2/prepare_dual_head_router_data.py`](../scripts/banking_v2/prepare_dual_head_router_data.py).
+[`scripts/retail_bank/prepare_dual_head_router_data.py`](../scripts/retail_bank/prepare_dual_head_router_data.py).
 It downloads governed Banking77 and CLINC150 sources, verifies source digests,
 builds train/validation/test splits, and checks the prepared split hashes
 against [`data/sources/banking-router-v1.lock.json`](../data/sources/banking-router-v1.lock.json).
@@ -68,7 +68,7 @@ against [`data/sources/banking-router-v1.lock.json`](../data/sources/banking-rou
 Run:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/prepare_dual_head_router_data.py \
+PYTHONPATH=src python scripts/retail_bank/prepare_dual_head_router_data.py \
   --output-dir data/banking-router-v1
 ```
 
@@ -94,7 +94,7 @@ The published router dataset revision is
 ## 4. Train and Publish the Router
 
 The router trainer is
-[`scripts/banking_v2/train_dual_head_router.py`](../scripts/banking_v2/train_dual_head_router.py).
+[`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py).
 It loads the published governed router dataset revision
 `54ff186a03501d76dc643dbed3d82729267ce811`, trains a shared DistilBERT encoder
 with domain and intent heads, calibrates the domain threshold, checks release
@@ -104,7 +104,7 @@ This step writes to Hugging Face Hub and requires `HF_TOKEN`:
 
 ```bash
 export HF_TOKEN=...
-uv run scripts/banking_v2/train_dual_head_router.py
+uv run scripts/retail_bank/train_dual_head_router.py
 ```
 
 The script has no dry-run CLI mode. Do not run it unless publishing the router
@@ -124,14 +124,14 @@ The POC loads and verifies this artifact in
 ## 5. Prepare Tool-Use SFT Data
 
 The SFT data script is
-[`scripts/banking_v2/prepare_tool_sft_data.py`](../scripts/banking_v2/prepare_tool_sft_data.py),
+[`scripts/retail_bank/prepare_tool_sft_data.py`](../scripts/retail_bank/prepare_tool_sft_data.py),
 which delegates to
 [`src/hello_slm/banking_tool_sft_data.py`](../src/hello_slm/banking_tool_sft_data.py).
 
 Run:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/prepare_tool_sft_data.py \
+PYTHONPATH=src python scripts/retail_bank/prepare_tool_sft_data.py \
   --output-dir data/banking-v3-tool-sft \
   --pilot-count 9000 \
   --split-seed 711
@@ -163,13 +163,13 @@ The published SFT dataset revision is
 The active training config is
 [`configs/banking-tool-sft-granite.toml`](../configs/banking-tool-sft-granite.toml).
 The guarded worker is
-[`scripts/banking_v2/cloud_train_tool_sft.py`](../scripts/banking_v2/cloud_train_tool_sft.py).
+[`scripts/retail_bank/cloud_train_tool_sft.py`](../scripts/retail_bank/cloud_train_tool_sft.py).
 
 Dry-run inspection does not start a paid job, download 9B weights, merge a
 checkpoint, or push to the Hub:
 
 ```bash
-PYTHONPATH=src python scripts/banking_v2/cloud_train_tool_sft.py \
+PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
   --manifest data/banking-v3-tool-sft/manifest.json
 ```
 
@@ -195,12 +195,12 @@ This is a paid Hugging Face Jobs step. Run it only after explicit authorization,
 valid `HF_TOKEN`, and budget approval.
 
 Launcher:
-[`scripts/banking_v2/run_remote_training_job.sh`](../scripts/banking_v2/run_remote_training_job.sh)
+[`scripts/retail_bank/run_remote_training_job.sh`](../scripts/retail_bank/run_remote_training_job.sh)
 
 Command shape:
 
 ```bash
-scripts/banking_v2/run_remote_training_job.sh \
+scripts/retail_bank/run_remote_training_job.sh \
   "$(git rev-parse HEAD)" \
   183e7e1ed1aba9c3d7155e7b83b64dc854935055
 ```
@@ -213,7 +213,7 @@ GitHub commit, and then calls `hf jobs uv run` with:
 - timeout: `5h`
 - secret: `HF_TOKEN`
 - volume: `hf://buckets/spkc83/jobs-artifacts:/data`
-- job script: [`hf_job_tool_sft.py`](../scripts/banking_v2/hf_job_tool_sft.py)
+- job script: [`hf_job_tool_sft.py`](../scripts/retail_bank/hf_job_tool_sft.py)
 
 Inside the job, the worker trains BF16 LoRA on Granite, checkpoints, optionally
 merges the adapter, verifies reload behavior, and pushes only because the job
@@ -235,12 +235,12 @@ This is also a paid Hugging Face Jobs step. Run it only after explicit
 authorization, valid `HF_TOKEN`, and budget approval.
 
 Launcher:
-[`scripts/banking_v2/run_remote_tool_eval_job.sh`](../scripts/banking_v2/run_remote_tool_eval_job.sh)
+[`scripts/retail_bank/run_remote_tool_eval_job.sh`](../scripts/retail_bank/run_remote_tool_eval_job.sh)
 
 Command shape for the released model:
 
 ```bash
-bash scripts/banking_v2/run_remote_tool_eval_job.sh \
+bash scripts/retail_bank/run_remote_tool_eval_job.sh \
   "$(git rev-parse HEAD)" \
   085df3d089cfadd77424b548542da0390a54a23e \
   183e7e1ed1aba9c3d7155e7b83b64dc854935055
@@ -254,10 +254,10 @@ run` with:
 - timeout: `2h`
 - secret: `HF_TOKEN`
 - volume: `hf://buckets/spkc83/jobs-artifacts:/data`
-- job script: [`hf_job_tool_eval.py`](../scripts/banking_v2/hf_job_tool_eval.py)
+- job script: [`hf_job_tool_eval.py`](../scripts/retail_bank/hf_job_tool_eval.py)
 
 The eval worker
-[`cloud_generate_tool_eval.py`](../scripts/banking_v2/cloud_generate_tool_eval.py)
+[`cloud_generate_tool_eval.py`](../scripts/retail_bank/cloud_generate_tool_eval.py)
 generates deterministic predictions against the frozen test split and scores
 them with [`src/hello_slm/banking_tool_eval.py`](../src/hello_slm/banking_tool_eval.py).
 
