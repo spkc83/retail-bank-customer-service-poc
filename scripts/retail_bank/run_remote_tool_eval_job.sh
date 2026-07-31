@@ -10,7 +10,6 @@ source_commit="$1"
 model_revision="$2"
 dataset_revision="$3"
 script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${source_commit}/scripts/retail_bank/hf_job_tool_eval.py"
-legacy_script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${source_commit}/scripts/banking_v2/hf_job_tool_eval.py"
 
 for revision_name in source_commit model_revision dataset_revision; do
   revision_value="${!revision_name}"
@@ -21,8 +20,8 @@ for revision_name in source_commit model_revision dataset_revision; do
 done
 
 if ! curl --fail --silent --head "$script_url" >/dev/null 2>&1; then
-  curl --fail --silent --show-error --head "$legacy_script_url" >/dev/null
-  script_url="$legacy_script_url"
+  echo "Could not resolve bootstrap script: ${script_url}" >&2
+  exit 2
 fi
 
 hf jobs uv run \

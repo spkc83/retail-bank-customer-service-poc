@@ -220,8 +220,8 @@ def test_remote_continuation_launcher_mounts_durable_bucket_and_uses_five_hour_c
     ) in launcher
     assert "hf jobs uv run" in launcher
     assert "/scripts/retail_bank/hf_job_continue_tool_sft.py" in launcher
-    assert "/scripts/banking_v2/hf_job_continue_tool_sft.py" in launcher
-    assert 'script_url="$legacy_script_url"' in launcher
+    assert "/scripts/banking_v2/hf_job_continue_tool_sft.py" not in launcher
+    assert 'script_url="$legacy_script_url"' not in launcher
     assert "rm " not in launcher
 
 

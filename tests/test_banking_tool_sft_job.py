@@ -65,6 +65,10 @@ def test_job_command_preserves_five_hour_internal_budget() -> None:
     assert '"--push-to-hub",' in source
     assert 'parser.add_argument("--resume-from")' in source
     assert 'command.extend(["--resume-from", args.resume_from])' in source
+    assert 'parser.add_argument("--learning-rate", type=float, default=1e-4)' in source
+    assert 'str(args.learning_rate)' in source
+    assert 'args.trackio_project' in source
+    assert 'args.trackio_run_name' in source
 
 
 def test_remote_launcher_mounts_durable_job_bucket() -> None:
@@ -73,13 +77,19 @@ def test_remote_launcher_mounts_durable_job_bucket() -> None:
     ).read_text(encoding="utf-8")
 
     assert "--volume hf://buckets/spkc83/jobs-artifacts:/data" in launcher
-    assert '--output-dir "/data/retail-bank-agent-9b-${source_commit:0:8}"' in launcher
+    assert (
+        'output_prefix="${OUTPUT_PREFIX:-/data/retail-bank-agent-9b-'
+        '${source_commit:0:8}}"' in launcher
+    )
     assert "must be the exact 40-character lowercase Git commit" in launcher
     assert "/scripts/retail_bank/hf_job_tool_sft.py" in launcher
-    assert "/scripts/banking_v2/hf_job_tool_sft.py" in launcher
+    assert "/scripts/banking_v2/hf_job_tool_sft.py" not in launcher
     assert 'if ! curl --fail --silent --head "$script_url"' in launcher
-    assert 'script_url="$legacy_script_url"' in launcher
+    assert 'script_url="$legacy_script_url"' not in launcher
     assert 'job_args+=(--resume-from "$resume_from")' in launcher
+    assert '--max-steps "$max_steps"' in launcher
+    assert '--learning-rate "$learning_rate"' in launcher
+    assert '--trackio-project "$trackio_project"' in launcher
 
 
 @pytest.mark.parametrize(
@@ -115,13 +125,11 @@ def test_remote_launcher_mounts_durable_job_bucket() -> None:
         ),
     ],
 )
-@pytest.mark.parametrize("available_path", ["current", "legacy"])
-def test_remote_launchers_resolve_current_and_pre_rename_bootstraps(
+def test_remote_launchers_resolve_current_bootstraps(
     tmp_path: Path,
     launcher: str,
     arguments: tuple[str, ...],
     bootstrap: str,
-    available_path: str,
 ) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -132,11 +140,7 @@ def test_remote_launchers_resolve_current_and_pre_rename_bootstraps(
         """#!/usr/bin/env bash
 url="${@: -1}"
 printf '%s\\n' "$url" >> "$CURL_LOG"
-if [[ "$MOCK_CURL_PATH" == "current" ]]; then
-  [[ "$url" == *"/scripts/retail_bank/"* ]]
-else
-  [[ "$url" == *"/scripts/banking_v2/"* ]]
-fi
+[[ "$url" == *"/scripts/retail_bank/"* ]]
 """,
         encoding="utf-8",
     )
@@ -154,7 +158,6 @@ printf '%s\\n' "$@" > "$HF_LOG"
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "CURL_LOG": str(curl_log),
         "HF_LOG": str(hf_log),
-        "MOCK_CURL_PATH": available_path,
     }
 
     subprocess.run(
@@ -165,14 +168,60 @@ printf '%s\\n' "$@" > "$HF_LOG"
 
     requested_urls = curl_log.read_text(encoding="utf-8").splitlines()
     submitted_args = hf_log.read_text(encoding="utf-8")
-    expected_segment = (
-        "/scripts/retail_bank/"
-        if available_path == "current"
-        else "/scripts/banking_v2/"
-    )
     assert requested_urls[0].endswith(f"/scripts/retail_bank/{bootstrap}")
-    assert len(requested_urls) == (1 if available_path == "current" else 2)
-    assert f"{expected_segment}{bootstrap}" in submitted_args
+    assert len(requested_urls) == 1
+    assert f"/scripts/retail_bank/{bootstrap}" in submitted_args
+
+
+def test_remote_training_launcher_forwards_v4_overrides(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    hf_log = tmp_path / "hf.log"
+    curl = bin_dir / "curl"
+    curl.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    curl.chmod(0o755)
+    hf = bin_dir / "hf"
+    hf.write_text(
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$HF_LOG\"\n",
+        encoding="utf-8",
+    )
+    hf.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HF_LOG": str(hf_log),
+        "DATASET_REPO": "spkc83/retail-bank-servicing-alignment-sft",
+        "BASE_MODEL": "spkc83/retail-bank-agent-9b",
+        "BASE_REVISION": "c" * 40,
+        "HF_HUB_DEST": "spkc83/retail-bank-servicing-agent-9b",
+        "MAX_STEPS": "500",
+        "LEARNING_RATE": "2e-5",
+        "CHECKPOINT_EVERY": "100",
+        "TRACKIO_PROJECT": "retail-bank-servicing-v4",
+    }
+
+    subprocess.run(
+        [
+            "bash",
+            "scripts/retail_bank/run_remote_training_job.sh",
+            "a" * 40,
+            "b" * 40,
+        ],
+        check=True,
+        env=env,
+    )
+
+    submitted_args = hf_log.read_text(encoding="utf-8")
+    for expected in (
+        "spkc83/retail-bank-servicing-alignment-sft",
+        "spkc83/retail-bank-agent-9b",
+        "spkc83/retail-bank-servicing-agent-9b",
+        "500",
+        "2e-5",
+        "100",
+        "retail-bank-servicing-v4",
+    ):
+        assert expected in submitted_args
 
 
 def test_post_training_evaluation_detaches_closed_trackio_callback() -> None:

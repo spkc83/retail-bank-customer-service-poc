@@ -66,16 +66,22 @@ If a command fails, fix that stage before moving downstream.
 ## 3. Prepare Router Data
 
 The router data script is
-[`scripts/retail_bank/prepare_dual_head_router_data.py`](../scripts/retail_bank/prepare_dual_head_router_data.py).
-It downloads governed Banking77 and CLINC150 sources, verifies source digests,
-builds train/validation/test splits, and checks the prepared split hashes
-against [`data/sources/banking-router-v1.lock.json`](../data/sources/banking-router-v1.lock.json).
+[`scripts/retail_bank/prepare_dual_head_router_data.py`](../scripts/retail_bank/prepare_dual_head_router_data.py) for the
+released v1 classifier, and [`scripts/retail_bank/prepare_conversation_router_data.py`](../scripts/retail_bank/prepare_conversation_router_data.py) for the
+v4 candidate history-aware router.
 
 Run:
 
 ```bash
 PYTHONPATH=src python scripts/retail_bank/prepare_dual_head_router_data.py \
   --output-dir data/banking-router-v1
+```
+
+Optional v4 candidate data preparation:
+
+```bash
+PYTHONPATH=src python scripts/retail_bank/prepare_conversation_router_data.py \
+  --output-dir data/banking-conversation-router-v4
 ```
 
 Expected local outputs:
@@ -115,6 +121,10 @@ uv run scripts/retail_bank/train_dual_head_router.py
 
 The script has no dry-run CLI mode. Do not run it unless publishing the router
 is intended.
+
+For the v4 branch, use `scripts/retail_bank/train_conversation_router.py` with
+`data/sources/banking-conversation-router-v4.lock.json` as the release lock and
+`scripts/retail_bank/train_conversation_router.py`/`prepare_conversation_router_data.py` as the training pair.
 
 Current released router:
 
@@ -194,6 +204,48 @@ The plan should show:
 
 For a local offline smoke path, use the worker's `--run-tiny-smoke` option. That
 path uses a small stand-in tokenizer/model path and does not launch a cloud job.
+
+### 6b. V4 Servicing-Alignment Continuation Candidate (9B start)
+
+The v4 candidate run starts from the released merged checkpoint and appends
+conversation-aligned records from `data/banking-servicing-alignment-v4`:
+
+```bash
+PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
+  --manifest data/banking-servicing-alignment-v4/manifest.json \
+  --base-model spkc83/retail-bank-agent-9b \
+  --base-revision 085df3d089cfadd77424b548542da0390a54a23e \
+  --family granite \
+  --hub-dest spkc83/retail-bank-servicing-agent-9b \
+  --learning-rate 2e-5 \
+  --max-steps 500 \
+  --max-train-seconds 14400 \
+  --dry-run
+```
+
+To launch this in HF Jobs on the same 5-hour RTX PRO 6000 path, set:
+
+```bash
+export BASE_MODEL=spkc83/retail-bank-agent-9b
+export BASE_REVISION=085df3d089cfadd77424b548542da0390a54a23e
+export CONFIRMATION_TOKEN=banking-v3-tool-sft
+export DATASET_REPO=spkc83/retail-bank-servicing-alignment-sft
+export HF_HUB_DEST=spkc83/retail-bank-servicing-agent-9b
+export MAX_STEPS=500
+export LEARNING_RATE=2e-5
+export CHECKPOINT_EVERY=100
+export TRACKIO_PROJECT=retail-bank-servicing-v4
+export PROJECT_LABEL=retail-bank-servicing-v4
+export OUTPUT_PREFIX=/data/retail-bank-servicing-agent-9b-v4
+scripts/retail_bank/run_remote_training_job.sh \
+  "$(git rev-parse HEAD)" \
+  DATASET_REVISION_40_HEX
+```
+
+This invokes `cloud_train_tool_sft.py` with a fresh LoRA over the released
+merged weights. It does not resume the retained v3 adapter or optimizer state.
+Then run the candidate through the frozen evaluator and promote only when every
+exact tool, response-path, grounding, and zero-error gate passes.
 
 ## 7. Paid Granite Training Job
 
@@ -328,6 +380,8 @@ Files to publish are under
 The Space card is
 [`poc/retail-bank-customer-service-poc/README.md`](../poc/retail-bank-customer-service-poc/README.md).
 
+Deployment is performed from the linked GitHub Space source repository (`github-poc` remote in this project). Keep it aligned with this branch and this exact checkout before publishing a deployment change.
+
 Before deployment:
 
 1. Run the POC tests with skip flags.
@@ -360,6 +414,11 @@ Run at least these live scenarios:
 - banking FAQ
 - out-of-domain prompt
 - multi-turn follow-up using previous context
+
+A live deployment should be treated as successful when both of these hold:
+
+- every local POC preflight test passes in skip mode, and diagnostics proves that model-handled turns use `spkc83/retail-bank-agent-9b` at the pinned revision;
+- OOD responses are stable for unsupported banking prompts and do not trigger tool-call syntax errors.
 
 Stop when all local tests pass and live diagnostics prove the active revision
 for model-handled turns.

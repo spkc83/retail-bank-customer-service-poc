@@ -33,6 +33,7 @@ from hello_slm.banking_tool_eval import (
     TaggedJsonToolAdapter,
     evaluate_records,
     load_predictions_jsonl,
+    release_gate_failures,
 )
 from hello_slm.banking_tool_sft_data import public_tool_manifest
 from hello_slm.banking_tool_wire import ToolWireAdapter
@@ -84,6 +85,7 @@ class EvalConfig:
     limit: int | None
     trust_remote_code: bool
     push_to_hub: bool
+    enforce_release_gates: bool
     token: str | None
 
 
@@ -108,6 +110,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--push-to-hub", action="store_true")
+    parser.add_argument("--enforce-release-gates", action="store_true")
     parser.add_argument("--token", default=os.environ.get("HF_TOKEN"))
     return parser.parse_args(argv)
 
@@ -133,6 +136,7 @@ def config_from_args(args: argparse.Namespace) -> EvalConfig:
         limit=int(args.limit) if args.limit is not None else None,
         trust_remote_code=bool(args.trust_remote_code),
         push_to_hub=bool(args.push_to_hub),
+        enforce_release_gates=bool(args.enforce_release_gates),
         token=args.token,
     )
 
@@ -202,6 +206,7 @@ def run_eval(config: EvalConfig, backend: GenerationBackend | None = None) -> di
         adapter=TaggedJsonToolAdapter(template_hash=adapter.template_hash),
         checkpoint_revision=config.model_revision,
     )
+    gate_failures = release_gate_failures(report)
     write_json(output_paths["report"], report)
     metadata = build_metadata(
         config,
@@ -215,9 +220,18 @@ def run_eval(config: EvalConfig, backend: GenerationBackend | None = None) -> di
         elapsed_seconds=time.time() - started,
         report_path=output_paths["report"],
     )
+    metadata["release_gate"] = {
+        "enforced": config.enforce_release_gates,
+        "eligible": not gate_failures,
+        "failures": gate_failures,
+    }
     write_json(output_paths["metadata"], metadata)
     if config.push_to_hub:
         publish_eval_artifacts(config, output_paths)
+    if config.enforce_release_gates and gate_failures:
+        raise ToolEvalGenerationError(
+            "frozen evaluation release gates failed: " + "; ".join(gate_failures)
+        )
     return metadata
 
 

@@ -10,6 +10,7 @@ from hello_slm.banking_tool_eval import (
     TaggedJsonToolAdapter,
     evaluate_records,
     fingerprint_records,
+    release_gate_failures,
     state_hash,
 )
 from hello_slm.banking_tool_sft_data import generate_records
@@ -122,6 +123,42 @@ def test_parse_failures_and_private_arguments_are_reported_with_call_denominator
     assert report["metrics"]["unsupported_private_arguments"]["denominator"] == 1
     assert report["records"]["private_arg"]["manifest_failures"] == [
         "cancel_transfer unsupported/private args: ['transfer_id']"
+    ]
+
+
+def test_release_gates_require_exact_frozen_suite_scores() -> None:
+    perfect = {
+        "metrics": {
+            name: {"numerator": 1, "denominator": 1, "score": 1.0}
+            for name in (
+                "tool_name_accuracy",
+                "tool_argument_accuracy",
+                "executable_tool_success",
+                "multi_tool_exact_sequence",
+                "clarification_appropriateness",
+                "grounded_final_factuality",
+                "no_tool_faq_quality",
+                "ood_small_talk_response_path",
+            )
+        }
+    }
+    perfect["metrics"].update(
+        {
+            name: {"numerator": 0, "denominator": 1, "score": 0.0}
+            for name in (
+                "malformed_tool_call_rate",
+                "unsupported_private_arguments",
+                "credential_request_rate",
+                "in_domain_false_refusal",
+                "ood_false_accept",
+            )
+        }
+    )
+
+    assert release_gate_failures(perfect) == []
+    perfect["metrics"]["tool_argument_accuracy"]["score"] = 0.99
+    assert release_gate_failures(perfect) == [
+        "tool_argument_accuracy=0.99 must equal 1.0"
     ]
 
 

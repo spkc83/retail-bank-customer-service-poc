@@ -13,7 +13,7 @@
 #   "trl==0.26.2",
 # ]
 # ///
-"""Bootstrap the pinned banking-v3 source inside a Hugging Face GPU Job."""
+"""Bootstrap the pinned SFT source inside a Hugging Face GPU Job."""
 
 from __future__ import annotations
 
@@ -40,19 +40,36 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--dataset-revision", required=True)
+    parser.add_argument("--dataset-repo", default=DATASET_REPO)
+    parser.add_argument("--base-model", default=BASE_MODEL)
+    parser.add_argument("--base-revision", default=BASE_REVISION)
+    parser.add_argument("--base-family", default="granite")
     parser.add_argument("--manifest")
     parser.add_argument("--output-dir", default="/data/retail-bank-agent-9b")
+    parser.add_argument("--hub-dest", default=MODEL_REPO)
     parser.add_argument("--resume-from")
     parser.add_argument("--max-steps", type=int, default=3_000)
     parser.add_argument("--max-train-seconds", type=int, default=14_400)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=2)
     parser.add_argument("--checkpoint-every", type=int, default=500)
+    parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--trackio-project", default="retail-bank-agent-v3")
+    parser.add_argument("--trackio-run-name")
+    parser.add_argument(
+        "--confirmation-token",
+        default="banking-v3-tool-sft",
+        help="Value required by the worker confirmation env guard.",
+    )
     return parser.parse_args()
 
 
 def download_source(source_commit: str, destination: Path) -> Path:
-    if not source_commit or any(char not in "0123456789abcdef" for char in source_commit):
-        raise ValueError("--source-commit must be a lowercase hexadecimal Git commit")
+    if len(source_commit) != 40 or any(
+        char not in "0123456789abcdef" for char in source_commit
+    ):
+        raise ValueError(
+            "--source-commit must be an exact 40-character lowercase Git commit"
+        )
     url = f"https://github.com/{SOURCE_REPO}/archive/{source_commit}.tar.gz"
     destination.mkdir(parents=True, exist_ok=True)
     request = urllib.request.Request(url, headers={"User-Agent": "retail-bank-tool-sft-job"})
@@ -75,22 +92,26 @@ def main() -> int:
         source_root = download_source(args.source_commit, temp_root / "source")
         dataset_root = Path(
             snapshot_download(
-                repo_id=DATASET_REPO,
+                repo_id=args.dataset_repo,
                 repo_type="dataset",
                 revision=args.dataset_revision,
                 local_dir=temp_root / "dataset",
                 token=os.environ["HF_TOKEN"],
             )
         )
-        manifest = Path(args.manifest) if args.manifest else dataset_root / "manifest.json"
+        manifest = (
+            dataset_root / args.manifest
+            if args.manifest
+            else dataset_root / "manifest.json"
+        )
         if not manifest.is_file():
             raise RuntimeError(f"dataset manifest is unavailable: {manifest}")
         env = {
             **os.environ,
             "PYTHONPATH": str(source_root / "src"),
-            "RETAIL_BANK_ALLOW_REMOTE_TOOL_SFT": "banking-v3-tool-sft",
+            "RETAIL_BANK_ALLOW_REMOTE_TOOL_SFT": args.confirmation_token,
             "RETAIL_BANK_SOURCE_COMMIT": args.source_commit,
-            "RETAIL_BANK_TOOL_SFT_DATASET_REPO": DATASET_REPO,
+            "RETAIL_BANK_TOOL_SFT_DATASET_REPO": args.dataset_repo,
             "RETAIL_BANK_TOOL_SFT_DATASET_REVISION": args.dataset_revision,
         }
         command = [
@@ -104,13 +125,13 @@ def main() -> int:
             "--output-dir",
             args.output_dir,
             "--hub-dest",
-            MODEL_REPO,
+            args.hub_dest,
             "--base-model",
-            BASE_MODEL,
+            args.base_model,
             "--base-revision",
-            BASE_REVISION,
+            args.base_revision,
             "--family",
-            "granite",
+            args.base_family,
             "--precision",
             "bf16-lora",
             "--max-steps",
@@ -124,13 +145,14 @@ def main() -> int:
             "--max-seq-len",
             "2048",
             "--learning-rate",
-            "1e-4",
+            str(args.learning_rate),
             "--checkpoint-every",
             str(args.checkpoint_every),
             "--trackio-project",
-            "retail-bank-agent-v3",
+            args.trackio_project,
             "--trackio-run-name",
-            f"granite-tool-sft-{args.source_commit[:8]}",
+            args.trackio_run_name
+            or f"{args.base_family}-tool-sft-{args.source_commit[:8]}",
         ]
         if args.resume_from:
             command.extend(["--resume-from", args.resume_from])

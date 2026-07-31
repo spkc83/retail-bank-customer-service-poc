@@ -99,6 +99,7 @@ def main() -> int:
             "--dtype",
             "fp16",
             "--push-to-hub",
+            "--enforce-release-gates",
         ]
         subprocess.run(command, cwd=source_root, env=env, check=True)
     return 0

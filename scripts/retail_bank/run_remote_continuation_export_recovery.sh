@@ -17,7 +17,6 @@ output_root="$6"
 selected_step="$7"
 selected_adapter_subdir="${8:-checkpoint-${selected_step}}"
 script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${recovery_source_commit}/scripts/retail_bank/hf_job_recover_continuation_export.py"
-legacy_script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${recovery_source_commit}/scripts/banking_v2/hf_job_recover_continuation_export.py"
 
 for revision in "$recovery_source_commit" "$training_source_commit" "$dataset_revision" "$parent_model_revision"; do
   if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
@@ -37,8 +36,8 @@ if [[ ! "$selected_step" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 if ! curl --fail --silent --head "$script_url" >/dev/null 2>&1; then
-  curl --fail --silent --show-error --head "$legacy_script_url" >/dev/null
-  script_url="$legacy_script_url"
+  echo "Could not resolve bootstrap script: ${script_url}" >&2
+  exit 2
 fi
 
 hf jobs uv run \

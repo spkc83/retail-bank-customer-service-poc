@@ -59,7 +59,12 @@ The worker [`scripts/retail_bank/cloud_train_tool_sft.py`](../scripts/retail_ban
 | Initial checkpoints | every `500` steps |
 | Output root in paid job | `/data/retail-bank-agent-9b-${SOURCE_COMMIT:0:8}` |
 
-The SFT corpus is declared in [`data/banking-v3-tool-sft/manifest.json`](../data/banking-v3-tool-sft/manifest.json) and summarized in [`data/banking-v3-tool-sft/preparation-report.json`](../data/banking-v3-tool-sft/preparation-report.json). It contains 6,304 training, 1,349 validation, and 1,347 frozen test conversations. The tokenizer and loss masking path is covered by [`src/hello_slm/banking_tool_wire.py`](../src/hello_slm/banking_tool_wire.py) and tests such as [`tests/test_banking_tool_wire.py`](../tests/test_banking_tool_wire.py).
+The released SFT corpus is declared in
+[`data/banking-v3-tool-sft/manifest.json`](../data/banking-v3-tool-sft/manifest.json)
+and summarized in its preparation report. It contains 6,304 training, 1,349
+validation, and 1,347 frozen test conversations. The v4 servicing-alignment
+candidate is a full composite of that corpus plus targeted multi-turn records;
+see [`10-servicing-alignment-v4.md`](10-servicing-alignment-v4.md).
 
 ## Local Preflight
 
@@ -85,6 +90,23 @@ PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
   --max-steps 3000 \
   --max-train-seconds 14400 \
   --checkpoint-every 500 \
+  --dry-run
+```
+
+For the fresh-LoRA v4 continuation candidate, start from the released merged
+weights and use the composite alignment dataset:
+
+```bash
+PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
+  --manifest data/banking-servicing-alignment-v4/manifest.json \
+  --base-model spkc83/retail-bank-agent-9b \
+  --base-revision 085df3d089cfadd77424b548542da0390a54a23e \
+  --hub-dest spkc83/retail-bank-servicing-agent-9b \
+  --family granite \
+  --learning-rate 2e-5 \
+  --max-steps 500 \
+  --max-train-seconds 14400 \
+  --checkpoint-every 100 \
   --dry-run
 ```
 
@@ -129,9 +151,50 @@ retention policy is applied. The wrapper builds the output path as
 `/data/retail-bank-agent-9b-${SOURCE_COMMIT:0:8}`.
 
 The active launchers and source of truth are under `scripts/retail_bank`.
-For compatibility only, when resuming a source commit created before the
-directory rename, a launcher probes the pre-rename bootstrap URL after the
-current path is absent. The old directory is not part of the current tree.
+
+## Rebuild on Clean Infrastructure
+
+The repository retains two separate, reproducible training lanes. Do not
+confuse the v4 alignment run with the initial banking SFT:
+
+1. **Initial banking SFT** starts from the immutable pretrained IBM Granite
+   checkpoint `ibm-granite/granite-4.1-8b` at
+   `1504002f650e656a0a3789d99574df12e3e94ed0`. The default bootstrap runs the
+   governed v3 corpus for at most 3,000 steps at `1e-4`, saves LoRA checkpoints,
+   merges the adapter, performs reload parity, and publishes the merged model.
+2. **Servicing alignment v4** starts from an immutable merged output of step 1,
+   attaches a new LoRA adapter, and trains the full composite alignment corpus
+   for at most 500 steps at `2e-5`. It does not require the old optimizer or
+   retained v3 adapter.
+
+On a new machine or cloud account, reproduce step 1 with a new destination repo
+so the released artifact is not overwritten:
+
+```bash
+export HF_HUB_DEST=YOUR_ORG/retail-bank-agent-9b-replica
+export DATASET_REPO=YOUR_ORG/retail-bank-agent-sft
+export BASE_MODEL=ibm-granite/granite-4.1-8b
+export BASE_REVISION=1504002f650e656a0a3789d99574df12e3e94ed0
+export MAX_STEPS=3000
+export LEARNING_RATE=1e-4
+export CHECKPOINT_EVERY=500
+scripts/retail_bank/run_remote_training_job.sh \
+  SOURCE_COMMIT_40_HEX \
+  DATASET_REVISION_40_HEX
+```
+
+Then reproduce step 2 by setting `BASE_MODEL` to that replica repository and
+`BASE_REVISION` to its immutable merged-weights commit, selecting the published
+servicing-alignment dataset, and using the v4 overrides in the end-to-end
+runbook. Every downstream evaluation and deployment command must consume the
+captured 40-character revisions, never `main`.
+
+This is a from-clean-infrastructure reconstruction of the project model. It is
+not foundation pretraining from random weights: English and general language
+ability come from the pinned IBM Granite checkpoint. Training Granite's 8.79B
+foundation weights from random initialization would require a different,
+large-scale pretraining corpus and distributed pretraining stack and is outside
+this repository's contract.
 
 ## Resume Initial Training
 

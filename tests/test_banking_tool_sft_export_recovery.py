@@ -105,8 +105,8 @@ def test_recovery_launcher_is_export_only_and_capped() -> None:
     assert '--selected-step "$selected_step"' in launcher
     assert 'output_root="$6"' in launcher
     assert "/scripts/retail_bank/hf_job_recover_continuation_export.py" in launcher
-    assert "/scripts/banking_v2/hf_job_recover_continuation_export.py" in launcher
-    assert 'script_url="$legacy_script_url"' in launcher
+    assert "/scripts/banking_v2/hf_job_recover_continuation_export.py" not in launcher
+    assert 'script_url="$legacy_script_url"' not in launcher
 
 
 def test_recovery_rejects_symbolic_revisions() -> None:

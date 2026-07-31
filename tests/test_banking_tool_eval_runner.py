@@ -272,6 +272,7 @@ def _config(tmp_path: Path) -> Any:
         limit=None,
         trust_remote_code=False,
         push_to_hub=False,
+        enforce_release_gates=False,
         token=None,
     )
 
@@ -555,8 +556,8 @@ def test_hf_eval_launcher_uses_pinned_url_durable_volume_and_two_hour_cap() -> N
     assert "--timeout 2h" in source
     assert "--volume hf://buckets/spkc83/jobs-artifacts:/data" in source
     assert "/scripts/retail_bank/hf_job_tool_eval.py" in source
-    assert "/scripts/banking_v2/hf_job_tool_eval.py" in source
-    assert 'script_url="$legacy_script_url"' in source
+    assert "/scripts/banking_v2/hf_job_tool_eval.py" not in source
+    assert 'script_url="$legacy_script_url"' not in source
     assert "hf_job_tool_eval.py" in source
     assert "--model-revision" in source
     assert "--dataset-revision" in source

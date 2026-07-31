@@ -32,6 +32,23 @@ PRIVATE_ARGUMENTS = frozenset(
         "transfer_id",
     }
 )
+PERFECT_SCORE_RELEASE_METRICS = (
+    "tool_name_accuracy",
+    "tool_argument_accuracy",
+    "executable_tool_success",
+    "multi_tool_exact_sequence",
+    "clarification_appropriateness",
+    "grounded_final_factuality",
+    "no_tool_faq_quality",
+    "ood_small_talk_response_path",
+)
+ZERO_ERROR_RELEASE_METRICS = (
+    "malformed_tool_call_rate",
+    "unsupported_private_arguments",
+    "credential_request_rate",
+    "in_domain_false_refusal",
+    "ood_false_accept",
+)
 _TOOL_CALL_BLOCK = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", flags=re.DOTALL)
 _CREDENTIAL_REQUEST = re.compile(
     r"\b(account number|customer id|password|pin|verify your identity|social security|ssn)\b",
@@ -281,6 +298,37 @@ def evaluate_records(
         "metrics": {name: counter.as_report() for name, counter in metrics.items()},
         "records": record_reports,
     }
+
+
+def release_gate_failures(report: Mapping[str, Any]) -> list[str]:
+    """Return exact frozen-suite failures for a model release candidate."""
+    metrics = report.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return ["evaluation report is missing metrics"]
+    failures: list[str] = []
+    for name in PERFECT_SCORE_RELEASE_METRICS:
+        failures.extend(_metric_gate_failures(metrics, name=name, expected=1.0))
+    for name in ZERO_ERROR_RELEASE_METRICS:
+        failures.extend(_metric_gate_failures(metrics, name=name, expected=0.0))
+    return failures
+
+
+def _metric_gate_failures(
+    metrics: Mapping[str, Any],
+    *,
+    name: str,
+    expected: float,
+) -> list[str]:
+    metric = metrics.get(name)
+    if not isinstance(metric, Mapping):
+        return [f"missing release metric: {name}"]
+    denominator = metric.get("denominator")
+    score = metric.get("score")
+    if not isinstance(denominator, int) or denominator < 1:
+        return [f"release metric has no evaluated rows: {name}"]
+    if not isinstance(score, int | float) or float(score) != expected:
+        return [f"{name}={score!r} must equal {expected:.1f}"]
+    return []
 
 
 def replay_state(initial_state: Mapping[str, Any], calls: Sequence[ToolCall]) -> dict[str, Any]:

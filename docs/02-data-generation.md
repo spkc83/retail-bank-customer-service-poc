@@ -185,7 +185,7 @@ Main files:
 | File | Purpose |
 | --- | --- |
 | [../src/hello_slm/banking_router_data.py](../src/hello_slm/banking_router_data.py) | Builds in-domain/OOD and Banking77 intent examples. |
-| [../scripts/retail_bank/prepare_dual_head_router_data.py](../scripts/retail_bank/prepare_dual_head_router_data.py) | Downloads pinned sources and writes governed splits. |
+| [../scripts/retail_bank/prepare_dual_head_router_data.py](../scripts/retail_bank/prepare_dual_head_router_data.py) | Downloads pinned sources and writes governed v1 splits. |
 | [../data/banking-router-v1/manifest.json](../data/banking-router-v1/manifest.json) | Local generated router-data manifest. |
 | [../data/sources/banking-router-v1.lock.json](../data/sources/banking-router-v1.lock.json) | Tracked release lock for split digests. |
 | [../data_cards/retail-bank-router-training-data.md](../data_cards/retail-bank-router-training-data.md) | Public router dataset card. |
@@ -254,6 +254,12 @@ By default, the script compares produced split digests to the tracked release
 lock. Use `data/banking-router-v1` as the output directory only when
 intentionally refreshing the repository's generated local copy. Use
 `--skip-release-digest-check` only for intentional experimental splits.
+
+The v4 conversation-router branch instead uses
+[`prepare_conversation_router_data.py`](../scripts/retail_bank/prepare_conversation_router_data.py),
+[`train_conversation_router.py`](../scripts/retail_bank/train_conversation_router.py),
+and the lock
+[`banking-conversation-router-v4.lock.json`](../data/sources/banking-conversation-router-v4.lock.json).
 
 ## Tests
 

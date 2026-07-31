@@ -85,6 +85,15 @@ record, verifies the released base split hashes, checks for PII-like content
 and held-out leakage, and compares the composite split hashes with the tracked
 lock. It fails rather than silently updating the lock.
 
+Before a paid HF job, publish this dataset to a dataset repo revision:
+
+```bash
+PYTHONPATH=src python \
+  scripts/retail_bank/prepare_servicing_alignment_data.py \
+  --push-to-hub \
+  --repo-id spkc83/retail-bank-servicing-alignment-sft
+```
+
 Run its focused tests:
 
 ```bash
@@ -140,3 +149,24 @@ It must:
 
 Until those checks pass, the released Granite revision and public Space remain
 unchanged.
+
+## Candidate Rollout in Space
+
+After a candidate run finishes and evaluation gates pass, promote by updating only
+these POC environment values for your Space deployment:
+
+- `RETAIL_BANK_MODEL_ID=spkc83/retail-bank-servicing-agent-9b`
+- `RETAIL_BANK_MODEL_REVISION=<candidate_checkpoint_revision>`
+
+Keep router defaults at `RETAIL_BANK_ROUTER_REVISION=unpublished-v4` until the
+router candidate is also promoted; the route diagnostics remain visible even when
+the v4 router is not active.
+
+Verify deployment by checking the diagnostic block in `poc/retail-bank-customer-service-poc/app.py`
+for:
+
+- `model_revision` showing the candidate revision
+- `router_revision` showing the active router revision
+- `classification` payload fields for each turn
+
+Do not change `RETAIL_BANK_ROUTER_REVISION` for a partially tested candidate.
