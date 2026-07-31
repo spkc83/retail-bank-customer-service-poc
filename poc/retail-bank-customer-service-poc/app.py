@@ -139,6 +139,23 @@ def run_model_turn(
     conversation = canonical_conversation(conversation_history)
 
     route = route_query(message, conversation)
+    if route.get("route") == "classifier_error":
+        return _direct_turn(
+            message=message,
+            response=MODEL_FAILURE_RESPONSE,
+            visible=visible,
+            conversation=conversation,
+            snapshot=render_snapshot(BANK.snapshot(username, session_hash)),
+            activity=(
+                "The conversation classifier failed; the 9B model was not invoked."
+            ),
+            diagnostics=_render_diagnostics(
+                route,
+                (),
+                (),
+                "classifier failure",
+            ),
+        )
     if route.get("route") == "out_of_domain":
         return _direct_turn(
             message=message,
@@ -297,8 +314,8 @@ def route_query(
         return _uncertain_route("router unavailable; delegated to the 9B model")
     try:
         return router.classify(message, history)
-    except (RuntimeError, TypeError, ValueError):
-        return _uncertain_route("router failed; delegated to the 9B model")
+    except (RuntimeError, TypeError, ValueError) as error:
+        return _classifier_error_route(type(error).__name__)
 
 
 def load_profile(request: gr.Request) -> tuple[str, str, str, str]:
@@ -470,14 +487,25 @@ def _uncertain_route(reason: str) -> dict[str, Any]:
         "banking_probability": None,
         "ood_probability": None,
         "confidence": None,
-        "intent": None,
-        "intent_confidence": None,
-        "intent_candidates": [],
-        "threshold": None,
-        "ood_threshold": None,
+        "capability": None,
+        "capability_confidence": None,
+        "capability_candidates": [],
+        "relation_probabilities": {},
+        "ood_banking_threshold": None,
+        "in_domain_threshold": None,
+        "relation_rescue_threshold": None,
         "router_revision": ROUTER_REVISION,
         "reason": reason,
     }
+
+
+def _classifier_error_route(failure_type: str) -> dict[str, Any]:
+    route = _uncertain_route(
+        "classifier failed; the 9B model was not invoked"
+    )
+    route["route"] = "classifier_error"
+    route["failure_type"] = failure_type
+    return route
 
 
 def _render_diagnostics(
@@ -488,10 +516,15 @@ def _render_diagnostics(
     model_passes: tuple[ModelPassTrace, ...] = (),
     visible_response: str | None = None,
 ) -> str:
-    candidates = route.get("intent_candidates")
+    candidates = route.get("capability_candidates")
+    if not isinstance(candidates, list):
+        candidates = route.get("intent_candidates")
     candidate_text = (
         "\n".join(
-            f"- `{item.get('intent')}`: {float(item.get('probability', 0)):.3f}"
+            (
+                f"- `{item.get('capability', item.get('intent'))}`: "
+                f"{float(item.get('probability', 0)):.3f}"
+            )
             for item in candidates
             if isinstance(item, dict)
         )
@@ -546,9 +579,13 @@ def _render_diagnostics(
         f"- In-domain probability: `{route.get('banking_probability')}`\n"
         f"- OOD probability: `{route.get('ood_probability')}`\n"
         f"- Conversation context applied: `{route.get('context_applied', False)}`\n"
-        f"- Context reason: `{route.get('context_reason')}`\n"
+        f"- Relation probabilities: "
+        f"`{json.dumps(route.get('relation_probabilities', {}), sort_keys=True)}`\n"
+        f"- Router reason: `{route.get('reason', 'not provided')}`\n"
+        f"- Router failure type: `{route.get('failure_type', 'none')}`\n"
         f"- Response path: `{response_path}`\n\n"
-        f"**Top intents**\n{candidate_text or '- None'}\n\n"
+        f"**Diagnostic servicing capabilities**\n"
+        f"{candidate_text or '- None'}\n\n"
         f"**9B tool calls**\n{call_text}\n\n"
         f"**Tool results**\n{result_text}\n\n"
         f"**9B generation provenance**\n{pass_text}\n\n"
@@ -581,8 +618,8 @@ with gr.Blocks(
         # Retail Bank Customer Service POC
 
         <div class="synthetic-banner">
-        <strong>Fictional data only.</strong> The dual-head classifier gates
-        only high-confidence OOD requests; its intent predictions are diagnostic.
+        <strong>Fictional data only.</strong> The history-aware classifier gates
+        only high-confidence OOD requests; its capability predictions are diagnostic.
         The 9B model owns allowed conversation, tool selection, tool arguments,
         and final responses. No real banking system is connected.
         </div>
@@ -647,7 +684,9 @@ with gr.Blocks(
             refresh_button,
         ],
         api_name="chat",
-        api_description="Direct dual-head routing and 9B ZeroGPU conversational turn.",
+        api_description=(
+            "History-aware classifier routing and 9B ZeroGPU conversational turn."
+        ),
         queue=True,
         trigger_mode="once",
     )

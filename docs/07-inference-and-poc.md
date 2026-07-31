@@ -6,6 +6,11 @@ It documents the current Granite 9B model path, the CPU dual-head router, the
 model-owned tool loop, session state, diagnostics, local tests, and the Space
 deployment surface.
 
+This chapter describes the public v1 Space. Candidate branch behavior and its
+non-loadable pre-release router sentinel are documented in
+[Conversation Router v4](09-conversation-router-v4.md); the public Space is
+unchanged until that candidate is published and verified.
+
 Everything in the POC is synthetic. It has no connection to a real bank, cannot
 access real accounts, and must not receive credentials, full account numbers,
 payment-card details, or real customer data.
@@ -70,30 +75,38 @@ Gradio session hash. It is not a bank identity provider.
 
 ## Router Loading and Thresholds
 
-The router code lives in
-[`router.py`](../poc/retail-bank-customer-service-poc/router.py). Startup calls:
+### Deployed public v1
 
-```python
-LearnedBankingRouter.from_hub()
-```
+The deployed public Space loads `spkc83/retail-bank-domain-intent-router` at
+revision `136ee159d19cda7f585dd122907bbeb1ef4ec4db`. Its implementation contract
+is retained in
+[`banking_dual_head_router.py`](../src/hello_slm/banking_dual_head_router.py)
+and its immutable configuration is recorded in the
+[released model card](../model_cards/retail-bank-domain-intent-router.md).
 
-That method downloads `spkc83/retail-bank-domain-intent-router` at revision
-`136ee159d19cda7f585dd122907bbeb1ef4ec4db`, verifies
-`manifest.json`, loads the tokenizer and DistilBERT encoder with
-`trust_remote_code=False`, and loads `classifier_heads.safetensors`.
-
-The released artifact's calibrated lower boundary is `0.165`. Serving uses two
-boundaries:
+The released artifact uses these boundaries:
 
 - banking probability `< 0.165`: `out_of_domain`
 - banking probability `>= 0.50`: `in_domain`
 - banking probability from `0.165` through `< 0.50`: `uncertain`
 
-Uncertain turns continue to the Granite 9B model. If the router is unavailable
-or classification fails after startup, [`app.py`](../poc/retail-bank-customer-service-poc/app.py)
-records an uncertain route and delegates the turn to the model.
+Uncertain turns continue to the Granite 9B model. The top three Banking77
+intents are diagnostics only.
 
-The top three Banking77 intents are diagnostics only.
+### Current v4 branch
+
+The current branch's
+[`router.py`](../poc/retail-bank-customer-service-poc/router.py) instead expects
+the unpublished history-aware artifact described in
+[Conversation Router v4](09-conversation-router-v4.md). It verifies an
+immutable revision, loads the shared encoder plus domain, servicing-capability,
+and conversation-relation heads, and uses the artifact's calibrated policy.
+The default `unpublished-v4` revision is intentionally non-loadable.
+
+Capability and relation outputs are diagnostics only. An unavailable router in
+explicit local test mode produces an `uncertain` test route; a classifier
+exception during a normal model turn produces a visible `classifier_error` and
+the 9B generator is not invoked.
 
 ## Model Loading
 
@@ -242,13 +255,14 @@ Diagnostics are rendered by
 [`_render_diagnostics`](../poc/retail-bank-customer-service-poc/app.py). They
 are part of the proof that a turn used the active model path.
 
-The panel shows:
+The current v4 branch panel shows:
 
-- route: `in_domain`, `uncertain`, or `out_of_domain`
+- route: `in_domain`, `uncertain`, `out_of_domain`, or `classifier_error`
 - in-domain and OOD probabilities
-- whether conversation context changed the route
+- whether complete visible conversation context was applied
+- conversation-relation probabilities and router failure details
 - response path, such as `direct_answer`, `base_tool`, or `base_tool_chain`
-- top intent candidates
+- top diagnostic servicing-capability candidates
 - generated tool calls and public arguments
 - tool-result success or safe error code
 - model pass labels, input-token counts, prompt SHA-256 values, raw output
@@ -257,6 +271,9 @@ The panel shows:
 - model ID and exact model revision
 - `SPACE_COMMIT_SHA`, when provided by the Space runtime
 - visible response SHA-256
+
+The deployed v1 Space shows Banking77 intent candidates in the corresponding
+diagnostic slot until it is intentionally upgraded to the v4 artifact.
 
 A successful live model turn should show:
 

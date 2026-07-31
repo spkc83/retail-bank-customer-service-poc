@@ -4,6 +4,12 @@ This runbook walks a new developer from local setup through data preparation,
 router training, Granite tool SFT, frozen evaluation, and the ZeroGPU POC. It
 uses the current active artifact set only.
 
+The released reproduction remains below. For the unpublished v4 classifier
+and Granite servicing-alignment candidates, follow
+[Conversation Router v4](09-conversation-router-v4.md) and
+[Granite Servicing Alignment v4](10-servicing-alignment-v4.md) instead of
+overwriting released Hub repositories.
+
 Paid Hugging Face Jobs steps are marked clearly. They are commands to run only
 after explicit authorization, working credentials, and budget approval. This
 document does not imply that paid jobs or public deployments have been started.

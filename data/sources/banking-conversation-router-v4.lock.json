@@ -1,0 +1,78 @@
+{
+  "clinc_member_sha256": "bfcca9ae515623541dc1983c94c4ed7cae9d26b42ae47d74b972e51bb6f7a21f",
+  "contract": "banking-conversation-router-v4-source-lock",
+  "created_at": "2026-07-31T07:00:09.167172+00:00",
+  "format_version": 1,
+  "prepared_split_sha256": {
+    "test": "e4d70f0adccf0615bf79b1034203b76d0986c09d58259c31a2e2ea24a5d4931f",
+    "train": "8289533eb3df841c215bd4ea6e7f216c1b0fd988ad49dfd0fb78a13ad795b4e8",
+    "validation": "ecde083032ee1dbd692190d4dcc08815c43f1459f255aaa3fd685ccad974df18"
+  },
+  "sources": {
+    "UCI/clinc150": {
+      "allowed_use": [
+        "conversation-router-external-ood-training"
+      ],
+      "archive_sha256": "0d8ecc3e1edd7b25cabde0177544ce536ddf773844bc80ef1a75f36e7f030ea2",
+      "member": "clinc150_uci/data_oos_plus.json",
+      "member_sha256": "bfcca9ae515623541dc1983c94c4ed7cae9d26b42ae47d74b972e51bb6f7a21f",
+      "url": "https://archive.ics.uci.edu/static/public/570/clinc150.zip",
+      "used_labels": [
+        "alarm",
+        "calendar",
+        "calendar_update",
+        "cook_time",
+        "date",
+        "definition",
+        "directions",
+        "distance",
+        "email",
+        "email_query",
+        "events",
+        "find_phone",
+        "flight_status",
+        "ingredient_substitution",
+        "ingredients_list",
+        "lost_luggage",
+        "measurement_conversion",
+        "meeting_schedule",
+        "next_song",
+        "nutrition_info",
+        "oos",
+        "play_music",
+        "plug_type",
+        "pto_request",
+        "recipe",
+        "reminder",
+        "reminder_update",
+        "shopping_list",
+        "shopping_list_update",
+        "spelling",
+        "tell_joke",
+        "text",
+        "timer",
+        "timezone",
+        "todo_list",
+        "todo_list_update",
+        "traffic",
+        "translate",
+        "travel_alert",
+        "travel_notification",
+        "weather",
+        "what_song"
+      ]
+    },
+    "sft": {
+      "allowed_use": [
+        "conversation-router-domain-capability-training"
+      ],
+      "manifest_sha256": "42c777b0109067a49039ea41f3be62eb90573a5a0d72b1497836a72eabcd2078",
+      "path": "data/banking-v3-tool-sft",
+      "split_sha256": {
+        "test": "76b485fa507d56002f12b556f100fd842c77146804cf49be3426be031cc692c0",
+        "train": "8d92fa0ab1d39875f0c4d918bc5aeaf670f71bf660a01a0a376cb4edc1cced53",
+        "validation": "a8c7871b33689fce026ea570ad0a8a90a609cde232a89486e5437b028279e6d3"
+      }
+    }
+  }
+}

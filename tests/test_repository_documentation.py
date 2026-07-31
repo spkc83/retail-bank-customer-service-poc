@@ -16,6 +16,8 @@ CANONICAL_DOCS = (
     "docs/06-evaluation.md",
     "docs/07-inference-and-poc.md",
     "docs/08-end-to-end-runbook.md",
+    "docs/09-conversation-router-v4.md",
+    "docs/10-servicing-alignment-v4.md",
     "docs/reference/file-map.md",
     "docs/reference/artifacts.md",
 )

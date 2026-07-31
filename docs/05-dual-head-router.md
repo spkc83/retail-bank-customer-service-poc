@@ -2,6 +2,12 @@
 
 This guide covers the active CPU router: governed Banking77 plus CLINC preparation, DistilBERT dual-head training, threshold calibration, publication, and serving behavior. The router does not select tools and does not supply tool arguments to the Granite model.
 
+This is the released v1 artifact guide. The
+[`feat/conversation-router-v4` candidate](09-conversation-router-v4.md)
+replaces Banking77 runtime intents with POC-aligned capability diagnostics and
+adds history-aware conversation-relation outputs; it does not replace the
+released artifact until its gates pass.
+
 ## Active Artifact IDs
 
 | Artifact | Value | Owner |
@@ -164,7 +170,12 @@ The artifact manifest lists file sizes and SHA-256 digests. [`verify_router_arti
 - banking probability `>= 0.50`: in-domain;
 - middle range: uncertain and delegated to the Granite model.
 
-The classifier's top intent predictions are diagnostics only. They do not enter the Granite prompt, select tools, or provide tool arguments. If an already-loaded router fails on a turn, the POC reports an uncertain route and delegates the turn to the model; it does not silently substitute a keyword classifier.
+The classifier's top intent predictions are diagnostics only. They do not
+enter the Granite prompt, select tools, or provide tool arguments. The deployed
+v1 POC reports an already-loaded router failure as uncertain and delegates the
+turn to the model; it does not silently substitute a keyword classifier. The
+v4 candidate intentionally changes this failure behavior as documented in
+[Conversation Router v4](09-conversation-router-v4.md).
 
 ## Stop Conditions
 

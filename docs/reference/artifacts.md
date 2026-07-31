@@ -12,7 +12,7 @@ agent, dual-head router, datasets, local manifests, and paid job outputs.
 | Agent published evaluation head | `spkc83/retail-bank-agent-9b` | `98cde9ee058b785fb871abcd2c85e18cea410bdf` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
 | Agent base model | `ibm-granite/granite-4.1-8b` | `1504002f650e656a0a3789d99574df12e3e94ed0` | [`configs/banking-tool-sft-granite.toml`](../../configs/banking-tool-sft-granite.toml), [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
 | Tool-use SFT dataset | `spkc83/retail-bank-agent-sft` | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` | [`data_cards/retail-bank-agent-sft.md`](../../data_cards/retail-bank-agent-sft.md), [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
-| Dual-head router | `spkc83/retail-bank-domain-intent-router` | `136ee159d19cda7f585dd122907bbeb1ef4ec4db` | [`router.py`](../../poc/retail-bank-customer-service-poc/router.py), [`model_cards/retail-bank-domain-intent-router.md`](../../model_cards/retail-bank-domain-intent-router.md) |
+| Dual-head router | `spkc83/retail-bank-domain-intent-router` | `136ee159d19cda7f585dd122907bbeb1ef4ec4db` | [`banking_dual_head_router.py`](../../src/hello_slm/banking_dual_head_router.py), [`model_cards/retail-bank-domain-intent-router.md`](../../model_cards/retail-bank-domain-intent-router.md) |
 | Router dataset | `spkc83/retail-bank-router-training-data` | `54ff186a03501d76dc643dbed3d82729267ce811` | [`train_dual_head_router.py`](../../scripts/retail_bank/train_dual_head_router.py), [`model_cards/retail-bank-domain-intent-router.md`](../../model_cards/retail-bank-domain-intent-router.md) |
 | Public Space | `spkc83/retail-bank-servicing-poc` | Space commit is exposed at runtime as `SPACE_COMMIT_SHA` | [`app.py`](../../poc/retail-bank-customer-service-poc/app.py), [`README.md`](../../poc/retail-bank-customer-service-poc/README.md) |
 
@@ -178,19 +178,38 @@ Source locks:
 | CLINC150 archive SHA-256 | `0d8ecc3e1edd7b25cabde0177544ce536ddf773844bc80ef1a75f36e7f030ea2` |
 | CLINC150 member SHA-256 | `bfcca9ae515623541dc1983c94c4ed7cae9d26b42ae47d74b972e51bb6f7a21f` |
 
+## Unpublished V4 Candidate Data
+
+These are governed local candidates, not published release artifacts.
+
+| Candidate | Train | Validation | Test | Lock |
+| --- | ---: | ---: | ---: | --- |
+| History-aware conversation router | 61,759 | 13,173 | 15,466 | [`banking-conversation-router-v4.lock.json`](../../data/sources/banking-conversation-router-v4.lock.json) |
+| Composite Granite servicing alignment | 6,624 | 1,429 | 1,374 | [`banking-servicing-alignment-v4.lock.json`](../../data/sources/banking-servicing-alignment-v4.lock.json) |
+
+The classifier candidate reserves seven exact captured regressions in test.
+The Granite composite retains all 9,000 released SFT records and adds 427
+targeted records, including three exact captured generative regressions in
+test.
+
 ## Runtime Artifact Defaults
+
+The first seven rows describe the released Granite runtime. The final two rows
+describe this branch's unpublished v4 router candidate; the POC deliberately
+refuses to load it until the revision is replaced with a verified immutable
+commit.
 
 | Runtime field | Default | Source |
 | --- | --- | --- |
 | `RETAIL_BANK_MODEL_ID` | `spkc83/retail-bank-agent-9b` | [`zero_gpu_runtime.py`](../../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py) |
 | `RETAIL_BANK_MODEL_REVISION` | `085df3d089cfadd77424b548542da0390a54a23e` | [`zero_gpu_runtime.py`](../../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py) |
-| `ROUTER_REPO_ID` | `spkc83/retail-bank-domain-intent-router` | [`router.py`](../../poc/retail-bank-customer-service-poc/router.py) |
-| `ROUTER_REVISION` | `136ee159d19cda7f585dd122907bbeb1ef4ec4db` | [`router.py`](../../poc/retail-bank-customer-service-poc/router.py) |
 | `INPUT_TOKEN_BUDGET` | `8192` | [`model_service.py`](../../poc/retail-bank-customer-service-poc/model_service.py) |
 | `MAX_NEW_TOKENS` | `512` | [`model_service.py`](../../poc/retail-bank-customer-service-poc/model_service.py) |
 | `MAX_TOOL_CALLS` | `8` | [`model_service.py`](../../poc/retail-bank-customer-service-poc/model_service.py) |
 | Demo usernames | `alex.demo`, `maya.demo` | [`auth.py`](../../poc/retail-bank-customer-service-poc/auth.py) |
 | Session database directory | `/tmp/retail-bank-servicing-poc` unless `POC_SESSION_DB_DIR` is set | [`state.py`](../../poc/retail-bank-customer-service-poc/state.py) |
+| V4 `RETAIL_BANK_ROUTER_ID` | `spkc83/retail-bank-conversation-router` | [`router.py`](../../poc/retail-bank-customer-service-poc/router.py) |
+| V4 `RETAIL_BANK_ROUTER_REVISION` | `unpublished-v4` (intentional non-loadable sentinel) | [`router.py`](../../poc/retail-bank-customer-service-poc/router.py) |
 
 ## Source Commit For A New Run
 

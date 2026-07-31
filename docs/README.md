@@ -2,7 +2,7 @@
 
 These docs explain the active Granite PEFT retail-bank agent repository for a
 junior developer. They describe the current code, cards, scripts, and release
-artifacts only.
+artifacts, plus the explicitly labeled v4 candidate under development.
 
 ## What This Repository Builds
 
@@ -75,6 +75,16 @@ cards under [../model_cards](../model_cards), and the data cards under
 
    Follow the complete install, data, training, evaluation, local POC, and
    deployment sequence.
+
+9. [Conversation Router v4](09-conversation-router-v4.md)
+
+   Understand the candidate cross-encoder, leakage-safe data contract,
+   multi-label conversation relations, local training path, and rollout gate.
+
+10. [Granite Servicing Alignment v4](10-servicing-alignment-v4.md)
+
+    Understand the composite continuation-SFT data, use-case alignment,
+    held-out regression policy, safe training plan, and release stop condition.
 
 Use the [file map](reference/file-map.md) to jump from concepts to code and the
 [artifact ledger](reference/artifacts.md) for immutable revisions and hashes.

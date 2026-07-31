@@ -27,6 +27,22 @@ transaction, transfer, and service case is fictional.
 The standalone application source is also published at
 [spkc83/retail-bank-servicing-poc](https://github.com/spkc83/retail-bank-servicing-poc).
 
+## V4 candidate
+
+Branch `feat/conversation-router-v4` replaces the current-only/heuristic
+classifier path with a history-aware cross-encoder candidate. It uses a domain
+head, coarse POC capability diagnostics, and independent conversation-relation
+labels. Its governed data and locally trained TITAN V artifact pass the
+held-out release gates. It will not replace the released router or Space
+revision until the artifact is explicitly published at an immutable revision
+and that revision is verified in the POC.
+
+The candidate also adds targeted Granite continuation-SFT data for natural
+multi-turn servicing, corrections, clarification answers, topic shifts, and
+grounded service-case details. See
+[Conversation Router v4](docs/09-conversation-router-v4.md) and
+[Granite Servicing Alignment v4](docs/10-servicing-alignment-v4.md).
+
 ## Request flow
 
 ```text
@@ -59,7 +75,9 @@ without reading the implementation first:
 6. [Frozen evaluation](docs/06-evaluation.md)
 7. [Inference and ZeroGPU POC](docs/07-inference-and-poc.md)
 8. [End-to-end runbook](docs/08-end-to-end-runbook.md)
-9. [Code/file map](docs/reference/file-map.md) and
+9. [Conversation Router v4 candidate](docs/09-conversation-router-v4.md)
+10. [Granite Servicing Alignment v4](docs/10-servicing-alignment-v4.md)
+11. [Code/file map](docs/reference/file-map.md) and
    [artifact ledger](docs/reference/artifacts.md)
 
 ## Local quick start
@@ -84,6 +102,26 @@ changes:
 
 ```bash
 PYTHONPATH=src uv run python scripts/retail_bank/prepare_dual_head_router_data.py
+```
+
+Generate the v4 history-aware classifier candidate data:
+
+```bash
+PYTHONPATH=src uv run python \
+  scripts/retail_bank/prepare_conversation_router_data.py
+```
+
+Generate the composite Granite servicing-alignment candidate:
+
+```bash
+PYTHONPATH=src uv run python \
+  scripts/retail_bank/prepare_servicing_alignment_data.py
+```
+
+Train the v4 classifier locally without publishing:
+
+```bash
+PYTHONPATH=src uv run scripts/retail_bank/train_conversation_router.py
 ```
 
 Inspect the Granite training plan without allocating a GPU or submitting a

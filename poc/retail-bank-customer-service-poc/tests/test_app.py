@@ -34,22 +34,29 @@ def route(
     route_name: str = "in_domain",
     *,
     banking_probability: float = 0.99,
-    intent: str = "pending_transfer",
+    capability: str = "transfers",
 ) -> dict[str, object]:
     return {
         "route": route_name,
         "banking_probability": banking_probability,
         "ood_probability": 1 - banking_probability,
         "confidence": max(banking_probability, 1 - banking_probability),
-        "intent": intent,
-        "intent_confidence": 0.8,
-        "intent_candidates": [
-            {"intent": intent, "probability": 0.8},
-            {"intent": "cash_withdrawal", "probability": 0.1},
-            {"intent": "card_payment_fee_charged", "probability": 0.05},
+        "capability": capability,
+        "capability_confidence": 0.8,
+        "capability_candidates": [
+            {"capability": capability, "probability": 0.8},
+            {"capability": "accounts", "probability": 0.1},
+            {"capability": "cards", "probability": 0.05},
         ],
-        "threshold": 0.98,
-        "ood_threshold": 0.5,
+        "relation_probabilities": {
+            "context_dependent": 0.1,
+            "agent_repair": 0.1,
+            "topic_shift": 0.1,
+            "clarification_answer": 0.1,
+        },
+        "ood_banking_threshold": 0.2,
+        "in_domain_threshold": 0.5,
+        "relation_rescue_threshold": 0.5,
         "router_revision": "test-router",
     }
 
@@ -96,7 +103,11 @@ def test_greeting_and_uncertain_turns_are_answered_by_9b(
     monkeypatch.setattr(
         app_module,
         "route_query",
-        lambda *_args: route("uncertain", banking_probability=0.52, intent="small_talk"),
+        lambda *_args: route(
+            "uncertain",
+            banking_probability=0.52,
+            capability="conversation",
+        ),
     )
     monkeypatch.setattr(app_module, "count_tokens", lambda *_args: 50)
     monkeypatch.setattr(
@@ -111,7 +122,7 @@ def test_greeting_and_uncertain_turns_are_answered_by_9b(
     assert result[1][-1]["role"] == "assistant"
     assert result[1][-1]["content"] == "Hey! How can I help with your banking today?"
     assert "model authored" in result[4]
-    assert "small_talk" in result[5]
+    assert "conversation" in result[5]
 
 
 def test_high_confidence_ood_uses_stock_response_inside_registered_gpu_turn(
@@ -124,7 +135,7 @@ def test_high_confidence_ood_uses_stock_response_inside_registered_gpu_turn(
         lambda *_args: route(
             "out_of_domain",
             banking_probability=0.001,
-            intent="cash_withdrawal",
+            capability="accounts",
         ),
     )
 
@@ -139,8 +150,37 @@ def test_test_mode_router_omission_routes_uncertain_to_9b(app_module) -> None:
     result = app_module.route_query("hello", [])
 
     assert result["route"] == "uncertain"
-    assert result["intent"] is None
-    assert result["intent_candidates"] == []
+    assert result["capability"] is None
+    assert result["capability_candidates"] == []
+
+
+def test_classifier_failure_is_visible_and_blocks_9b(
+    app_module,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingRouter:
+        def classify(self, *_args):
+            raise RuntimeError("classifier unavailable")
+
+    monkeypatch.setattr(app_module, "router", FailingRouter())
+
+    def unexpected_generation(*_args):
+        pytest.fail("9B generation must not run after classifier failure")
+
+    monkeypatch.setattr(app_module, "generate_text", unexpected_generation)
+
+    result = app_module.run_model_turn(
+        "Show my balances.",
+        [],
+        [],
+        request(),
+    )
+
+    assert result[1][-1]["content"] == app_module.MODEL_FAILURE_RESPONSE
+    assert "classifier failed" in result[4]
+    assert "classifier_error" in result[5]
+    assert "RuntimeError" in result[5]
+    assert "9B generator was not invoked" in result[5]
 
 
 def test_model_selects_transfer_tool_and_receives_full_tool_history(
@@ -245,7 +285,7 @@ def test_second_pass_failure_preserves_executed_write_in_history_and_diagnostics
     monkeypatch.setattr(
         app_module,
         "route_query",
-        lambda *_args: route(intent="cash_withdrawal"),
+        lambda *_args: route(capability="cards"),
     )
 
     result = app_module.run_model_turn("Freeze card 4821.", [], [], request())
@@ -268,19 +308,25 @@ def test_credential_like_text_reaches_router_and_model(
 ) -> None:
     routed: list[str] = []
     generated: list[str] = []
+
+    def record_route(message, _history):
+        routed.append(message)
+        return route()
+
+    def record_generation(messages, *_args):
+        generated.append(messages[-1]["content"])
+        return "I can discuss banking support without using that credential."
+
     monkeypatch.setattr(
         app_module,
         "route_query",
-        lambda message, _history: routed.append(message) or route(),
+        record_route,
     )
     monkeypatch.setattr(app_module, "count_tokens", lambda *_args: 100)
     monkeypatch.setattr(
         app_module,
         "generate_text",
-        lambda messages, *_args: (
-            generated.append(messages[-1]["content"])
-            or "I can discuss banking support without using that credential."
-        ),
+        record_generation,
     )
 
     result = app_module.run_model_turn("My PIN is 1234", [], [], request())

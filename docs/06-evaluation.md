@@ -59,7 +59,7 @@ Use the static dry run to verify the scorer without GPU or Hub access:
 PYTHONPATH=src python scripts/retail_bank/evaluate_tool_model.py \
   --dry-run \
   --checkpoint-revision local-docs-smoke \
-  --output /tmp/hello-slm-tool-eval-dry-run.json
+  --output /tmp/retail-bank-tool-eval-dry-run.json
 ```
 
 This command evaluates two in-memory records. It verifies tool name and argument scoring, executable tool success, grounded final factuality, OOD path scoring, credential request rate, and report serialization. It does not load the Granite model or the frozen 1,347-record split.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from typing import Any, cast
 
 import pytest
 
@@ -46,7 +47,7 @@ def test_token_count_uses_input_ids_from_batch_encoding_shape(
                 "attention_mask": [1, 1, 1, 1],
             }
 
-    runtime.tokenizer = FakeTokenizer()
+    cast(Any, runtime).tokenizer = FakeTokenizer()
 
     assert runtime.count_tokens(
         [{"role": "system", "content": "system"}],

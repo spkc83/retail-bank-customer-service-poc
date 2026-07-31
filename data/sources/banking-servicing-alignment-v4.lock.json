@@ -1,0 +1,23 @@
+{
+  "alignment_split_counts": {
+    "test": 27,
+    "train": 320,
+    "validation": 80
+  },
+  "base_manifest_sha256": "42c777b0109067a49039ea41f3be62eb90573a5a0d72b1497836a72eabcd2078",
+  "contract": "banking-servicing-alignment-v4-source-lock",
+  "created_at": "2026-07-31T00:00:00Z",
+  "format_version": 1,
+  "generator_version": "banking-servicing-alignment-sft/v4",
+  "prepared_split_sha256": {
+    "test": "ab3184abe3839aadf5009730bcc4ae53e4a4ed25998e1ebce81153755a2b9cb9",
+    "train": "d2d7bc1f94cac3f394211c2d364708c0b77f4af8c50e2381143246b83f3e386a",
+    "validation": "1802a1cb07ce305dcf0272b9444b3f69fcd9da8ba38a98eedcdd8dec830cac56"
+  },
+  "split_counts": {
+    "test": 1374,
+    "train": 6624,
+    "validation": 1429
+  },
+  "synthetic_bank_sha256": "e01955d99de955104c3cf630c1e5a38976616f4306504ab528a8bcfb6aab8282"
+}

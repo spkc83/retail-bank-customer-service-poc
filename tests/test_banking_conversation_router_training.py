@@ -1,0 +1,166 @@
+from __future__ import annotations
+
+import importlib.util
+import math
+from pathlib import Path
+from types import ModuleType
+
+import torch
+
+
+def load_training_module() -> ModuleType:
+    path = Path("scripts/retail_bank/train_conversation_router.py")
+    spec = importlib.util.spec_from_file_location(
+        "banking_conversation_router_training",
+        path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_runtime_route_policy_rescues_context_but_not_topic_shift() -> None:
+    training = load_training_module()
+    routes = training.route_predictions(
+        domain_probabilities=[0.05, 0.05, 0.05, 0.90],
+        relation_probabilities=[
+            [0.95, 0.05, 0.05, 0.05],
+            [0.05, 0.95, 0.05, 0.05],
+            [0.05, 0.05, 0.95, 0.05],
+            [0.05, 0.05, 0.05, 0.05],
+        ],
+        ood_banking_threshold=0.20,
+        in_domain_threshold=0.50,
+        relation_rescue_threshold=0.50,
+    )
+
+    assert routes == ["uncertain", "uncertain", "out_of_domain", "in_domain"]
+
+
+def test_metrics_cover_capability_and_each_relation_slice() -> None:
+    training = load_training_module()
+    metrics = training.evaluate_predictions(
+        domain_probabilities=[0.95, 0.90, 0.05, 0.10, 0.90],
+        domain_labels=[1, 1, 0, 0, 1],
+        capability_predictions=[0, 1, 0, 1, 0],
+        capability_labels=[0, 1, -100, -100, 0],
+        relation_probabilities=[
+            [0.90, 0.05, 0.05, 0.05],
+            [0.90, 0.90, 0.05, 0.05],
+            [0.05, 0.05, 0.90, 0.05],
+            [0.05, 0.05, 0.90, 0.05],
+            [0.90, 0.05, 0.05, 0.05],
+        ],
+        relation_labels=[
+            [1, 0, 0, 0],
+            [1, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 1, 0],
+            [1, 0, 0, 0],
+        ],
+        example_kinds=[
+            "contextual_followup",
+            "agent_repair",
+            "external_topic_shift",
+            "external_topic_shift",
+            "heldout_screenshot_regression",
+        ],
+        current_texts=[
+            "followup",
+            "repair",
+            "weather",
+            "timer",
+            "When was that created?",
+        ],
+        ood_banking_threshold=0.20,
+        in_domain_threshold=0.50,
+        relation_rescue_threshold=0.50,
+        num_capabilities=2,
+    )
+
+    assert metrics["capability_macro_f1"] == 1.0
+    assert metrics["relation_macro_f1"] == 1.0
+    assert metrics["contextual_false_refusal_rate"] == 0.0
+    assert metrics["repair_false_refusal_rate"] == 0.0
+    assert metrics["topic_shift_ood_false_accept_rate"] == 0.0
+    assert metrics["heldout_regression_route_error_rate"] == 0.0
+    assert metrics["heldout_regression_capability_error_rate"] == 0.0
+    assert metrics["heldout_regression_relation_error_rate"] == 0.0
+    assert metrics["heldout_regression_rows"] == 1
+    assert metrics["heldout_regression_predictions"][0]["current_text"] == (
+        "When was that created?"
+    )
+    assert training.release_gate_failures(metrics) == []
+
+
+def test_release_gate_reports_use_case_regressions() -> None:
+    training = load_training_module()
+    failures = training.release_gate_failures(
+        {
+            "capability_macro_f1": 0.70,
+            "relation_macro_f1": 0.70,
+            "in_domain_false_refusal_rate": 0.06,
+            "ood_false_accept_rate": 0.10,
+            "contextual_false_refusal_rate": 0.06,
+            "repair_false_refusal_rate": 0.06,
+            "topic_shift_ood_false_accept_rate": 0.10,
+            "heldout_regression_route_error_rate": 0.10,
+            "heldout_regression_capability_error_rate": 0.10,
+            "heldout_regression_relation_error_rate": 0.10,
+        }
+    )
+
+    assert len(failures) == 10
+
+
+def test_relation_positive_weights_are_capped_for_rare_labels() -> None:
+    training = load_training_module()
+    rows = [
+        {"relation_labels": [1, 0, 0, 0]},
+        {"relation_labels": [1, 0, 0, 0]},
+        {"relation_labels": [0, 1, 0, 0]},
+        {"relation_labels": [0, 0, 0, 0]},
+    ]
+
+    assert training.relation_positive_weights(rows, max_weight=3.0) == [
+        1.0,
+        3.0,
+        3.0,
+        3.0,
+    ]
+
+
+def test_weighted_mean_prioritizes_targeted_rows() -> None:
+    training = load_training_module()
+
+    value = training._weighted_mean(
+        torch.tensor([1.0, 3.0]),
+        torch.tensor([1.0, 5.0]),
+    )
+
+    assert math.isclose(float(value), 8.0 / 3.0, rel_tol=1e-6)
+
+
+def test_relation_calibration_uses_lowest_exact_optimum_for_other_labels() -> None:
+    training = load_training_module()
+    probabilities = [
+        [0.10, 0.20, 0.80, 0.10],
+        [0.01, 0.01, 0.01, 0.01],
+    ]
+    labels = [
+        [1, 1, 1, 1],
+        [0, 0, 0, 0],
+    ]
+
+    thresholds = training.calibrate_relation_thresholds(
+        probabilities,
+        labels,
+    )
+
+    assert thresholds == {
+        "context_dependent": 0.05,
+        "agent_repair": 0.05,
+        "topic_shift": 0.05,
+        "clarification_answer": 0.05,
+    }

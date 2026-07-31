@@ -27,6 +27,17 @@ service and operate a synthetic retail-bank backend.
 Everything is fictional. The application has no connection to a bank and
 cannot access real accounts or perform real transactions.
 
+## V4 branch status
+
+The public Space still uses the released dual-head router listed below. The
+`feat/conversation-router-v4` source branch contains a history-aware
+cross-encoder candidate with domain, servicing-capability, and multi-label
+conversation-relation heads. That branch deliberately uses a non-loadable
+`unpublished-v4` revision sentinel. The local artifact passes its held-out
+gates, but the sentinel remains until that candidate is explicitly published
+at an immutable commit. Capability predictions remain diagnostics and never
+enter the Granite prompt or choose tools.
+
 ## Live artifacts
 
 - Application: https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc

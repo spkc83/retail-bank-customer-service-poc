@@ -23,12 +23,14 @@ Authenticated synthetic customer
   -> model-authored final response
 ```
 
-The implementation is split across these files:
+The released architecture and the current branch implementation are documented
+across these files:
 
 | Step | Code |
 | --- | --- |
 | Gradio event and OOD shortcut | [../poc/retail-bank-customer-service-poc/app.py](../poc/retail-bank-customer-service-poc/app.py) |
-| CPU router loading and prediction | [../poc/retail-bank-customer-service-poc/router.py](../poc/retail-bank-customer-service-poc/router.py) |
+| Released dual-head router contract | [../src/hello_slm/banking_dual_head_router.py](../src/hello_slm/banking_dual_head_router.py) |
+| Current v4 branch router loading and prediction | [../poc/retail-bank-customer-service-poc/router.py](../poc/retail-bank-customer-service-poc/router.py) |
 | Model/tool loop | [../poc/retail-bank-customer-service-poc/model_service.py](../poc/retail-bank-customer-service-poc/model_service.py) |
 | ZeroGPU model loading and deterministic decoding | [../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py](../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py) |
 | Synthetic bank state and tool execution | [../poc/retail-bank-customer-service-poc/mock_bank.py](../poc/retail-bank-customer-service-poc/mock_bank.py) |
@@ -42,9 +44,11 @@ The router is a shared-encoder classifier with:
 - a binary supported-banking/OOD head;
 - a 77-way Banking77 intent head.
 
-The POC loads the artifact from `spkc83/retail-bank-domain-intent-router` at
-revision `136ee159d19cda7f585dd122907bbeb1ef4ec4db`. The router uses two
-serving thresholds in [../poc/retail-bank-customer-service-poc/router.py](../poc/retail-bank-customer-service-poc/router.py):
+The deployed public v1 POC loads the artifact from
+`spkc83/retail-bank-domain-intent-router` at revision
+`136ee159d19cda7f585dd122907bbeb1ef4ec4db`. Its released thresholds are
+recorded in
+[the router model card](../model_cards/retail-bank-domain-intent-router.md):
 
 - banking probability below `0.165`: high-confidence OOD;
 - banking probability at least `0.50`: in-domain;
@@ -54,6 +58,12 @@ High-confidence OOD requests receive the static governed response from
 [../poc/retail-bank-customer-service-poc/responses.py](../poc/retail-bank-customer-service-poc/responses.py).
 Uncertain requests continue to the 8.79B model. The top intent candidates are
 diagnostics only; they are not added to the prompt and they do not choose tools.
+
+The current `feat/conversation-router-v4` branch replaces that POC loader with
+the history-aware capability/relation candidate described in
+[Conversation Router v4](09-conversation-router-v4.md). Its local artifact
+passes the candidate gates but remains unpublished and is not the deployed
+public router.
 
 ### Granite generative agent
 
@@ -119,8 +129,9 @@ Runtime behavior mirrors the SFT and evaluation code:
 
 The POC is explicit about failure boundaries:
 
-- If the router artifact is unavailable or classification fails, the route is
-  marked uncertain and the 8.79B model receives the turn.
+- The deployed v1 Space marks an already-loaded router failure uncertain. The
+  current v4 branch instead reports `classifier_error` and does not invoke the
+  8.79B model, so a classifier outage cannot masquerade as a valid experiment.
 - If ZeroGPU allocation or generation fails, the UI reports model
   unavailability.
 - If the model emits malformed tool syntax or invalid tool arguments, the UI

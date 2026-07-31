@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
+import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -12,47 +13,89 @@ from safetensors.torch import load_file
 from torch import nn
 from transformers import AutoModel, AutoTokenizer
 
-ROUTER_REPO_ID = "spkc83/retail-bank-domain-intent-router"
-ROUTER_REVISION = "136ee159d19cda7f585dd122907bbeb1ef4ec4db"
-OOD_BANKING_PROBABILITY_THRESHOLD = 0.5
+ROUTER_REPO_ID = os.environ.get(
+    "RETAIL_BANK_ROUTER_ID",
+    "spkc83/retail-bank-conversation-router",
+)
+ROUTER_REVISION = os.environ.get(
+    "RETAIL_BANK_ROUTER_REVISION",
+    "unpublished-v4",
+)
 
 
-class DualHeadRouterModel(nn.Module):
-    def __init__(self, encoder: nn.Module, hidden_size: int, intent_count: int) -> None:
+class ConversationRouterModel(nn.Module):
+    def __init__(
+        self,
+        encoder: nn.Module,
+        *,
+        hidden_size: int,
+        capability_count: int,
+        relation_count: int,
+    ) -> None:
         super().__init__()
         self.encoder = encoder
         self.domain_head = nn.Linear(hidden_size, 2)
-        self.intent_head = nn.Linear(hidden_size, intent_count)
+        self.capability_head = nn.Linear(hidden_size, capability_count)
+        self.relation_head = nn.Linear(hidden_size, relation_count)
 
     def forward(
         self,
         *,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
         pooled = outputs.last_hidden_state[:, 0]
-        return self.domain_head(pooled), self.intent_head(pooled)
+        return (
+            self.domain_head(pooled),
+            self.capability_head(pooled),
+            self.relation_head(pooled),
+        )
 
 
 class LearnedBankingRouter:
+    """History-aware CPU gate; capability predictions are diagnostics only."""
+
     def __init__(
         self,
         *,
         tokenizer: Any,
-        model: DualHeadRouterModel,
-        intent_labels: tuple[str, ...],
-        threshold: float,
+        model: Any,
+        capability_labels: tuple[str, ...],
+        relation_labels: tuple[str, ...],
+        ood_banking_threshold: float,
+        in_domain_threshold: float,
+        relation_rescue_threshold: float,
+        relation_thresholds: Mapping[str, float] | None = None,
         max_length: int,
+        max_exchanges: int,
     ) -> None:
+        if not capability_labels or not relation_labels:
+            raise ValueError("router labels must not be empty")
+        if not 0.0 < ood_banking_threshold < in_domain_threshold < 1.0:
+            raise ValueError("invalid domain thresholds")
+        if not 0.0 < relation_rescue_threshold < 1.0:
+            raise ValueError("invalid relation rescue threshold")
         self.tokenizer = tokenizer
         self.model = model.to("cpu").eval()
-        self.intent_labels = intent_labels
-        self.threshold = threshold
+        self.capability_labels = capability_labels
+        self.relation_labels = relation_labels
+        self.ood_banking_threshold = ood_banking_threshold
+        self.in_domain_threshold = in_domain_threshold
+        self.relation_rescue_threshold = relation_rescue_threshold
+        self.relation_thresholds = {
+            label: float((relation_thresholds or {}).get(label, 0.5))
+            for label in self.relation_labels
+        }
         self.max_length = max_length
+        self.max_exchanges = max_exchanges
 
     @classmethod
     def from_hub(cls) -> LearnedBankingRouter:
+        if not _is_commit(ROUTER_REVISION):
+            raise RuntimeError(
+                "RETAIL_BANK_ROUTER_REVISION must pin the published v4 router commit"
+            )
         root = Path(snapshot_download(ROUTER_REPO_ID, revision=ROUTER_REVISION))
         config = verify_artifact(root)
         tokenizer = AutoTokenizer.from_pretrained(
@@ -65,31 +108,38 @@ class LearnedBankingRouter:
             local_files_only=True,
             trust_remote_code=False,
         )
-        labels = tuple(str(label) for label in config["intent_labels"])
-        model = DualHeadRouterModel(
+        capabilities = tuple(str(label) for label in config["capability_labels"])
+        relations = tuple(str(label) for label in config["relation_labels"])
+        model = ConversationRouterModel(
             encoder,
-            int(encoder.config.hidden_size),
-            len(labels),
+            hidden_size=int(encoder.config.hidden_size),
+            capability_count=len(capabilities),
+            relation_count=len(relations),
         )
         heads = load_file(root / "classifier_heads.safetensors", device="cpu")
-        model.domain_head.load_state_dict(
-            {
-                "weight": heads["domain_head.weight"],
-                "bias": heads["domain_head.bias"],
-            }
-        )
-        model.intent_head.load_state_dict(
-            {
-                "weight": heads["intent_head.weight"],
-                "bias": heads["intent_head.bias"],
-            }
-        )
+        for name, head in (
+            ("domain_head", model.domain_head),
+            ("capability_head", model.capability_head),
+            ("relation_head", model.relation_head),
+        ):
+            head.load_state_dict(
+                {
+                    "weight": heads[f"{name}.weight"],
+                    "bias": heads[f"{name}.bias"],
+                },
+                strict=True,
+            )
         return cls(
             tokenizer=tokenizer,
             model=model,
-            intent_labels=labels,
-            threshold=float(config["domain_threshold"]),
+            capability_labels=capabilities,
+            relation_labels=relations,
+            ood_banking_threshold=float(config["ood_banking_threshold"]),
+            in_domain_threshold=float(config["in_domain_threshold"]),
+            relation_rescue_threshold=float(config["relation_rescue_threshold"]),
+            relation_thresholds=config.get("relation_thresholds"),
             max_length=int(config["max_length"]),
+            max_exchanges=int(config.get("max_exchanges", 3)),
         )
 
     def classify(
@@ -99,66 +149,19 @@ class LearnedBankingRouter:
     ) -> dict[str, Any]:
         if not isinstance(message, str) or not message.strip():
             raise ValueError("message must be a non-empty string")
-        normalized_message = message.strip()
-        current = self._predict(f"[CURRENT]\n{normalized_message}")
-        current["context_applied"] = False
-        if current["route"] == "in_domain":
-            return current
-
-        exchanges = _recent_exchanges(history)
-        if not exchanges:
-            return current
-        previous_user, previous_assistant = exchanges[-1]
-        if (
-            _has_contextual_reference(normalized_message)
-            and _is_ambiguous_contextual_fragment(normalized_message)
-        ):
-            context_reason = "contextual_reference"
-        elif (
-            _is_short_follow_up(normalized_message)
-            and _is_ambiguous_contextual_fragment(normalized_message)
-            and _invites_follow_up(previous_assistant)
-        ):
-            context_reason = "short_follow_up"
-        else:
-            return current
-
-        previous = self._predict(f"[CURRENT]\n{previous_user}")
-        if previous["route"] == "out_of_domain":
-            if len(exchanges) < 2:
-                return current
-            earlier_user, earlier_assistant = exchanges[-2]
-            previous_was_follow_up = (
-                _has_contextual_reference(previous_user)
-                or (
-                    _is_short_follow_up(previous_user)
-                    and _invites_follow_up(earlier_assistant)
-                )
-            )
-            if not previous_was_follow_up:
-                return current
-            earlier = self._predict(f"[CURRENT]\n{earlier_user}")
-            if earlier["route"] == "out_of_domain":
-                return current
-
-        contextual = self._predict(
-            f"[CURRENT]\n{normalized_message}\n"
-            f"[PREVIOUS_ASSISTANT]\n{previous_assistant}\n"
-            f"[PREVIOUS_USER]\n{previous_user}"
+        rendered, context_applied = render_router_input(
+            message.strip(),
+            history,
+            max_exchanges=self.max_exchanges,
         )
-        if contextual["route"] == "out_of_domain":
-            contextual["route"] = "uncertain"
-            contextual["context_route_override"] = (
-                "Active banking follow-up was retained for 9B adjudication."
-            )
-        contextual["context_applied"] = True
-        contextual["context_reason"] = context_reason
-        contextual["context_chain_depth"] = (
-            2 if previous["route"] == "out_of_domain" else 1
-        )
-        return contextual
+        return self._predict(rendered, context_applied=context_applied)
 
-    def _predict(self, rendered: str) -> dict[str, Any]:
+    def _predict(
+        self,
+        rendered: str,
+        *,
+        context_applied: bool,
+    ) -> dict[str, Any]:
         encoded = self.tokenizer(
             rendered,
             return_tensors="pt",
@@ -166,20 +169,48 @@ class LearnedBankingRouter:
             max_length=self.max_length,
         )
         with torch.inference_mode():
-            domain_logits, intent_logits = self.model(
+            domain_logits, capability_logits, relation_logits = self.model(
                 input_ids=encoded["input_ids"],
                 attention_mask=encoded["attention_mask"],
             )
-        banking_probability = float(torch.softmax(domain_logits, dim=-1)[0, 1])
-        intent_probabilities = torch.softmax(intent_logits, dim=-1)[0]
-        candidate_count = min(3, len(self.intent_labels))
+        banking_probability = float(
+            torch.softmax(domain_logits.float(), dim=-1)[0, 1]
+        )
+        ood_probability = 1.0 - banking_probability
+        relation_values = torch.sigmoid(relation_logits.float())[0].tolist()
+        relations = dict(zip(self.relation_labels, relation_values, strict=True))
+        active_relations = [
+            label
+            for label in self.relation_labels
+            if relations[label] >= self.relation_thresholds[label]
+        ]
+        rescue_probability = max(
+            relations.get("context_dependent", 0.0),
+            relations.get("agent_repair", 0.0),
+            relations.get("clarification_answer", 0.0),
+        )
+        if banking_probability >= self.in_domain_threshold:
+            route = "in_domain"
+        elif (
+            banking_probability < self.ood_banking_threshold
+            and rescue_probability < self.relation_rescue_threshold
+        ):
+            route = "out_of_domain"
+        else:
+            route = "uncertain"
+
+        capability_probabilities = torch.softmax(
+            capability_logits.float(),
+            dim=-1,
+        )[0]
+        candidate_count = min(3, len(self.capability_labels))
         candidate_probabilities, candidate_indices = torch.topk(
-            intent_probabilities,
+            capability_probabilities,
             k=candidate_count,
         )
-        candidates = [
+        capability_candidates = [
             {
-                "intent": self.intent_labels[int(index)],
+                "capability": self.capability_labels[int(index)],
                 "probability": float(probability),
             }
             for probability, index in zip(
@@ -188,37 +219,54 @@ class LearnedBankingRouter:
                 strict=True,
             )
         ]
-        ood_probability = 1.0 - banking_probability
-        ood_threshold = min(self.threshold, OOD_BANKING_PROBABILITY_THRESHOLD)
-        in_domain_threshold = max(
-            self.threshold,
-            OOD_BANKING_PROBABILITY_THRESHOLD,
+        capability = (
+            capability_candidates[0]["capability"] if route == "in_domain" else None
         )
-        if banking_probability >= in_domain_threshold:
-            route = "in_domain"
-        elif banking_probability < ood_threshold:
-            route = "out_of_domain"
-        else:
-            route = "uncertain"
+        capability_confidence = float(candidate_probabilities[0])
         return {
             "route": route,
             "banking_probability": banking_probability,
             "ood_probability": ood_probability,
-            "confidence": max(banking_probability, ood_probability),
-            "intent": candidates[0]["intent"],
-            "intent_confidence": candidates[0]["probability"],
-            "intent_candidates": candidates,
-            "threshold": self.threshold,
-            "ood_threshold": ood_threshold,
-            "in_domain_threshold": in_domain_threshold,
+            "confidence": (
+                banking_probability
+                if route == "in_domain"
+                else ood_probability
+                if route == "out_of_domain"
+                else max(banking_probability, rescue_probability)
+            ),
+            "capability": capability,
+            "capability_confidence": capability_confidence,
+            "capability_candidates": capability_candidates,
+            "relation_probabilities": relations,
+            "relation_thresholds": self.relation_thresholds,
+            "active_relations": active_relations,
+            "context_applied": context_applied,
+            "ood_banking_threshold": self.ood_banking_threshold,
+            "in_domain_threshold": self.in_domain_threshold,
+            "relation_rescue_threshold": self.relation_rescue_threshold,
             "router_revision": ROUTER_REVISION,
+            "router_architecture": "history-aware-cross-encoder-v4",
         }
+
+
+def render_router_input(
+    current: str,
+    history: list[dict[str, Any]] | None,
+    *,
+    max_exchanges: int,
+) -> tuple[str, bool]:
+    exchanges = _recent_exchanges(history)[-max_exchanges:]
+    parts = [f"[CURRENT_USER]\n{current.strip()}"]
+    for previous_user, previous_assistant in reversed(exchanges):
+        parts.append(f"[PREVIOUS_ASSISTANT]\n{previous_assistant}")
+        parts.append(f"[PREVIOUS_USER]\n{previous_user}")
+    return "\n".join(parts), bool(exchanges)
 
 
 def verify_artifact(root: Path) -> dict[str, Any]:
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     if (
-        manifest.get("contract") != "banking-dual-head-router-artifact"
+        manifest.get("contract") != "banking-conversation-router-artifact"
         or manifest.get("release_eligible") is not True
     ):
         raise ValueError("router artifact is not release eligible")
@@ -232,30 +280,14 @@ def verify_artifact(root: Path) -> dict[str, Any]:
         if _sha256(path) != str(entry["sha256"]):
             raise ValueError(f"router artifact digest mismatch: {relative}")
     config = json.loads((root / "router_config.json").read_text(encoding="utf-8"))
-    if config.get("contract") != "banking-dual-head-router":
+    if (
+        config.get("contract") != "banking-conversation-router"
+        or int(config.get("format_version", 0)) != 2
+    ):
         raise ValueError("unexpected router configuration")
+    if config.get("capability_enters_generation_prompt") is not False:
+        raise ValueError("router capability must remain diagnostic")
     return config
-
-
-def _has_contextual_reference(text: str) -> bool:
-    normalized = "".join(character.lower() if character.isalnum() else " " for character in text)
-    return bool(
-        set(normalized.split())
-        & {
-            "again",
-            "else",
-            "it",
-            "next",
-            "that",
-            "them",
-            "then",
-            "there",
-            "these",
-            "they",
-            "this",
-            "those",
-        }
-    )
 
 
 def _recent_exchanges(
@@ -271,116 +303,17 @@ def _recent_exchanges(
     ]
     exchanges: list[tuple[str, str]] = []
     active_user: str | None = None
-    active_assistant: str | None = None
     for role, content in messages:
         if role == "user":
-            if active_user is not None and active_assistant is not None:
-                exchanges.append((active_user, active_assistant))
             active_user = content
-            active_assistant = None
         elif active_user is not None:
-            active_assistant = content
-    if active_user is not None and active_assistant is not None:
-        exchanges.append((active_user, active_assistant))
+            exchanges.append((active_user, content))
+            active_user = None
     return exchanges
 
 
-def _is_short_follow_up(text: str) -> bool:
-    words = re.findall(r"[A-Za-z0-9]+", text)
-    return 0 < len(words) <= 6 and len(text) <= 64
-
-
-def _is_ambiguous_contextual_fragment(text: str) -> bool:
-    words = {word.casefold() for word in re.findall(r"[A-Za-z0-9]+", text)}
-    if not words:
-        return False
-    fragment_vocabulary = {
-        "a",
-        "about",
-        "again",
-        "also",
-        "an",
-        "and",
-        "another",
-        "are",
-        "be",
-        "block",
-        "can",
-        "cancel",
-        "care",
-        "check",
-        "could",
-        "did",
-        "dispute",
-        "do",
-        "does",
-        "else",
-        "for",
-        "freeze",
-        "happen",
-        "happened",
-        "is",
-        "it",
-        "list",
-        "make",
-        "me",
-        "my",
-        "need",
-        "next",
-        "no",
-        "now",
-        "of",
-        "ok",
-        "okay",
-        "one",
-        "ones",
-        "or",
-        "other",
-        "please",
-        "replace",
-        "same",
-        "show",
-        "stop",
-        "sure",
-        "take",
-        "tell",
-        "that",
-        "the",
-        "them",
-        "then",
-        "there",
-        "these",
-        "they",
-        "this",
-        "those",
-        "to",
-        "too",
-        "want",
-        "was",
-        "were",
-        "what",
-        "which",
-        "will",
-        "would",
-        "yes",
-    }
-    return all(word.isdigit() or word in fragment_vocabulary for word in words)
-
-
-def _invites_follow_up(text: str) -> bool:
-    normalized = text.casefold()
-    return "?" in text or any(
-        phrase in normalized
-        for phrase in (
-            "please provide",
-            "please tell me",
-            "which one",
-            "what are",
-            "could you provide",
-            "can you provide",
-            "need the",
-        )
-    )
+def _is_commit(value: str) -> bool:
+    return len(value) == 40 and all(character in "0123456789abcdef" for character in value)
 
 
 def _sha256(path: Path) -> str:

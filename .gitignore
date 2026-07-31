@@ -10,4 +10,6 @@ dist/
 artifacts/
 data/banking-v3-tool-sft/
 data/banking-router-v1/
+data/banking-conversation-router-v4/
+data/banking-servicing-alignment-v4/
 *.egg-info/

@@ -57,13 +57,19 @@ def router_guidance() -> dict[str, Any]:
         "route": "in_domain",
         "banking_probability": 0.99,
         "ood_probability": 0.01,
-        "intent": "pending_transfer",
-        "intent_confidence": 0.81,
-        "intent_candidates": [
-            {"intent": "pending_transfer", "probability": 0.81},
-            {"intent": "cancel_transfer", "probability": 0.12},
-            {"intent": "card_payment_fee_charged", "probability": 0.03},
+        "capability": "transfers",
+        "capability_confidence": 0.81,
+        "capability_candidates": [
+            {"capability": "transfers", "probability": 0.81},
+            {"capability": "accounts", "probability": 0.12},
+            {"capability": "cards", "probability": 0.03},
         ],
+        "relation_probabilities": {
+            "context_dependent": 0.1,
+            "agent_repair": 0.1,
+            "topic_shift": 0.1,
+            "clarification_answer": 0.1,
+        },
     }
 
 
@@ -487,16 +493,16 @@ def test_tool_chain_stops_at_total_call_limit() -> None:
 
 
 def test_token_budget_keeps_latest_complete_tool_chain_and_newest_fitting_turns() -> None:
-    system = {"role": "system", "content": "system"}
-    old = [
+    system: dict[str, Any] = {"role": "system", "content": "system"}
+    old: list[dict[str, Any]] = [
         {"role": "user", "content": "old " * 30},
         {"role": "assistant", "content": "old answer " * 30},
     ]
-    middle = [
+    middle: list[dict[str, Any]] = [
         {"role": "user", "content": "middle"},
         {"role": "assistant", "content": "middle answer"},
     ]
-    latest = [
+    latest: list[dict[str, Any]] = [
         {"role": "user", "content": "show transfers"},
         {
             "role": "assistant",
