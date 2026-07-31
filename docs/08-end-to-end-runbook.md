@@ -223,7 +223,8 @@ Current released model identity:
 
 - repo: `spkc83/retail-bank-agent-9b`
 - immutable weights revision: `085df3d089cfadd77424b548542da0390a54a23e`
-- training/provenance head: `247ac402989144698f89727a59a07ce5d05f31c6`
+- training/provenance revision: `247ac402989144698f89727a59a07ce5d05f31c6`
+- published evaluation head: `98cde9ee058b785fb871abcd2c85e18cea410bdf`
 - training job: `spkc83/6a6a60d4b36a6516e96a0709`
 - FP16-native recovery and merge-parity job:
   `spkc83/6a6a6b6323ed89c748ec502c`
@@ -274,6 +275,13 @@ Released evaluation job:
 - banking FAQs: `258/258`
 - OOD paths: `30/30`
 - grounded factual responses: `1,119/1,119`
+
+The released evaluation files are retained in the model repository. The
+private bucket was only a restartable staging location; its released
+evaluation copy and obsolete training intermediates were retired on
+2026-07-31. The selected continuation step-600 recovery checkpoint remains.
+See [`docs/04-training-and-recovery.md`](04-training-and-recovery.md) for the
+exact retention policy.
 
 ## 9. Run the POC Locally
 

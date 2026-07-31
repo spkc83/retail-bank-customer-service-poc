@@ -28,8 +28,10 @@ adaptation of `ibm-granite/granite-4.1-8b`.
 - Model repository: `spkc83/retail-bank-agent-9b`
 - Immutable weights revision:
   `085df3d089cfadd77424b548542da0390a54a23e`
-- Training/provenance head:
+- Training/provenance revision:
   `247ac402989144698f89727a59a07ce5d05f31c6`
+- Published evaluation head:
+  `98cde9ee058b785fb871abcd2c85e18cea410bdf`
 - Base revision:
   `1504002f650e656a0a3789d99574df12e3e94ed0`
 - Source revision:

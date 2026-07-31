@@ -8,7 +8,8 @@ agent, dual-head router, datasets, local manifests, and paid job outputs.
 | Artifact | Repository | Immutable revision | Source |
 | --- | --- | --- | --- |
 | Granite retail-bank agent | `spkc83/retail-bank-agent-9b` | `085df3d089cfadd77424b548542da0390a54a23e` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md), [`zero_gpu_runtime.py`](../../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py) |
-| Agent provenance head | `spkc83/retail-bank-agent-9b` | `247ac402989144698f89727a59a07ce5d05f31c6` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
+| Agent training/provenance revision | `spkc83/retail-bank-agent-9b` | `247ac402989144698f89727a59a07ce5d05f31c6` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
+| Agent published evaluation head | `spkc83/retail-bank-agent-9b` | `98cde9ee058b785fb871abcd2c85e18cea410bdf` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
 | Agent base model | `ibm-granite/granite-4.1-8b` | `1504002f650e656a0a3789d99574df12e3e94ed0` | [`configs/banking-tool-sft-granite.toml`](../../configs/banking-tool-sft-granite.toml), [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
 | Tool-use SFT dataset | `spkc83/retail-bank-agent-sft` | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` | [`data_cards/retail-bank-agent-sft.md`](../../data_cards/retail-bank-agent-sft.md), [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
 | Dual-head router | `spkc83/retail-bank-domain-intent-router` | `136ee159d19cda7f585dd122907bbeb1ef4ec4db` | [`router.py`](../../poc/retail-bank-customer-service-poc/router.py), [`model_cards/retail-bank-domain-intent-router.md`](../../model_cards/retail-bank-domain-intent-router.md) |
@@ -21,7 +22,8 @@ agent, dual-head router, datasets, local manifests, and paid job outputs.
 | --- | --- | --- |
 | Model repository | `spkc83/retail-bank-agent-9b` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
 | Immutable weights revision | `085df3d089cfadd77424b548542da0390a54a23e` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Training/provenance head | `247ac402989144698f89727a59a07ce5d05f31c6` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
+| Training/provenance revision | `247ac402989144698f89727a59a07ce5d05f31c6` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
+| Published evaluation head | `98cde9ee058b785fb871abcd2c85e18cea410bdf` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
 | Base model | `ibm-granite/granite-4.1-8b` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
 | Base revision | `1504002f650e656a0a3789d99574df12e3e94ed0` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
 | Source revision | `4270636255515f7a563d935794a3642e0b13ccb3` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
@@ -41,6 +43,26 @@ explicitly authorized.
 | Granite SFT training | `spkc83/6a6a60d4b36a6516e96a0709` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
 | FP16-native recovery and merge parity | `spkc83/6a6a6b6323ed89c748ec502c` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
 | Frozen tool/final-response evaluation | `spkc83/6a6a6c7cb36a6516e96a0ac4` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
+
+## Private Job-Bucket Retention
+
+Bucket: `spkc83/jobs-artifacts`
+
+The bucket is a private, restartable job workspace. It is not read by the
+public Space and it is not the authoritative location for published model,
+router, dataset, or evaluation artifacts.
+
+| State | Files | Logical size |
+| --- | ---: | ---: |
+| Before 2026-07-31 cleanup | 290 | 449,461,595,301 bytes |
+| After cleanup | 58 | 1,252,559,272 bytes |
+| Removed | 232 | about 448.2 GB |
+
+The retained set preserves the released continuation's selected
+`checkpoint-600` adapter, trainer state, and provenance JSON. Failed runs,
+superseded checkpoints, duplicate merged weights, temporary merge files, and
+bucket copies of already-published evaluation outputs were removed. New runs
+must write a new prefix and apply the same publish-verify-retain policy.
 
 ## Released Evaluation
 

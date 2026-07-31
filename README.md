@@ -103,10 +103,14 @@ MYPYPATH=src uv run mypy src scripts tests
 uv lock --check
 ```
 
-The paid Hugging Face Jobs commands, checkpoint persistence requirements, and
-recovery paths are documented in
+The paid Hugging Face Jobs commands, checkpoint retention policy, and recovery
+paths are documented in
 [training and recovery](docs/04-training-and-recovery.md). They are
 intentionally separate from the safe local quick start.
+
+Published Hub repositories are the release source of truth. The private
+`jobs-artifacts` bucket is a bounded training workspace, not a second model
+registry: only the selected recovery checkpoint is retained after a release.
 
 ## Release facts
 

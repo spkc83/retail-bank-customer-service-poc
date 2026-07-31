@@ -19,6 +19,31 @@ Use immutable 40-character revisions for every paid or published run. Branch nam
 | Training job | `spkc83/6a6a60d4b36a6516e96a0709` | [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md) |
 | Recovery and parity job | `spkc83/6a6a6b6323ed89c748ec502c` | [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md) |
 
+## Bucket Retention Policy
+
+The private `spkc83/jobs-artifacts` bucket is durable working storage for an
+active job, but it is not the release source of truth. On 2026-07-31, after the
+merged weights, adapter, provenance, and frozen evaluation were verified in
+their published Hub repositories, 232 obsolete job files totaling 448.2 GB
+were removed. The bucket now retains 58 files totaling about 1.25 GB.
+
+The retained recovery set is:
+
+- `retail-bank-agent-9b-continuation-42706362-68a4e5b1/checkpoint-600/`;
+- `continuation_training_metadata.json` and the small JSON provenance records
+  for that released continuation.
+
+This preserves export recovery for the selected step-600 adapter. Superseded
+checkpoints, failed-run outputs, duplicate merged 16.8 GB weights, temporary
+merge files, optimizer state from non-selected runs, and bucket copies of
+published evaluation results were retired. The active model, adapter,
+evaluation, router, datasets, and Space do not load from this bucket.
+
+New training and evaluation runs must use a new output prefix. Their
+intermediate files may be removed after publication and verification, but the
+selected recovery adapter, trainer state, and run metadata must remain until
+that release is formally retired.
+
 ## What Trains
 
 The worker [`scripts/retail_bank/cloud_train_tool_sft.py`](../scripts/retail_bank/cloud_train_tool_sft.py) loads the pinned Granite base and trains a BF16 LoRA adapter with TRL `SFTTrainer`. The retained hyperparameters are:
@@ -98,17 +123,21 @@ scripts/retail_bank/run_remote_training_job.sh \
   183e7e1ed1aba9c3d7155e7b83b64dc854935055
 ```
 
-The mounted bucket persists under `/data`, so checkpoints survive job exit and can be reused by continuation or recovery. The wrapper builds the output path as `/data/retail-bank-agent-9b-${SOURCE_COMMIT:0:8}`.
+The mounted bucket persists under `/data`, so checkpoints survive job exit
+during an active run and can be reused by continuation or recovery until the
+retention policy is applied. The wrapper builds the output path as
+`/data/retail-bank-agent-9b-${SOURCE_COMMIT:0:8}`.
 
-The current launchers resolve job bootstraps under `scripts/retail_bank`.
-When resuming a source commit created before the directory rename, they probe
-the pre-rename bootstrap URL only after the current path is absent. The old
-directory is not part of the current tree; this narrow URL fallback keeps
-immutable historical checkpoints recoverable.
+The active launchers and source of truth are under `scripts/retail_bank`.
+For compatibility only, when resuming a source commit created before the
+directory rename, a launcher probes the pre-rename bootstrap URL after the
+current path is absent. The old directory is not part of the current tree.
 
 ## Resume Initial Training
 
-If the initial job exits after writing a valid checkpoint, resume with the same source and dataset revisions plus the checkpoint path under the persisted bucket:
+If an active job exits after writing a retained checkpoint, resume with the
+same source and dataset revisions plus the checkpoint path under the persisted
+bucket:
 
 ```bash
 scripts/retail_bank/run_remote_training_job.sh \
@@ -171,7 +200,11 @@ The release model card records the accepted FP16-native continuation values: `8/
 
 ## Export Recovery
 
-Use export recovery when continuation training completed and wrote a good adapter to the bucket, but publication or final export failed. Recovery is export-only: it does not call `trainer.train`. The launcher is [`scripts/retail_bank/run_remote_continuation_export_recovery.sh`](../scripts/retail_bank/run_remote_continuation_export_recovery.sh), the job bootstrap is [`scripts/retail_bank/hf_job_recover_continuation_export.py`](../scripts/retail_bank/hf_job_recover_continuation_export.py), and the recovery worker is [`scripts/retail_bank/cloud_recover_continuation_export.py`](../scripts/retail_bank/cloud_recover_continuation_export.py).
+Use export recovery when continuation training completed and wrote a retained
+adapter to the bucket, but publication or final export failed. The released
+v3 step-600 adapter remains available for this path; superseded v3 checkpoints
+do not. Recovery is export-only: it does not call `trainer.train`. The launcher
+is [`scripts/retail_bank/run_remote_continuation_export_recovery.sh`](../scripts/retail_bank/run_remote_continuation_export_recovery.sh), the job bootstrap is [`scripts/retail_bank/hf_job_recover_continuation_export.py`](../scripts/retail_bank/hf_job_recover_continuation_export.py), and the recovery worker is [`scripts/retail_bank/cloud_recover_continuation_export.py`](../scripts/retail_bank/cloud_recover_continuation_export.py).
 
 ```bash
 scripts/retail_bank/run_remote_continuation_export_recovery.sh \

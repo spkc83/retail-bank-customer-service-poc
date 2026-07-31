@@ -119,7 +119,13 @@ bash scripts/retail_bank/run_remote_tool_eval_job.sh \
   183e7e1ed1aba9c3d7155e7b83b64dc854935055
 ```
 
-The `HF_TOKEN` secret must read the model and dataset and write evaluation artifacts to `spkc83/retail-bank-agent-9b`. The launcher writes to `/data/retail-bank-agent-eval-${MODEL_REVISION:0:8}-${DATASET_REVISION:0:8}` in the durable bucket.
+The `HF_TOKEN` secret must read the model and dataset and write evaluation
+artifacts to `spkc83/retail-bank-agent-9b`. The launcher writes temporary,
+restartable outputs to
+`/data/retail-bank-agent-eval-${MODEL_REVISION:0:8}-${DATASET_REVISION:0:8}`
+in the durable bucket. After the published files and hashes are verified in
+the model repository, the bucket copy may be retired under the policy in
+[`docs/04-training-and-recovery.md`](04-training-and-recovery.md).
 
 [`hf_job_tool_eval.py`](../scripts/retail_bank/hf_job_tool_eval.py) pins the runtime packages in its PEP 723 header, downloads the exact source commit, sets `PYTHONPATH`, exports revision metadata, and invokes [`cloud_generate_tool_eval.py`](../scripts/retail_bank/cloud_generate_tool_eval.py) with `--dtype fp16 --push-to-hub`.
 
@@ -149,6 +155,9 @@ The metadata records:
 - output paths and SHA-256 values;
 - publish prefix;
 - disabled live tool execution and disabled output repair.
+
+For the released evaluation, the published model-repository copy is the source
+of truth. Its former bucket staging copy was removed on 2026-07-31.
 
 ## Metrics and Gates
 
