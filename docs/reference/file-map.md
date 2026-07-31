@@ -87,7 +87,7 @@ This map links the current active retail-bank agent workflow to repo files.
 | [`../../scripts/retail_bank/run_remote_tool_eval_job.sh`](../../scripts/retail_bank/run_remote_tool_eval_job.sh) | Paid frozen eval job launcher. |
 | [`../../scripts/retail_bank/rescore_tool_eval.py`](../../scripts/retail_bank/rescore_tool_eval.py) | Reproducible prompt-equivalence proof and persisted-prediction rescore. |
 | [`../../scripts/retail_bank/run_release_pipeline.py`](../../scripts/retail_bank/run_release_pipeline.py) | Canonical data, two-stage SFT, router, evaluation, and deployment orchestrator. |
-| [`../../scripts/retail_bank/deploy_zero_gpu_space.py`](../../scripts/retail_bank/deploy_zero_gpu_space.py) | Guarded allowlist upload, exact runtime-pin persistence, restart, and Space readiness helper. |
+| [`../../scripts/retail_bank/deploy_zero_gpu_space.py`](../../scripts/retail_bank/deploy_zero_gpu_space.py) | Guarded allowlist upload, exact runtime-pin persistence, and Space readiness helper. |
 | [`../../scripts/retail_bank/hf_job_remerge_tool_sft.py`](../../scripts/retail_bank/hf_job_remerge_tool_sft.py) | Merge recovery helper used by release validation. |
 | [`../../scripts/retail_bank/hf_job_merge_parity.py`](../../scripts/retail_bank/hf_job_merge_parity.py) | Merge parity helper. |
 

@@ -323,8 +323,8 @@ deployment command without explicit authorization for that deployment. Before a
 deployment, verify the local POC tests and set the Space secret `DEMO_AUTH_JSON`
 to the exact two demo users. The canonical deploy stage uploads only allowlisted
 application files, persists the exact model and router revisions as Space
-variables, records the returned Space commit in `SPACE_COMMIT_SHA`, restarts the
-Space, and waits for the runtime:
+variables, records the returned Space commit in `SPACE_COMMIT_SHA`, triggers a
+rebuild through those Hub updates, and waits for the rebuilt runtime:
 
 ```bash
 PYTHONPATH=src python scripts/retail_bank/run_release_pipeline.py \

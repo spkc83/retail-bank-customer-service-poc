@@ -269,9 +269,9 @@ PYTHONPATH=src python scripts/retail_bank/run_release_pipeline.py \
 [`deploy_zero_gpu_space.py`](../scripts/retail_bank/deploy_zero_gpu_space.py)
 uploads an allowlist that excludes tests, virtual environments, bytecode, and
 hidden caches. It then persists the exact model, router, and returned Space
-commit revisions as runtime variables, restarts the Space, and waits for it to
-start. It does not delete remote files; remote cleanup remains a separately
-authorized operation.
+commit revisions as runtime variables and waits for the resulting Hub-triggered
+rebuild to start. It does not delete remote files; remote cleanup remains a
+separately authorized operation.
 
 After deployment, require the authenticated `/zero_gpu_probe` to enter user code
 and report CUDA plus the pinned revisions. Then run live read, write, multi-tool,

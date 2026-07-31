@@ -104,7 +104,6 @@ def deploy(args: argparse.Namespace, api: Any) -> dict[str, Any]:
             value=value,
             token=args.token,
         )
-    api.restart_space(args.space_id, token=args.token)
     runtime = api.wait_for_space(
         args.space_id,
         timeout=args.wait_timeout,
@@ -123,7 +122,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     deployment_plan = plan(args)
     if args.execute:
-        from huggingface_hub import HfApi
+        try:
+            from huggingface_hub import HfApi
+        except ModuleNotFoundError as error:
+            raise DeployError(
+                "huggingface_hub is required; install the documented dev or scale extra"
+            ) from error
 
         result: Mapping[str, Any] = deploy(args, HfApi())
     else:

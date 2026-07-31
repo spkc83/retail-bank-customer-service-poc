@@ -29,7 +29,6 @@ class FakeApi:
     def __init__(self) -> None:
         self.upload: dict[str, Any] | None = None
         self.variables: dict[str, str] = {}
-        self.restarted: str | None = None
         self.waited: str | None = None
 
     def upload_folder(self, **kwargs: Any) -> Any:
@@ -45,9 +44,6 @@ class FakeApi:
     ) -> None:
         assert repo_id == "spkc83/test-space"
         self.variables[key] = value
-
-    def restart_space(self, repo_id: str, **_kwargs: Any) -> None:
-        self.restarted = repo_id
 
     def wait_for_space(self, repo_id: str, **_kwargs: Any) -> Any:
         self.waited = repo_id
@@ -101,7 +97,6 @@ def test_deploy_persists_exact_runtime_pins_and_space_commit(tmp_path: Path) -> 
         "RETAIL_BANK_ROUTER_REVISION": ROUTER_REVISION,
         "SPACE_COMMIT_SHA": SPACE_COMMIT,
     }
-    assert api.restarted == "spkc83/test-space"
     assert api.waited == "spkc83/test-space"
     assert result["runtime_stage"] == "RUNNING"
 
