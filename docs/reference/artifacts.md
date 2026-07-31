@@ -34,7 +34,7 @@ runtime defaults.
 | Prompt-identical training dataset revision | `fea8aa1cda716954eb7322325e2be25c9f570ea3` |
 | Parameters | 8,791,592,960 |
 | Tool format | Granite native tagged JSON |
-| Canonical pipeline bootstrap source | `1da0bdc1cdcc5a0e1c5ce137c32384d927c1948b` |
+| Remote-job bootstrap source | `1da0bdc1cdcc5a0e1c5ce137c32384d927c1948b` |
 
 ## Paid Job Records
 

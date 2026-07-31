@@ -30,9 +30,9 @@ transaction, transfer, and service case is fictional.
 | ZeroGPU application | [retail-bank-servicing-poc](https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc) | See the Space diagnostics panel |
 
 The released training and evaluation jobs used source revision
-`475dc2b563ef87fa0c9aa597b0b0465d56d2ee0f`; the canonical pipeline pins its
-current executable source in `configs/retail-bank-release.toml`. The standalone
-application source is published at
+`475dc2b563ef87fa0c9aa597b0b0465d56d2ee0f`; the canonical pipeline pins the
+remote-job bootstrap source in `configs/retail-bank-release.toml`. The
+standalone application source is published at
 [spkc83/retail-bank-servicing-poc](https://github.com/spkc83/retail-bank-servicing-poc).
 
 ## Request Flow
