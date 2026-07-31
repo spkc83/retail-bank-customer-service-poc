@@ -3,7 +3,8 @@
 This repository builds a model-driven synthetic retail-bank service agent. The
 active release has three runtime pieces:
 
-- A CPU dual-head router for domain/OOD gating and intent diagnostics.
+- A CPU history-aware router for domain/OOD gating, servicing-capability
+  diagnostics, and conversation-relation scoring.
 - A Granite 8.79B generative agent fine-tuned with PEFT/LoRA.
 - A synthetic SQLite banking backend wrapped by the Gradio/ZeroGPU POC.
 
@@ -14,7 +15,7 @@ bank.
 
 ```text
 Authenticated synthetic customer
-  -> CPU dual-head router
+  -> CPU history-aware router
   -> high-confidence OOD: governed scope response
   -> in-domain or uncertain: ZeroGPU Granite 8.79B generation
   -> direct answer, clarification, or tagged-JSON tool call
@@ -23,52 +24,45 @@ Authenticated synthetic customer
   -> model-authored final response
 ```
 
-The released architecture and the current branch implementation are documented
-across these files:
+The released architecture is documented across these files:
 
 | Step | Code |
 | --- | --- |
 | Gradio event and OOD shortcut | [../poc/retail-bank-customer-service-poc/app.py](../poc/retail-bank-customer-service-poc/app.py) |
-| Released dual-head router contract | [../src/hello_slm/banking_dual_head_router.py](../src/hello_slm/banking_dual_head_router.py) |
-| Current v4 branch router loading and prediction | [../poc/retail-bank-customer-service-poc/router.py](../poc/retail-bank-customer-service-poc/router.py) |
+| History-aware router loading and prediction | [../poc/retail-bank-customer-service-poc/router.py](../poc/retail-bank-customer-service-poc/router.py) |
 | Model/tool loop | [../poc/retail-bank-customer-service-poc/model_service.py](../poc/retail-bank-customer-service-poc/model_service.py) |
 | ZeroGPU model loading and deterministic decoding | [../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py](../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py) |
 | Synthetic bank state and tool execution | [../poc/retail-bank-customer-service-poc/mock_bank.py](../poc/retail-bank-customer-service-poc/mock_bank.py) |
 
 ## Component Responsibilities
 
-### Dual-head router
+### History-aware router
 
-The router is a shared-encoder classifier with:
+The router is a shared DistilBERT cross-encoder with:
 
 - a binary supported-banking/OOD head;
-- a 77-way Banking77 intent head.
+- a coarse servicing-capability diagnostic head;
+- a multi-label conversation-relation head.
 
-The deployed public v1 POC loads the artifact from
-`spkc83/retail-bank-domain-intent-router` at revision
-`136ee159d19cda7f585dd122907bbeb1ef4ec4db`. Its released thresholds are
-recorded in
+The POC loads the artifact from `spkc83/retail-bank-conversation-router` at
+revision `9e090c0fa21cebbaa03a431a7ce61e656c0739fe`. Its released thresholds
+are recorded in
 [the router model card](../model_cards/retail-bank-domain-intent-router.md):
 
-- banking probability below `0.165`: high-confidence OOD;
+- banking probability below `0.10` with no relation rescue: high-confidence OOD;
 - banking probability at least `0.50`: in-domain;
-- the middle region: uncertain.
+- the middle region, or rescued relation turns: uncertain.
 
 High-confidence OOD requests receive the static governed response from
 [../poc/retail-bank-customer-service-poc/responses.py](../poc/retail-bank-customer-service-poc/responses.py).
-Uncertain requests continue to the 8.79B model. The top intent candidates are
-diagnostics only; they are not added to the prompt and they do not choose tools.
-
-The current `feat/conversation-router-v4` branch replaces that POC loader with
-the history-aware capability/relation candidate described in
-[Conversation Router v4](09-conversation-router-v4.md). Its local artifact
-passes the candidate gates but remains unpublished and is not the deployed
-public router.
+Uncertain requests continue to the 8.79B model. Capability and relation outputs
+are diagnostics only; they are not added to the prompt and they do not choose
+tools.
 
 ### Granite generative agent
 
-The POC loads `spkc83/retail-bank-agent-9b` at revision
-`085df3d089cfadd77424b548542da0390a54a23e` by default in
+The POC loads `spkc83/retail-bank-servicing-agent-9b` at revision
+`1d56824995aa1adecfe20f62ca42fb1c0c443817` by default in
 [../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py](../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py).
 The model uses deterministic generation:
 
@@ -123,15 +117,15 @@ Runtime behavior mirrors the SFT and evaluation code:
 | Granite tagged-JSON parsing | [../src/hello_slm/banking_tool_wire.py](../src/hello_slm/banking_tool_wire.py) |
 | Assistant-only targets | `ToolWireAdapter.render_training()` in [../src/hello_slm/banking_tool_wire.py](../src/hello_slm/banking_tool_wire.py) |
 | Frozen tool/final-response scoring | [../src/hello_slm/banking_tool_eval.py](../src/hello_slm/banking_tool_eval.py) |
-| Router architecture | [../src/hello_slm/banking_dual_head_router.py](../src/hello_slm/banking_dual_head_router.py) |
+| Router architecture | [../src/hello_slm/banking_conversation_router.py](../src/hello_slm/banking_conversation_router.py) |
 
 ## Failure Behavior
 
 The POC is explicit about failure boundaries:
 
-- The deployed v1 Space marks an already-loaded router failure uncertain. The
-  current v4 branch instead reports `classifier_error` and does not invoke the
-  8.79B model, so a classifier outage cannot masquerade as a valid experiment.
+- Explicit local router-skip mode marks the route uncertain. A normal-turn
+  classifier exception reports `classifier_error` and does not invoke the 8.79B
+  model, so a classifier outage cannot masquerade as a valid experiment.
 - If ZeroGPU allocation or generation fails, the UI reports model
   unavailability.
 - If the model emits malformed tool syntax or invalid tool arguments, the UI

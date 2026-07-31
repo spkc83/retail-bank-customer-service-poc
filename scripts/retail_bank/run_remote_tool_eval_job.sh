@@ -9,6 +9,8 @@ fi
 source_commit="$1"
 model_revision="$2"
 dataset_revision="$3"
+model_repo="${MODEL_REPO:-spkc83/retail-bank-agent-9b}"
+dataset_repo="${DATASET_REPO:-spkc83/retail-bank-agent-sft}"
 script_url="https://raw.githubusercontent.com/spkc83/retail-bank-servicing/${source_commit}/scripts/retail_bank/hf_job_tool_eval.py"
 
 for revision_name in source_commit model_revision dataset_revision; do
@@ -33,6 +35,8 @@ hf jobs uv run \
   --label model="${model_revision:0:8}" \
   "$script_url" \
   --source-commit "$source_commit" \
+  --model-repo "$model_repo" \
   --model-revision "$model_revision" \
+  --dataset-repo "$dataset_repo" \
   --dataset-revision "$dataset_revision" \
   --output-dir "/data/retail-bank-agent-eval-${model_revision:0:8}-${dataset_revision:0:8}"

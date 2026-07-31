@@ -301,6 +301,53 @@ def test_account_grounding_requires_the_requested_balance_values() -> None:
     assert complete["metrics"]["grounded_final_factuality"]["score"] == 1.0
 
 
+def test_created_at_grounding_accepts_equivalent_human_readable_utc_timestamp() -> None:
+    record = _record(
+        "case_created_at",
+        expected={
+            "requires_tool": True,
+            "tool_calls": [{"name": "list_service_cases", "arguments": {}}],
+            "grounding_facts": ["case.created_at=2026-06-18T14:00:00Z"],
+        },
+    )
+    tool_call = '<tool_call>{"name":"list_service_cases","arguments":{}}</tool_call>\n'
+
+    equivalent = evaluate_records(
+        [record],
+        model=StaticPredictionModel(
+            {
+                "case_created_at": tool_call
+                + "The case was created on 2026-06-18 at 14:00 UTC."
+            }
+        ),
+        adapter=TaggedJsonToolAdapter(),
+    )
+    wrong_time = evaluate_records(
+        [record],
+        model=StaticPredictionModel(
+            {
+                "case_created_at": tool_call
+                + "The case was created on 2026-06-18 at 15:00 UTC."
+            }
+        ),
+        adapter=TaggedJsonToolAdapter(),
+    )
+    missing_timezone = evaluate_records(
+        [record],
+        model=StaticPredictionModel(
+            {
+                "case_created_at": tool_call
+                + "The case was created on 2026-06-18 at 14:00."
+            }
+        ),
+        adapter=TaggedJsonToolAdapter(),
+    )
+
+    assert equivalent["metrics"]["grounded_final_factuality"]["score"] == 1.0
+    assert wrong_time["metrics"]["grounded_final_factuality"]["score"] == 0.0
+    assert missing_timezone["metrics"]["grounded_final_factuality"]["score"] == 0.0
+
+
 def test_cli_dry_run_writes_json_report(tmp_path: Path) -> None:
     output_path = tmp_path / "report.json"
 

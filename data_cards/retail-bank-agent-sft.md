@@ -21,7 +21,8 @@ conversations for supervised fine-tuning of a conversational tool-using model.
 - Training revision:
   `183e7e1ed1aba9c3d7155e7b83b64dc854935055`
 - Source: https://github.com/spkc83/retail-bank-servicing
-- Model: https://huggingface.co/spkc83/retail-bank-agent-9b
+- Released stage-2 model:
+  https://huggingface.co/spkc83/retail-bank-servicing-agent-9b
 - Public POC:
   https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
 
@@ -33,6 +34,15 @@ conversations for supervised fine-tuning of a conversational tool-using model.
 - Corpus fingerprint:
   `2bb7a400ed2556b15c7e5eb6147668041b5deef8ae4f037f9e2e52295ff29ab5`
 - Split seed: `711`
+
+## Role In The Release Pipeline
+
+This is the stage-1 tool-use SFT corpus. It teaches the Granite base model the
+synthetic-bank tool wire, public tool schemas, tool-result grounding,
+clarification, FAQ, OOD refusal, and multi-tool ordering. The released
+servicing agent then receives a second SFT stage on
+`spkc83/retail-bank-servicing-alignment-sft` for observed POC conversation and
+tool-use failures.
 
 ## Coverage
 

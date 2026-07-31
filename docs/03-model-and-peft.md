@@ -1,7 +1,8 @@
 # Model And PEFT
 
-The active generative model is `spkc83/retail-bank-agent-9b`, a merged FP16
-LoRA adaptation of IBM Granite for a synthetic retail-bank tool-use POC.
+The active generative model is `spkc83/retail-bank-servicing-agent-9b`, a
+merged FP16 LoRA adaptation of IBM Granite for a synthetic retail-bank
+customer-service POC.
 
 The source of truth for released identity and metrics is
 [../model_cards/retail-bank-agent-9b.md](../model_cards/retail-bank-agent-9b.md).
@@ -18,16 +19,18 @@ and [../configs/banking-tool-sft-granite.toml](../configs/banking-tool-sft-grani
 | Architecture | Dense decoder-only causal transformer |
 | Parameter count | 8,791,592,960 |
 | Tool format | Granite native tagged JSON |
-| Released model repo | `spkc83/retail-bank-agent-9b` |
-| Immutable weights revision | `085df3d089cfadd77424b548542da0390a54a23e` |
+| Released model repo | `spkc83/retail-bank-servicing-agent-9b` |
+| Immutable weights revision | `1d56824995aa1adecfe20f62ca42fb1c0c443817` |
 
 The live POC loads that model repo and revision by default in
 [../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py](../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py).
 
-## PEFT Strategy
+## Two-Stage PEFT Strategy
 
-Training uses LoRA through PEFT and TRL SFTTrainer. The primary lane is BF16
-LoRA over the pinned base model.
+Training uses LoRA through PEFT and TRL SFTTrainer. Stage 1 adapts the pinned
+IBM Granite base to the synthetic-bank tool wire. Stage 2 continues from the
+tool-trained checkpoint with the v4 servicing-remediation corpus because live
+POC testing exposed multi-turn conversation and tool-use failures.
 
 Defaults in [../scripts/retail_bank/cloud_train_tool_sft.py](../scripts/retail_bank/cloud_train_tool_sft.py):
 
@@ -113,7 +116,9 @@ paid job, merge weights, or push to Hugging Face:
 
 ```bash
 PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
-  --manifest data/banking-v3-tool-sft/manifest.json
+  --manifest data/banking-servicing-alignment-v4/manifest.json \
+  --base-model spkc83/retail-bank-agent-9b \
+  --base-revision 085df3d089cfadd77424b548542da0390a54a23e
 ```
 
 The local tiny smoke path uses small offline stand-ins:
@@ -186,35 +191,37 @@ outputs. The release helper
 [../scripts/retail_bank/hf_job_finalize_tool_sft.py](../scripts/retail_bank/hf_job_finalize_tool_sft.py)
 checks parity reports before publication.
 
-The public model card reports the active release metrics:
+The public model card reports the active servicing-remediation release metrics:
 
 | Metric | Value |
 | --- | ---: |
-| Representative parity generations | `8/8` exact |
-| FP16 adapter/merged argmax agreement | `1.0` |
-| Mean absolute logit drift | `0.00828770` |
-| p99 absolute logit drift | `0.0410156` |
-| p999 absolute logit drift | `0.0703125` |
-| Maximum absolute logit drift | `0.238281` |
+| Training job | `spkc83/6a6ca6276b79c09949c1d6cb` |
+| Runtime | about 18 minutes 59 seconds |
+| Estimated cost | about `$0.87` |
+| Training loss | `0.0069123295` |
+| Evaluation loss | `0.0002181597` |
+| Token accuracy | `0.999976121` |
 
 Merge parity is a release gate, not a replacement for frozen evaluation.
 
 ## Frozen Evaluation Summary
 
 The model card records that the released checkpoint passed the frozen
-1,347-record evaluation split with:
+1,374-record evaluation split with:
 
-- `774/774` tool names and arguments;
-- `678/678` executable tool trajectories;
+- `796/796` tool names and arguments;
+- `700/700` executable tool trajectories;
 - `96/96` exact dependent multi-tool sequences;
 - `63/63` appropriate clarifications;
 - `258/258` banking FAQ answers;
-- `30/30` OOD response paths;
-- `1,119/1,119` grounded factual responses;
+- `35/35` OOD response paths;
+- `1,141/1,141` grounded factual responses;
 - zero malformed calls, private arguments, credential requests, in-domain
   false refusals, or OOD false accepts.
 
 The evaluator code is [../src/hello_slm/banking_tool_eval.py](../src/hello_slm/banking_tool_eval.py).
+The prompt-equivalent rescore helper is
+[../scripts/retail_bank/rescore_tool_eval.py](../scripts/retail_bank/rescore_tool_eval.py).
 The remote evaluator entry points live under [../scripts/retail_bank](../scripts/retail_bank).
 
 ## Related Tests

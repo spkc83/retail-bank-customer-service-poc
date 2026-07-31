@@ -1,52 +1,55 @@
 # Granite PEFT Training and Recovery
 
-This runbook covers the active IBM Granite 8.79B PEFT lane only: local checks, initial training, continuation, export recovery, remerge, merge parity, and final publication. The training configuration is [`configs/banking-tool-sft-granite.toml`](../configs/banking-tool-sft-granite.toml). The published model card is [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md).
+This runbook covers the active IBM Granite 8.79B PEFT lane: local checks,
+stage-1 base-tool SFT, stage-2 servicing-remediation SFT, exact evaluation,
+rescore, recovery boundaries, and final publication. The training configuration
+is [`configs/banking-tool-sft-granite.toml`](../configs/banking-tool-sft-granite.toml).
+The published model card is
+[`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md).
 
 ## Active Artifact IDs
 
-Use immutable 40-character revisions for every paid or published run. Branch names such as `main` are rejected by the job entry points.
+Use immutable 40-character revisions for every paid or published run. Branch
+names such as `main` are rejected by the job entry points.
 
 | Artifact | Value | Owner |
 | --- | --- | --- |
-| Base model | `ibm-granite/granite-4.1-8b` | [`configs/banking-tool-sft-granite.toml`](../configs/banking-tool-sft-granite.toml) |
-| Base revision | `1504002f650e656a0a3789d99574df12e3e94ed0` | [`configs/banking-tool-sft-granite.toml`](../configs/banking-tool-sft-granite.toml) |
-| Model repo | `spkc83/retail-bank-agent-9b` | [`scripts/retail_bank/hf_job_tool_sft.py`](../scripts/retail_bank/hf_job_tool_sft.py) |
-| Released weights revision | `085df3d089cfadd77424b548542da0390a54a23e` | [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md) |
-| Training dataset repo | `spkc83/retail-bank-agent-sft` | [`data_cards/retail-bank-agent-sft.md`](../data_cards/retail-bank-agent-sft.md) |
-| Training dataset revision | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` | [`data_cards/retail-bank-agent-sft.md`](../data_cards/retail-bank-agent-sft.md) |
-| Source revision used for release | `4270636255515f7a563d935794a3642e0b13ccb3` | [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md) |
-| Recovery source revision | `0237b97c0a9558bbb2e95c45097ac5ae5f9f7f21` | [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md) |
-| Training job | `spkc83/6a6a60d4b36a6516e96a0709` | [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md) |
-| Recovery and parity job | `spkc83/6a6a6b6323ed89c748ec502c` | [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md) |
+| IBM base model | `ibm-granite/granite-4.1-8b` | [`configs/banking-tool-sft-granite.toml`](../configs/banking-tool-sft-granite.toml) |
+| IBM base revision | `1504002f650e656a0a3789d99574df12e3e94ed0` | [`configs/banking-tool-sft-granite.toml`](../configs/banking-tool-sft-granite.toml) |
+| Stage-1 tool-use checkpoint | `spkc83/retail-bank-agent-9b` at `085df3d089cfadd77424b548542da0390a54a23e` | [`release config`](../configs/retail-bank-release.toml) |
+| Released model repo | `spkc83/retail-bank-servicing-agent-9b` | [`model card`](../model_cards/retail-bank-agent-9b.md) |
+| Released weights revision | `1d56824995aa1adecfe20f62ca42fb1c0c443817` | [`model card`](../model_cards/retail-bank-agent-9b.md) |
+| Initial tool-use dataset | `spkc83/retail-bank-agent-sft` at `183e7e1ed1aba9c3d7155e7b83b64dc854935055` | [`data card`](../data_cards/retail-bank-agent-sft.md) |
+| Corrected servicing dataset | `spkc83/retail-bank-servicing-alignment-sft` at `0ce32f9c7a3edff227005e5b89b089947b87625a` | [`data card`](../data_cards/retail-bank-servicing-alignment-sft.md) |
+| Prompt-identical training dataset | `spkc83/retail-bank-servicing-alignment-sft` at `fea8aa1cda716954eb7322325e2be25c9f570ea3` | [`data card`](../data_cards/retail-bank-servicing-alignment-sft.md) |
+| Source revision used for release | `475dc2b563ef87fa0c9aa597b0b0465d56d2ee0f` | [`artifact ledger`](reference/artifacts.md) |
+| Servicing-remediation training job | `spkc83/6a6ca6276b79c09949c1d6cb` | [`model card`](../model_cards/retail-bank-agent-9b.md) |
+| Exact evaluation job | `spkc83/6a6caac1a00abefd4b289b14` | [`model card`](../model_cards/retail-bank-agent-9b.md) |
 
 ## Bucket Retention Policy
 
-The private `spkc83/jobs-artifacts` bucket is durable working storage for an
-active job, but it is not the release source of truth. On 2026-07-31, after the
-merged weights, adapter, provenance, and frozen evaluation were verified in
-their published Hub repositories, 232 obsolete job files totaling 448.2 GB
-were removed. The bucket now retains 58 files totaling about 1.25 GB.
+The private `spkc83/jobs-artifacts` bucket is durable working storage for active
+jobs, but it is not the release source of truth. Published Hub repositories are
+authoritative for the model, router, datasets, and evaluation reports.
 
-The retained recovery set is:
+On 2026-07-31, obsolete job files were reduced from 290 files
+(`449,461,595,301` bytes) to 58 files (`1,252,559,272` bytes). The retained set
+preserves selected recovery adapters, trainer state, and provenance JSON. Failed
+runs, superseded checkpoints, duplicate merged weights, temporary merge files,
+optimizer state from non-selected runs, and bucket copies of already-published
+evaluation outputs were removed.
 
-- `retail-bank-agent-9b-continuation-42706362-68a4e5b1/checkpoint-600/`;
-- `continuation_training_metadata.json` and the small JSON provenance records
-  for that released continuation.
-
-This preserves export recovery for the selected step-600 adapter. Superseded
-checkpoints, failed-run outputs, duplicate merged 16.8 GB weights, temporary
-merge files, optimizer state from non-selected runs, and bucket copies of
-published evaluation results were retired. The active model, adapter,
-evaluation, router, datasets, and Space do not load from this bucket.
-
-New training and evaluation runs must use a new output prefix. Their
-intermediate files may be removed after publication and verification, but the
-selected recovery adapter, trainer state, and run metadata must remain until
-that release is formally retired.
+New training and evaluation runs must use a new output prefix. Intermediate
+files may be removed after publication and verification, but the selected
+recovery adapter, trainer state, and run metadata must remain until that release
+is formally retired.
 
 ## What Trains
 
-The worker [`scripts/retail_bank/cloud_train_tool_sft.py`](../scripts/retail_bank/cloud_train_tool_sft.py) loads the pinned Granite base and trains a BF16 LoRA adapter with TRL `SFTTrainer`. The retained hyperparameters are:
+The worker
+[`scripts/retail_bank/cloud_train_tool_sft.py`](../scripts/retail_bank/cloud_train_tool_sft.py)
+loads a pinned Granite-family model and trains a BF16 LoRA adapter with TRL
+`SFTTrainer`.
 
 | Setting | Value |
 | --- | --- |
@@ -54,17 +57,19 @@ The worker [`scripts/retail_bank/cloud_train_tool_sft.py`](../scripts/retail_ban
 | Target modules | `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` |
 | LoRA rank / alpha / dropout | `32` / `64` / `0.05` |
 | Maximum sequence length | `2048` |
-| Initial full-job optimizer cap | `14400` seconds |
 | Outer HF Jobs timeout | `5h` |
-| Initial checkpoints | every `500` steps |
-| Output root in paid job | `/data/retail-bank-agent-9b-${SOURCE_COMMIT:0:8}` |
+| Remote GPU flavor | `rtx-pro-6000` |
 
-The released SFT corpus is declared in
-[`data/banking-v3-tool-sft/manifest.json`](../data/banking-v3-tool-sft/manifest.json)
-and summarized in its preparation report. It contains 6,304 training, 1,349
-validation, and 1,347 frozen test conversations. The v4 servicing-alignment
-candidate is a full composite of that corpus plus targeted multi-turn records;
-see [`10-servicing-alignment-v4.md`](10-servicing-alignment-v4.md).
+The release has two Granite SFT stages:
+
+1. Stage 1 starts from `ibm-granite/granite-4.1-8b` revision
+   `1504002f650e656a0a3789d99574df12e3e94ed0` and trains the initial 9,000-row
+   synthetic tool-use corpus. It teaches the tagged-JSON tool wire, tool-result
+   grounding, clarification, FAQ, OOD refusal, and multi-tool ordering.
+2. Stage 2 continues from the stage-1 tool-trained checkpoint and trains the
+   composite v4 servicing-remediation corpus. It exists because POC testing
+   exposed failures in service-case follow-ups, card anaphora, clarification
+   answers, agent repair, and topic shifts.
 
 ## Local Preflight
 
@@ -75,26 +80,12 @@ python -m pytest -q tests/test_banking_tool_sft_data.py \
   tests/test_banking_tool_wire.py \
   tests/test_banking_tool_sft_job.py \
   tests/test_banking_tool_sft_worker.py \
-  tests/test_banking_tool_sft_continuation.py \
-  tests/test_banking_tool_sft_export_recovery.py \
-  tests/test_banking_tool_sft_release.py
+  tests/test_banking_tool_eval.py \
+  tests/test_banking_tool_eval_runner.py
 ```
 
-Check the training plan without downloading 9B weights, launching a job, merging, or pushing:
-
-```bash
-PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
-  --manifest data/banking-v3-tool-sft/manifest.json \
-  --base-revision 1504002f650e656a0a3789d99574df12e3e94ed0 \
-  --family granite \
-  --max-steps 3000 \
-  --max-train-seconds 14400 \
-  --checkpoint-every 500 \
-  --dry-run
-```
-
-For the fresh-LoRA v4 continuation candidate, start from the released merged
-weights and use the composite alignment dataset:
+Check the stage-2 training plan without downloading 9B weights, launching a
+job, merging, or pushing:
 
 ```bash
 PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
@@ -105,7 +96,6 @@ PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
   --family granite \
   --learning-rate 2e-5 \
   --max-steps 500 \
-  --max-train-seconds 14400 \
   --checkpoint-every 100 \
   --dry-run
 ```
@@ -118,18 +108,18 @@ PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
   --dry-run
 ```
 
-The tiny smoke uses small offline stand-ins. It writes local smoke artifacts and verifies assistant-label tokens, checkpoint metadata, adapter output paths, final output paths, and merge/reload parity. It does not prove the 8.79B base can train on GPU.
+The tiny smoke uses small offline stand-ins. It writes local smoke artifacts and
+verifies assistant-label tokens, checkpoint metadata, adapter output paths,
+final output paths, and merge/reload parity. It does not prove the 8.79B model
+can train on GPU.
 
-## Dry Run vs Paid HF Jobs
+## Paid HF Jobs
 
-Dry run is the default for [`cloud_train_tool_sft.py`](../scripts/retail_bank/cloud_train_tool_sft.py). It reports the intended stack and guard state. It refuses to:
-
-- download the 9B Granite base weights;
-- start paid/cloud work;
-- write to Hugging Face Hub;
-- merge or publish a checkpoint.
-
-Paid execution is launched through [`scripts/retail_bank/run_remote_training_job.sh`](../scripts/retail_bank/run_remote_training_job.sh), which submits [`scripts/retail_bank/hf_job_tool_sft.py`](../scripts/retail_bank/hf_job_tool_sft.py) with:
+Paid execution is launched through
+[`scripts/retail_bank/run_remote_training_job.sh`](../scripts/retail_bank/run_remote_training_job.sh),
+which submits
+[`scripts/retail_bank/hf_job_tool_sft.py`](../scripts/retail_bank/hf_job_tool_sft.py)
+with:
 
 - `--flavor rtx-pro-6000`;
 - `--timeout 5h`;
@@ -137,150 +127,67 @@ Paid execution is launched through [`scripts/retail_bank/run_remote_training_job
 - `--volume hf://buckets/spkc83/jobs-artifacts:/data`;
 - exact source and dataset revisions.
 
-The `HF_TOKEN` secret must have read access to the dataset and base, and write access to `spkc83/retail-bank-agent-9b`. Do not put tokens on the command line.
+The `HF_TOKEN` secret must have read access to the dataset and base, and write
+access to the destination model repository. Do not put tokens on the command
+line.
 
-```bash
-scripts/retail_bank/run_remote_training_job.sh \
-  "$(git rev-parse HEAD)" \
-  183e7e1ed1aba9c3d7155e7b83b64dc854935055
-```
+The released stage-2 training job was `spkc83/6a6ca6276b79c09949c1d6cb`. It ran
+for about 18 minutes 59 seconds and cost about `$0.87`. Final reported metrics:
 
-The mounted bucket persists under `/data`, so checkpoints survive job exit
-during an active run and can be reused by continuation or recovery until the
-retention policy is applied. The wrapper builds the output path as
-`/data/retail-bank-agent-9b-${SOURCE_COMMIT:0:8}`.
+| Metric | Value |
+| --- | ---: |
+| Training loss | `0.0069123295` |
+| Evaluation loss | `0.0002181597` |
+| Token accuracy | `0.999976121` |
 
-The active launchers and source of truth are under `scripts/retail_bank`.
+## Rescore and Evaluation
+
+The exact evaluation job was `spkc83/6a6caac1a00abefd4b289b14`. It evaluated
+1,374 frozen records and passed every hard gate.
+
+The corrected dataset revision
+`0ce32f9c7a3edff227005e5b89b089947b87625a` is prompt-identical to the training
+revision `fea8aa1cda716954eb7322325e2be25c9f570ea3` for generation and scoring.
+The helper `scripts/retail_bank/rescore_tool_eval.py` rescored equivalent rows
+against the existing predictions. This is not a second generation run.
 
 ## Rebuild on Clean Infrastructure
 
 The repository retains two separate, reproducible training lanes. Do not
-confuse the v4 alignment run with the initial banking SFT:
+confuse the servicing-remediation run with foundation pretraining:
 
-1. **Initial banking SFT** starts from the immutable pretrained IBM Granite
-   checkpoint `ibm-granite/granite-4.1-8b` at
-   `1504002f650e656a0a3789d99574df12e3e94ed0`. The default bootstrap runs the
-   governed v3 corpus for at most 3,000 steps at `1e-4`, saves LoRA checkpoints,
-   merges the adapter, performs reload parity, and publishes the merged model.
-2. **Servicing alignment v4** starts from an immutable merged output of step 1,
-   attaches a new LoRA adapter, and trains the full composite alignment corpus
-   for at most 500 steps at `2e-5`. It does not require the old optimizer or
-   retained v3 adapter.
+1. Stage 1 starts from the immutable pretrained IBM Granite checkpoint. English
+   and general language ability come from this base model, not from random
+   initialization in this repository.
+2. Stage 2 starts from the stage-1 tool-trained checkpoint and uses the
+   composite servicing-remediation dataset.
 
-On a new machine or cloud account, reproduce step 1 with a new destination repo
-so the released artifact is not overwritten:
+On a new machine or cloud account, reproduce into a new destination repository
+unless the goal is an explicitly authorized replacement release. Every
+downstream evaluation and deployment command must consume captured
+40-character revisions, never `main`.
 
-```bash
-export HF_HUB_DEST=YOUR_ORG/retail-bank-agent-9b-replica
-export DATASET_REPO=YOUR_ORG/retail-bank-agent-sft
-export BASE_MODEL=ibm-granite/granite-4.1-8b
-export BASE_REVISION=1504002f650e656a0a3789d99574df12e3e94ed0
-export MAX_STEPS=3000
-export LEARNING_RATE=1e-4
-export CHECKPOINT_EVERY=500
-scripts/retail_bank/run_remote_training_job.sh \
-  SOURCE_COMMIT_40_HEX \
-  DATASET_REVISION_40_HEX
-```
-
-Then reproduce step 2 by setting `BASE_MODEL` to that replica repository and
-`BASE_REVISION` to its immutable merged-weights commit, selecting the published
-servicing-alignment dataset, and using the v4 overrides in the end-to-end
-runbook. Every downstream evaluation and deployment command must consume the
-captured 40-character revisions, never `main`.
-
-This is a from-clean-infrastructure reconstruction of the project model. It is
-not foundation pretraining from random weights: English and general language
-ability come from the pinned IBM Granite checkpoint. Training Granite's 8.79B
-foundation weights from random initialization would require a different,
-large-scale pretraining corpus and distributed pretraining stack and is outside
-this repository's contract.
-
-## Resume Initial Training
-
-If an active job exits after writing a retained checkpoint, resume with the
-same source and dataset revisions plus the checkpoint path under the persisted
-bucket:
+[`scripts/retail_bank/run_release_pipeline.py`](../scripts/retail_bank/run_release_pipeline.py)
+is the canonical orchestration entry point. It contains data preparation,
+stage-1 Granite tool-use SFT from the pinned IBM checkpoint, stage-2 remediation
+SFT from the captured stage-1 revision, router training, exact evaluation, and
+ZeroGPU deployment:
 
 ```bash
-scripts/retail_bank/run_remote_training_job.sh \
-  SOURCE_COMMIT_40_HEX \
-  183e7e1ed1aba9c3d7155e7b83b64dc854935055 \
-  /data/retail-bank-agent-9b-SOURCE8/checkpoint-STEP
+PYTHONPATH=src python scripts/retail_bank/run_release_pipeline.py --stage all
 ```
 
-The resume flag is forwarded by [`hf_job_tool_sft.py`](../scripts/retail_bank/hf_job_tool_sft.py) to `cloud_train_tool_sft.py --resume-from`. Keep the source revision unchanged unless the purpose is an explicitly new run.
+The command above prints the complete plan without executing it. Execute one
+stage at a time with `--execute` and the applicable `--allow-paid` and
+`--allow-publish` guards. After a publishing stage, record the new immutable
+revision in `configs/retail-bank-release.toml` before executing its downstream
+consumer.
 
-## Continuation Training
+## Recovery Boundaries
 
-Continuation does not rerun the original SFT. [`scripts/retail_bank/cloud_continue_tool_sft.py`](../scripts/retail_bank/cloud_continue_tool_sft.py) loads the pinned Granite base plus the retained adapter from a pinned model revision, then oversamples sequential, clarification, and servicing-quality records while retaining single-tool, tool-error, FAQ, OOD, and hard-negative regression records. Its behavior is tested in [`tests/test_banking_tool_sft_continuation.py`](../tests/test_banking_tool_sft_continuation.py).
-
-Dry-run the continuation plan:
-
-```bash
-PYTHONPATH=src python scripts/retail_bank/cloud_continue_tool_sft.py \
-  --manifest data/banking-v3-tool-sft/manifest.json \
-  --source-model-revision 085df3d089cfadd77424b548542da0390a54a23e \
-  --base-revision 1504002f650e656a0a3789d99574df12e3e94ed0 \
-  --max-steps 600 \
-  --max-train-seconds 9000 \
-  --checkpoint-every 100 \
-  --dry-run
-```
-
-Launch the paid continuation:
-
-```bash
-scripts/retail_bank/run_remote_continuation_job.sh \
-  SOURCE_COMMIT_40_HEX \
-  183e7e1ed1aba9c3d7155e7b83b64dc854935055 \
-  085df3d089cfadd77424b548542da0390a54a23e \
-  600
-```
-
-The wrapper mounts the same durable bucket and writes `/data/retail-bank-agent-9b-continuation-${SOURCE_COMMIT:0:8}-${SOURCE_MODEL_REVISION:0:8}`. The job secret remains `HF_TOKEN`. The remote worker requires `RETAIL_BANK_ALLOW_REMOTE_CONTINUATION_SFT=banking-v3-continuation-sft`, which [`hf_job_continue_tool_sft.py`](../scripts/retail_bank/hf_job_continue_tool_sft.py) sets inside the job.
-
-## Remerge and Merge Parity
-
-The release path keeps the adapter and the merged root checkpoint separate:
-
-- [`scripts/retail_bank/hf_job_remerge_tool_sft.py`](../scripts/retail_bank/hf_job_remerge_tool_sft.py) rebuilds a merged FP16 checkpoint from the adapter and pinned Granite base.
-- [`scripts/retail_bank/hf_job_merge_parity.py`](../scripts/retail_bank/hf_job_merge_parity.py) compares adapter-vs-merged logits and deterministic generations on eight prompts.
-- [`scripts/retail_bank/hf_job_finalize_tool_sft.py`](../scripts/retail_bank/hf_job_finalize_tool_sft.py) validates the parity report and publishes allowlisted files.
-
-The finalizer gate, covered by [`tests/test_banking_tool_sft_release.py`](../tests/test_banking_tool_sft_release.py), requires:
-
-| Gate | Threshold |
-| --- | --- |
-| Finite logit differences | all true |
-| Greedy generations equal | all true |
-| Compared prompts | at least `8` |
-| Argmax token agreement | at least `0.999` |
-| Maximum absolute logit drift | at most `0.3` |
-| p999 absolute logit drift | at most `0.07` |
-
-The release model card records the accepted FP16-native continuation values: `8/8` exact representative generations, argmax agreement `1.0`, mean absolute logit drift `0.00828770`, p99/p999 drift `0.0410156`/`0.0703125`, and maximum drift `0.238281`.
-
-## Export Recovery
-
-Use export recovery when continuation training completed and wrote a retained
-adapter to the bucket, but publication or final export failed. The released
-v3 step-600 adapter remains available for this path; superseded v3 checkpoints
-do not. Recovery is export-only: it does not call `trainer.train`. The launcher
-is [`scripts/retail_bank/run_remote_continuation_export_recovery.sh`](../scripts/retail_bank/run_remote_continuation_export_recovery.sh), the job bootstrap is [`scripts/retail_bank/hf_job_recover_continuation_export.py`](../scripts/retail_bank/hf_job_recover_continuation_export.py), and the recovery worker is [`scripts/retail_bank/cloud_recover_continuation_export.py`](../scripts/retail_bank/cloud_recover_continuation_export.py).
-
-```bash
-scripts/retail_bank/run_remote_continuation_export_recovery.sh \
-  RECOVERY_SOURCE_COMMIT_40_HEX \
-  TRAINING_SOURCE_COMMIT_40_HEX \
-  183e7e1ed1aba9c3d7155e7b83b64dc854935055 \
-  PARENT_MODEL_REVISION_40_HEX \
-  TRAINING_JOB_ID \
-  /data/retail-bank-agent-9b-continuation-SOURCE8-PARENT8 \
-  SELECTED_STEP
-```
-
-Optional argument 8 overrides the selected adapter subdirectory; otherwise the wrapper uses `checkpoint-${SELECTED_STEP}`. The wrapper requires `OUTPUT_ROOT` to start with `/data/retail-bank-agent-9b-continuation-` and caps the export recovery job at `1h`.
+Use export recovery only when a training job completed and wrote a retained
+adapter to the bucket, but publication or final export failed. Recovery is
+export-only: it does not call `trainer.train`.
 
 Recovery cross-checks persisted metadata against the inspected training job:
 
@@ -292,32 +199,38 @@ Recovery cross-checks persisted metadata against the inspected training job:
 - completed step count;
 - training-job artifact time window.
 
-It tries the FP16-native candidate before the FP32-accumulated FP16 candidate and publishes only after unchanged parity gates pass. This is covered by [`tests/test_banking_tool_sft_export_recovery.py`](../tests/test_banking_tool_sft_export_recovery.py).
+It tries FP16-native merged output before any fallback and publishes only after
+unchanged parity gates pass. This is covered by
+[`tests/test_banking_tool_sft_export_recovery.py`](../tests/test_banking_tool_sft_export_recovery.py).
 
 ## Stop Conditions
 
-Stop before paid training if any local preflight fails, if the dry-run guard says remote execution is not intentionally enabled, or if the source/dataset/base revision is not exact. Stop during or after remote work if:
+Stop before paid training if any local preflight fails, if the dry-run guard
+says remote execution is not intentionally enabled, or if the source, dataset,
+or base revision is not exact. Stop during or after remote work if:
 
 - checkpoint metadata is missing or mismatched;
 - validation loss or token accuracy is unavailable;
 - merge/reload parity fails;
-- merge parity gates fail;
 - the job cannot write to `/data`;
 - Hub upload cannot record exact published revisions;
-- frozen evaluation in [`docs/06-evaluation.md`](06-evaluation.md) fails a release gate.
+- frozen evaluation in [`docs/06-evaluation.md`](06-evaluation.md) fails a
+  release gate.
 
-Do not use output repair, deterministic tool planning, or branch-name revisions to make a checkpoint appear releasable.
+Do not use output repair, deterministic tool planning, or branch-name revisions
+to make a checkpoint appear releasable.
 
 ## Expected Outputs
 
-Initial and continuation training write under the mounted `/data` output root:
+Training writes under the mounted `/data` output root:
 
 - adapter files under `adapter/`;
 - merged root checkpoint under the selected merged subdirectory;
 - checkpoint metadata under `checkpoint-*` or `checkpoints/step-*`;
 - `training_result.json`;
-- remerge report such as `fp16_remerge.json`;
-- merge parity report such as `merge_parity_diagnostics_merged-fp16_float16.json`;
-- Hub evidence files including `merge_parity_diagnostics.json` and exact revision records.
+- merge parity report files;
+- Hub evidence files including exact revision records.
 
-The published model repository root contains merged FP16 weights. The unmerged adapter remains under `adapter/`, as documented in [`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md).
+The published model repository root contains merged FP16 weights. The unmerged
+adapter remains under `adapter/`, as documented in
+[`model_cards/retail-bank-agent-9b.md`](../model_cards/retail-bank-agent-9b.md).

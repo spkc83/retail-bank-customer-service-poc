@@ -1,20 +1,25 @@
 ---
 base_model: distilbert/distilbert-base-uncased
 datasets:
-  - spkc83/retail-bank-router-training-data
+  - spkc83/retail-bank-conversation-router-data
 library_name: transformers
 license: apache-2.0
 pipeline_tag: text-classification
 tags:
   - banking
-  - intent-classification
   - out-of-domain-detection
+  - conversation-router
 ---
 
-# Retail Bank domain-intent router
+# Retail Bank Conversation Router
 
-DistilBERT shared encoder with a binary supported-banking/OOD head and a
-77-way Banking77 intent head. The intent loss is masked for CLINC rows.
+The released router is a DistilBERT cross-encoder with one shared encoder and
+three heads:
+
+- binary supported-banking/OOD domain head;
+- coarse servicing-capability head for diagnostics;
+- multi-label conversation-relation head for `context_dependent`,
+  `agent_repair`, `topic_shift`, and `clarification_answer`.
 
 Source and evaluation code:
 https://github.com/spkc83/retail-bank-servicing
@@ -22,35 +27,60 @@ https://github.com/spkc83/retail-bank-servicing
 Live model-driven application:
 https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
 
-## Held-out results
+## Artifact Identity
+
+- Model repository: `spkc83/retail-bank-conversation-router`
+- Model revision: `9e090c0fa21cebbaa03a431a7ce61e656c0739fe`
+- Training-data repository: `spkc83/retail-bank-conversation-router-data`
+- Training-data revision: `e9a64a2e7f2b622d5412c15eac4618ceca2150da`
+- Base encoder revision:
+  `12040accade4e8a0f71eabdb258fecc2e7e948be`
+- Source revision:
+  `475dc2b563ef87fa0c9aa597b0b0465d56d2ee0f`
+
+## Held-Out Results
 
 - Release eligible: `True`
-- Model revision: `136ee159d19cda7f585dd122907bbeb1ef4ec4db`
-- Training-data revision: `54ff186a03501d76dc643dbed3d82729267ce811`
-- Intent macro F1: `0.948425`
-- In-domain false-refusal rate: `0.005099`
-- OOD false-accept rate: `0.020109`
-- Follow-up false-refusal rate: `0.001623`
-- Conversational false-refusal rate: `0.050000`
-- Banking-to-OOD false-accept rate: `0.009783`
-- Calibrated lower boundary: `0.165000`
+- Test rows: `15,466`
+- Capability macro F1: `0.997838`
+- Relation macro F1: `0.998628`
+- In-domain false-refusal rate: `0.000167`
+- OOD false-accept rate: `0.012735`
+- Contextual false-refusal rate: `0.000105`
+- Repair false-refusal rate: `0.000000`
+- External topic-shift false-accept rate: `0.000778`
+- Captured-regression route/capability/relation errors: `0 / 0 / 0`
 
-The hosted POC uses two serving boundaries: banking probability below `0.165`
-is OOD, probability at least `0.50` is in-domain, and the middle region is
-uncertain. Uncertain turns continue to the 9B agent. The top three intent
-predictions are displayed only as diagnostics; they do not enter the prompt,
-select a tool, or provide tool arguments.
+## Serving Policy
 
-## Data and licenses
+The router receives the current user turn and up to three complete visible prior
+user/assistant exchanges in one encoder sequence. Tool payloads and hidden
+tool-call messages are not classifier input.
 
-Classifier-only data combines PolyAI Banking77 and UCI CLINC150 under
-CC-BY-4.0. Banking77 is prohibited from the generative SFT lane. The prepared
-dataset contains 44,432 training, 8,589 validation, and 16,260 test rows.
-Supported greeting, thanks, goodbye, and bot-identity examples are positive
-domain rows with their 77-way intent loss masked.
+Serving uses:
 
-## Serving fallback
+- banking probability `< 0.10` plus no relation rescue: `out_of_domain`;
+- banking probability `>= 0.50`: `in_domain`;
+- middle region or relation rescue: `uncertain`;
+- `context_dependent`, `agent_repair`, and `clarification_answer` can rescue a
+  low-domain follow-up from immediate OOD refusal;
+- `topic_shift` is diagnostic and does not rescue external requests.
 
-If the artifact is unavailable or classification fails, the experimental POC
-marks the route uncertain and delegates the turn to the 9B model. The router is
-an experiment component, not a production authorization or safety boundary.
+Both `in_domain` and `uncertain` continue to the 9B agent. Capability
+predictions and relation probabilities are displayed only as diagnostics; they
+do not enter the prompt, select a tool, or provide tool arguments.
+
+## Data and Licenses
+
+Classifier-only data combines the governed synthetic tool-use/SFT conversations
+with UCI CLINC150 external OOD examples. The prepared dataset contains 61,759
+training, 13,173 validation, and 15,466 test rows. Exact captured POC failures
+are held out in test and are not copied into training.
+
+## Serving Fallback
+
+If the artifact is unavailable or classification fails, the POC returns its
+explicit model-failure response and does not call the 9B model for that turn.
+This makes a missing classifier visible instead of silently changing the
+experiment. The router remains an experimental component, not a production
+authorization or safety boundary.

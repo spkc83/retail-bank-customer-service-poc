@@ -1,9 +1,10 @@
 # Conversation Router v4
 
-This document describes the v4 classifier candidate on
-`feat/conversation-router-v4`. The local candidate passes its held-out gates,
-but it is not the currently deployed router until it is published at an
-immutable revision and the Space is updated to that revision.
+This document describes the released v4 classifier. It is published as
+`spkc83/retail-bank-conversation-router` at revision
+`9e090c0fa21cebbaa03a431a7ce61e656c0739fe` and trained from
+`spkc83/retail-bank-conversation-router-data` revision
+`e9a64a2e7f2b622d5412c15eac4618ceca2150da`.
 
 ## Why v4 Exists
 
@@ -130,7 +131,7 @@ a valid conversational continuation.
 ## Governed Data
 
 [`banking_conversation_router_data.py`](../src/hello_slm/banking_conversation_router_data.py)
-builds the candidate dataset from:
+builds the released router dataset from:
 
 - the existing split-isolated Granite SFT conversations for POC-aligned
   in-domain examples;
@@ -171,7 +172,7 @@ realizations for service-case references, standalone address requests, card
 selection followed by replacement, repeated-answer repair, and wrong-topic
 repair. Validation and test use separately worded versions.
 
-Generate the local candidate:
+Generate the local governed dataset:
 
 ```bash
 PYTHONPATH=src python scripts/retail_bank/prepare_conversation_router_data.py
@@ -230,7 +231,7 @@ The held-out test report blocks publication unless all of these pass:
 The exact screenshot-derived regression set is test-only and must route every
 case correctly before a Space revision changes.
 
-### Local candidate result
+### Released local-training result
 
 The deterministic one-epoch TITAN V run produced
 `artifacts/banking-conversation-router-v4/` and passed all release gates:
@@ -247,17 +248,18 @@ The deterministic one-epoch TITAN V run produced
 | External topic-shift false-accept rate | `0.000778` |
 | Captured-regression route/capability/relation errors | `0 / 0 / 0` |
 
-These are candidate metrics, not deployment claims. The local artifact remains
-ignored by Git; its governed manifest, training code, and metrics are the
-inputs to a later explicit publication step.
+These metrics are the release gate evidence for router revision
+`9e090c0fa21cebbaa03a431a7ce61e656c0739fe`. The local artifact remains ignored
+by Git; the published Hub artifact and tracked lock are the reproducibility
+surfaces.
 
 ## POC Integration
 
 [`router.py`](../poc/retail-bank-customer-service-poc/router.py) implements the
 same model heads, input rendering, and route policy in the standalone Space.
-It requires `RETAIL_BANK_ROUTER_REVISION` to be an immutable 40-character v4
-artifact commit. Until that artifact exists, the branch is intentionally not
-deployable over the current public Space.
+It requires `RETAIL_BANK_ROUTER_REVISION` to be an immutable 40-character
+artifact commit. The released revision is
+`9e090c0fa21cebbaa03a431a7ce61e656c0739fe`.
 
 A classifier exception produces a visible `classifier_error` response path
 and blocks the Granite call. The POC therefore never presents a classifier

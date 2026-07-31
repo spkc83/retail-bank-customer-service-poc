@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 import torch
 
-from router import LearnedBankingRouter
+from router import ROUTER_REPO_ID, ROUTER_REVISION, LearnedBankingRouter
+
+
+def test_router_defaults_pin_the_published_v4_artifact() -> None:
+    assert ROUTER_REPO_ID == "spkc83/retail-bank-conversation-router"
+    assert ROUTER_REVISION == "9e090c0fa21cebbaa03a431a7ce61e656c0739fe"
 
 
 class FakeTokenizer:

@@ -1032,6 +1032,7 @@ def run_remote_training(config: WorkerConfig) -> dict[str, Any]:
             repo_id=config.hub_dest,
             repo_type="model",
             folder_path=config.output_dir / ("merged" if config.merge_adapter else "adapter"),
+            ignore_patterns=[".*", "**/.*"],
         )
         api.upload_folder(
             repo_id=config.hub_dest,

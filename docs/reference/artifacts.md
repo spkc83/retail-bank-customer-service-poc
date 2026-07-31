@@ -1,48 +1,53 @@
 # Artifact Ledger
 
-This page records the active immutable artifacts for the retail-bank Granite
-agent, dual-head router, datasets, local manifests, and paid job outputs.
+This page records the active immutable artifacts for the retail-bank servicing
+agent, history-aware router, datasets, local manifests, paid job outputs, and
+runtime defaults.
 
 ## Published Repositories
 
 | Artifact | Repository | Immutable revision | Source |
 | --- | --- | --- | --- |
-| Granite retail-bank agent | `spkc83/retail-bank-agent-9b` | `085df3d089cfadd77424b548542da0390a54a23e` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md), [`zero_gpu_runtime.py`](../../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py) |
-| Agent training/provenance revision | `spkc83/retail-bank-agent-9b` | `247ac402989144698f89727a59a07ce5d05f31c6` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
-| Agent published evaluation head | `spkc83/retail-bank-agent-9b` | `98cde9ee058b785fb871abcd2c85e18cea410bdf` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
-| Agent base model | `ibm-granite/granite-4.1-8b` | `1504002f650e656a0a3789d99574df12e3e94ed0` | [`configs/banking-tool-sft-granite.toml`](../../configs/banking-tool-sft-granite.toml), [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
-| Tool-use SFT dataset | `spkc83/retail-bank-agent-sft` | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` | [`data_cards/retail-bank-agent-sft.md`](../../data_cards/retail-bank-agent-sft.md), [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
-| Dual-head router | `spkc83/retail-bank-domain-intent-router` | `136ee159d19cda7f585dd122907bbeb1ef4ec4db` | [`banking_dual_head_router.py`](../../src/hello_slm/banking_dual_head_router.py), [`model_cards/retail-bank-domain-intent-router.md`](../../model_cards/retail-bank-domain-intent-router.md) |
-| Router dataset | `spkc83/retail-bank-router-training-data` | `54ff186a03501d76dc643dbed3d82729267ce811` | [`train_dual_head_router.py`](../../scripts/retail_bank/train_dual_head_router.py), [`model_cards/retail-bank-domain-intent-router.md`](../../model_cards/retail-bank-domain-intent-router.md) |
+| Granite servicing agent | `spkc83/retail-bank-servicing-agent-9b` | `1d56824995aa1adecfe20f62ca42fb1c0c443817` | [`model card`](../../model_cards/retail-bank-agent-9b.md), [`zero_gpu_runtime.py`](../../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py) |
+| Agent published evaluation head | `spkc83/retail-bank-servicing-agent-9b` | `214fc0d9e143e4fa7b658de1993113562b90958a` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
+| Agent base model | `ibm-granite/granite-4.1-8b` | `1504002f650e656a0a3789d99574df12e3e94ed0` | [`configs/banking-tool-sft-granite.toml`](../../configs/banking-tool-sft-granite.toml), [`model card`](../../model_cards/retail-bank-agent-9b.md) |
+| Stage-1 Granite tool-use checkpoint | `spkc83/retail-bank-agent-9b` | `085df3d089cfadd77424b548542da0390a54a23e` | [`release config`](../../configs/retail-bank-release.toml) |
+| Initial tool-use SFT dataset | `spkc83/retail-bank-agent-sft` | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` | [`data card`](../../data_cards/retail-bank-agent-sft.md) |
+| Corrected servicing-remediation dataset | `spkc83/retail-bank-servicing-alignment-sft` | `0ce32f9c7a3edff227005e5b89b089947b87625a` | [`data card`](../../data_cards/retail-bank-servicing-alignment-sft.md) |
+| Prompt-identical training dataset revision | `spkc83/retail-bank-servicing-alignment-sft` | `fea8aa1cda716954eb7322325e2be25c9f570ea3` | [`data card`](../../data_cards/retail-bank-servicing-alignment-sft.md) |
+| History-aware router | `spkc83/retail-bank-conversation-router` | `9e090c0fa21cebbaa03a431a7ce61e656c0739fe` | [`router card`](../../model_cards/retail-bank-domain-intent-router.md), [`router.py`](../../poc/retail-bank-customer-service-poc/router.py) |
+| Router dataset | `spkc83/retail-bank-conversation-router-data` | `e9a64a2e7f2b622d5412c15eac4618ceca2150da` | [`data card`](../../data_cards/retail-bank-router-training-data.md) |
 | Public Space | `spkc83/retail-bank-servicing-poc` | Space commit is exposed at runtime as `SPACE_COMMIT_SHA` | [`app.py`](../../poc/retail-bank-customer-service-poc/app.py), [`README.md`](../../poc/retail-bank-customer-service-poc/README.md) |
 
 ## Agent Model Details
 
-| Field | Value | Source |
-| --- | --- | --- |
-| Model repository | `spkc83/retail-bank-agent-9b` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Immutable weights revision | `085df3d089cfadd77424b548542da0390a54a23e` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Training/provenance revision | `247ac402989144698f89727a59a07ce5d05f31c6` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Published evaluation head | `98cde9ee058b785fb871abcd2c85e18cea410bdf` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Base model | `ibm-granite/granite-4.1-8b` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Base revision | `1504002f650e656a0a3789d99574df12e3e94ed0` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Source revision | `4270636255515f7a563d935794a3642e0b13ccb3` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Recovery source revision | `0237b97c0a9558bbb2e95c45097ac5ae5f9f7f21` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Dataset revision | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Dataset fingerprint | `2bb7a400ed2556b15c7e5eb6147668041b5deef8ae4f037f9e2e52295ff29ab5` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Parameters | 8,791,592,960 | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Tool format | Granite native tagged JSON | [`model card`](../../model_cards/retail-bank-agent-9b.md), [`model_service.py`](../../poc/retail-bank-customer-service-poc/model_service.py) |
+| Field | Value |
+| --- | --- |
+| Model repository | `spkc83/retail-bank-servicing-agent-9b` |
+| Immutable weights revision | `1d56824995aa1adecfe20f62ca42fb1c0c443817` |
+| Published evaluation head | `214fc0d9e143e4fa7b658de1993113562b90958a` |
+| Base model | `ibm-granite/granite-4.1-8b` |
+| Base revision | `1504002f650e656a0a3789d99574df12e3e94ed0` |
+| Source revision | `475dc2b563ef87fa0c9aa597b0b0465d56d2ee0f` |
+| Initial dataset revision | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` |
+| Corrected remediation dataset revision | `0ce32f9c7a3edff227005e5b89b089947b87625a` |
+| Prompt-identical training dataset revision | `fea8aa1cda716954eb7322325e2be25c9f570ea3` |
+| Parameters | 8,791,592,960 |
+| Tool format | Granite native tagged JSON |
 
 ## Paid Job Records
 
-These are the job records for the released artifacts. Do not start new paid jobs unless
-explicitly authorized.
+These are the job records for the released artifacts. Do not start new paid jobs
+unless explicitly authorized.
 
 | Purpose | Job ID | Evidence |
 | --- | --- | --- |
-| Granite SFT training | `spkc83/6a6a60d4b36a6516e96a0709` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
-| FP16-native recovery and merge parity | `spkc83/6a6a6b6323ed89c748ec502c` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
-| Frozen tool/final-response evaluation | `spkc83/6a6a6c7cb36a6516e96a0ac4` | [`model_cards/retail-bank-agent-9b.md`](../../model_cards/retail-bank-agent-9b.md) |
+| Servicing-remediation SFT training | `spkc83/6a6ca6276b79c09949c1d6cb` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
+| Exact frozen tool/final-response evaluation | `spkc83/6a6caac1a00abefd4b289b14` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
+
+The servicing-remediation training run took about 18 minutes 59 seconds and
+cost about `$0.87`. It reported training loss `0.0069123295`, evaluation loss
+`0.0002181597`, and token accuracy `0.999976121`.
 
 ## Private Job-Bucket Retention
 
@@ -58,30 +63,36 @@ router, dataset, or evaluation artifacts.
 | After cleanup | 58 | 1,252,559,272 bytes |
 | Removed | 232 | about 448.2 GB |
 
-The retained set preserves the released continuation's selected
-`checkpoint-600` adapter, trainer state, and provenance JSON. Failed runs,
-superseded checkpoints, duplicate merged weights, temporary merge files, and
-bucket copies of already-published evaluation outputs were removed. New runs
-must write a new prefix and apply the same publish-verify-retain policy.
+The retained set preserves the selected recovery checkpoint adapter, trainer
+state, and provenance JSON. Failed runs, superseded checkpoints, duplicate
+merged weights, temporary merge files, and bucket copies of already-published
+evaluation outputs were removed. New runs must write a new prefix and apply the
+same publish-verify-retain policy.
 
 ## Released Evaluation
 
-The released evaluation report is stored under
-`evaluation/085df3d089cf-183e7e1ed1ab/` in the model repository.
+The final released score is from evaluation job
+`spkc83/6a6caac1a00abefd4b289b14`.
 
 | Metric | Result | Source |
 | --- | ---: | --- |
-| Frozen test conversations | 1,347 | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Tool names and arguments | `774/774` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Executable trajectories | `678/678` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
+| Frozen test conversations | 1,374 | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
+| Tool names and arguments | `796/796` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
+| Executable trajectories | `700/700` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
 | Dependent multi-tool sequences | `96/96` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
 | Clarifications | `63/63` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
 | Banking FAQ answers | `258/258` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| OOD paths | `30/30` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
-| Grounded factual responses | `1,119/1,119` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
+| OOD paths | `35/35` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
+| Grounded factual responses | `1,141/1,141` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
 | Malformed calls, unsupported/private arguments, credential requests, in-domain false refusals, OOD false accepts | `0` | [`model card`](../../model_cards/retail-bank-agent-9b.md) |
 
-## Tool-Use SFT Dataset
+The corrected dataset revision
+`0ce32f9c7a3edff227005e5b89b089947b87625a` is prompt-identical to the training
+revision `fea8aa1cda716954eb7322325e2be25c9f570ea3` for generation and scoring.
+The final report is therefore a rescore of equivalent prompts, not a second
+generation run. The rescore helper is `scripts/retail_bank/rescore_tool_eval.py`.
+
+## Initial Tool-Use SFT Dataset
 
 Published repository: `spkc83/retail-bank-agent-sft`
 
@@ -100,122 +111,87 @@ Local manifest:
 | validation | 1,349 | `a8c7871b33689fce026ea570ad0a8a90a609cde232a89486e5437b028279e6d3` |
 | test | 1,347 | `76b485fa507d56002f12b556f100fd842c77146804cf49be3426be031cc692c0` |
 
-Tool manifest hash:
-`sha256:88b6f53e19779732cde99190ebb5405d317e5691f91bc63624ef32c241939b40`
+## Servicing-Remediation SFT Dataset
 
-Coverage:
+Published repository: `spkc83/retail-bank-servicing-alignment-sft`
 
-| Scenario family | Conversations |
-| --- | ---: |
-| Clarification | 333 |
-| Conversation | 999 |
-| Hard negative | 333 |
-| Multi-turn | 1,665 |
-| No-tool banking FAQ | 1,665 |
-| OOD | 333 |
-| Tool error | 666 |
-| Tool success | 3,006 |
+Corrected published revision:
+`0ce32f9c7a3edff227005e5b89b089947b87625a`
+
+Prompt-identical training revision:
+`fea8aa1cda716954eb7322325e2be25c9f570ea3`
+
+Local manifest:
+[`data/banking-servicing-alignment-v4/manifest.json`](../../data/banking-servicing-alignment-v4/manifest.json)
+
+| Split | Initial base | Remediation additions | Composite total |
+| --- | ---: | ---: | ---: |
+| train | 6,304 | 320 | 6,624 |
+| validation | 1,349 | 80 | 1,429 |
+| test | 1,347 | 27 | 1,374 |
 
 ## Router Artifact
 
-Published repository: `spkc83/retail-bank-domain-intent-router`
+Published repository: `spkc83/retail-bank-conversation-router`
 
 Published revision:
-`136ee159d19cda7f585dd122907bbeb1ef4ec4db`
+`9e090c0fa21cebbaa03a431a7ce61e656c0739fe`
 
 Training-data revision:
-`54ff186a03501d76dc643dbed3d82729267ce811`
+`e9a64a2e7f2b622d5412c15eac4618ceca2150da`
 
 Router code:
 [`poc/retail-bank-customer-service-poc/router.py`](../../poc/retail-bank-customer-service-poc/router.py)
 
 | Field | Value |
 | --- | ---: |
-| Intent macro F1 | `0.948425` |
-| In-domain false-refusal rate | `0.005099` |
-| OOD false-accept rate | `0.020109` |
-| Follow-up false-refusal rate | `0.001623` |
-| Conversational false-refusal rate | `0.050000` |
-| Banking-to-OOD false-accept rate | `0.009783` |
-| Calibrated lower boundary | `0.165000` |
+| Capability macro F1 | `0.997838` |
+| Relation macro F1 | `0.998628` |
+| In-domain false-refusal rate | `0.000167` |
+| OOD false-accept rate | `0.012735` |
+| Contextual false-refusal rate | `0.000105` |
+| Repair false-refusal rate | `0.000000` |
+| External topic-shift false-accept rate | `0.000778` |
+| Captured-regression route/capability/relation errors | `0 / 0 / 0` |
+| OOD banking boundary | `0.10` |
 | Serving in-domain boundary | `0.50` |
-
-Serving routes:
-
-- banking probability `< 0.165`: `out_of_domain`
-- banking probability `>= 0.50`: `in_domain`
-- banking probability from `0.165` through `< 0.50`: `uncertain`
+| Relation rescue boundary | `0.40` |
 
 ## Router Dataset
 
-Published repository: `spkc83/retail-bank-router-training-data`
+Published repository: `spkc83/retail-bank-conversation-router-data`
 
 Published revision:
-`54ff186a03501d76dc643dbed3d82729267ce811`
-
-Local manifest:
-[`data/banking-router-v1/manifest.json`](../../data/banking-router-v1/manifest.json)
+`e9a64a2e7f2b622d5412c15eac4618ceca2150da`
 
 Release lock:
-[`data/sources/banking-router-v1.lock.json`](../../data/sources/banking-router-v1.lock.json)
+[`data/sources/banking-conversation-router-v4.lock.json`](../../data/sources/banking-conversation-router-v4.lock.json)
 
 | Split | Rows | Local SHA-256 |
 | --- | ---: | --- |
-| train | 44,432 | `c9067a04cefa90ed6fd874a6ebabbccb8015122b7920608c6d051df77b9f1acd` |
-| validation | 8,589 | `7c1315a5f8555168143a0800364a98a6ce4f88ec7cb15b42216b15a83f33cfc5` |
-| test | 16,260 | `e9178afc36ac2d90eef0587b4d42e2785e1c12e0a23445afe56486c3f61ac431` |
-
-Prepared manifest SHA-256:
-`78ba999216f0058d70db810c79bb4318f34c077bc81adc3adfae604d82c207f7`
-
-Source locks:
-
-| Source | Revision or digest |
-| --- | --- |
-| Banking77 release revision | `90d4e2ee5521c04fc1488f065b8b083658768c57` |
-| Banking77 source repository revision | `57ec275d8078af65b7731c2a98be812d844a6d6b` |
-| Banking77 normalized snapshot SHA-256 | `22ce056724069f431b477aa8478f1a42ce31286ad595cb7e53a838173052b340` |
-| CLINC150 archive SHA-256 | `0d8ecc3e1edd7b25cabde0177544ce536ddf773844bc80ef1a75f36e7f030ea2` |
-| CLINC150 member SHA-256 | `bfcca9ae515623541dc1983c94c4ed7cae9d26b42ae47d74b972e51bb6f7a21f` |
-
-## Unpublished V4 Candidate Data
-
-These are governed local candidates, not published release artifacts.
-
-| Candidate | Train | Validation | Test | Lock |
-| --- | ---: | ---: | ---: | --- |
-| History-aware conversation router | 61,759 | 13,173 | 15,466 | [`banking-conversation-router-v4.lock.json`](../../data/sources/banking-conversation-router-v4.lock.json) |
-| Composite Granite servicing alignment | 6,624 | 1,429 | 1,374 | [`banking-servicing-alignment-v4.lock.json`](../../data/sources/banking-servicing-alignment-v4.lock.json) |
-
-The classifier candidate reserves seven exact captured regressions in test.
-The Granite composite retains all 9,000 released SFT records and adds 427
-targeted records, including three exact captured generative regressions in
-test.
+| train | 61,759 | `8289533eb3df841c215bd4ea6e7f216c1b0fd988ad49dfd0fb78a13ad795b4e8` |
+| validation | 13,173 | `ecde083032ee1dbd692190d4dcc08815c43f1459f255aaa3fd685ccad974df18` |
+| test | 15,466 | `e4d70f0adccf0615bf79b1034203b76d0986c09d58259c31a2e2ea24a5d4931f` |
 
 ## Runtime Artifact Defaults
 
-The first seven rows describe the released Granite runtime. The final two rows
-describe this branch's unpublished v4 router candidate; the POC deliberately
-refuses to load it until the revision is replaced with a verified immutable
-commit.
-
 | Runtime field | Default | Source |
 | --- | --- | --- |
-| `RETAIL_BANK_MODEL_ID` | `spkc83/retail-bank-agent-9b` | [`zero_gpu_runtime.py`](../../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py) |
-| `RETAIL_BANK_MODEL_REVISION` | `085df3d089cfadd77424b548542da0390a54a23e` | [`zero_gpu_runtime.py`](../../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py) |
+| `RETAIL_BANK_MODEL_ID` | `spkc83/retail-bank-servicing-agent-9b` | [`zero_gpu_runtime.py`](../../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py) |
+| `RETAIL_BANK_MODEL_REVISION` | `1d56824995aa1adecfe20f62ca42fb1c0c443817` | [`zero_gpu_runtime.py`](../../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py) |
+| `RETAIL_BANK_ROUTER_ID` | `spkc83/retail-bank-conversation-router` | [`router.py`](../../poc/retail-bank-customer-service-poc/router.py) |
+| `RETAIL_BANK_ROUTER_REVISION` | `9e090c0fa21cebbaa03a431a7ce61e656c0739fe` | [`router.py`](../../poc/retail-bank-customer-service-poc/router.py) |
 | `INPUT_TOKEN_BUDGET` | `8192` | [`model_service.py`](../../poc/retail-bank-customer-service-poc/model_service.py) |
 | `MAX_NEW_TOKENS` | `512` | [`model_service.py`](../../poc/retail-bank-customer-service-poc/model_service.py) |
 | `MAX_TOOL_CALLS` | `8` | [`model_service.py`](../../poc/retail-bank-customer-service-poc/model_service.py) |
 | Demo usernames | `alex.demo`, `maya.demo` | [`auth.py`](../../poc/retail-bank-customer-service-poc/auth.py) |
 | Session database directory | `/tmp/retail-bank-servicing-poc` unless `POC_SESSION_DB_DIR` is set | [`state.py`](../../poc/retail-bank-customer-service-poc/state.py) |
-| V4 `RETAIL_BANK_ROUTER_ID` | `spkc83/retail-bank-conversation-router` | [`router.py`](../../poc/retail-bank-customer-service-poc/router.py) |
-| V4 `RETAIL_BANK_ROUTER_REVISION` | `unpublished-v4` (intentional non-loadable sentinel) | [`router.py`](../../poc/retail-bank-customer-service-poc/router.py) |
 
 ## Source Commit For A New Run
 
-The released job source revisions are recorded above. For a new paid run,
-commit and push the intended source state, then obtain its immutable revision
-with:
+The released job source revision is `475dc2b563ef87fa0c9aa597b0b0465d56d2ee0f`.
+For a new paid run, commit and push the intended source state, then obtain its
+immutable revision with:
 
 ```bash
 git rev-parse HEAD

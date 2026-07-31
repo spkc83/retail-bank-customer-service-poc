@@ -1,188 +1,147 @@
-# Dual-Head Banking77 and CLINC Router
+# History-Aware Conversation Router
 
-This guide covers the active CPU router: governed Banking77 plus CLINC preparation, DistilBERT dual-head training, threshold calibration, publication, and serving behavior. The router does not select tools and does not supply tool arguments to the Granite model.
+This guide covers the released CPU router: governed v4 data preparation,
+DistilBERT cross-encoder training, threshold calibration, publication, and
+serving behavior. The router does not select tools and does not supply tool
+arguments to the Granite model.
 
-This is the released v1 artifact guide. The
-[`feat/conversation-router-v4` candidate](09-conversation-router-v4.md)
-replaces Banking77 runtime intents with POC-aligned capability diagnostics and
-adds history-aware conversation-relation outputs; it does not replace the
-released artifact until its gates pass.
+The previous Banking77 intent router has been superseded for the POC runtime.
+This file keeps its historical filename so existing documentation links remain
+stable.
 
 ## Active Artifact IDs
 
 | Artifact | Value | Owner |
 | --- | --- | --- |
-| Router repo | `spkc83/retail-bank-domain-intent-router` | [`src/hello_slm/banking_dual_head_router.py`](../src/hello_slm/banking_dual_head_router.py) |
-| Router revision | `136ee159d19cda7f585dd122907bbeb1ef4ec4db` | [`src/hello_slm/banking_dual_head_router.py`](../src/hello_slm/banking_dual_head_router.py) |
-| Router dataset repo | `spkc83/retail-bank-router-training-data` | [`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py) |
-| Router dataset revision | `54ff186a03501d76dc643dbed3d82729267ce811` | [`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py) |
-| Base encoder | `distilbert/distilbert-base-uncased` | [`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py) |
-| Base encoder revision | `12040accade4e8a0f71eabdb258fecc2e7e948be` | [`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py) |
+| Router repo | `spkc83/retail-bank-conversation-router` | [`poc/retail-bank-customer-service-poc/router.py`](../poc/retail-bank-customer-service-poc/router.py) |
+| Router revision | `9e090c0fa21cebbaa03a431a7ce61e656c0739fe` | [`model card`](../model_cards/retail-bank-domain-intent-router.md) |
+| Router dataset repo | `spkc83/retail-bank-conversation-router-data` | [`scripts/retail_bank/prepare_conversation_router_data.py`](../scripts/retail_bank/prepare_conversation_router_data.py) |
+| Router dataset revision | `e9a64a2e7f2b622d5412c15eac4618ceca2150da` | [`data card`](../data_cards/retail-bank-router-training-data.md) |
+| Base encoder | `distilbert/distilbert-base-uncased` | [`scripts/retail_bank/train_conversation_router.py`](../scripts/retail_bank/train_conversation_router.py) |
+| Base encoder revision | `12040accade4e8a0f71eabdb258fecc2e7e948be` | [`scripts/retail_bank/train_conversation_router.py`](../scripts/retail_bank/train_conversation_router.py) |
 
-The public dataset card is [`data_cards/retail-bank-router-training-data.md`](../data_cards/retail-bank-router-training-data.md). The public model card is [`model_cards/retail-bank-domain-intent-router.md`](../model_cards/retail-bank-domain-intent-router.md).
+The public dataset card is
+[`data_cards/retail-bank-router-training-data.md`](../data_cards/retail-bank-router-training-data.md).
+The public model card is
+[`model_cards/retail-bank-domain-intent-router.md`](../model_cards/retail-bank-domain-intent-router.md).
 
 ## Architecture
 
-[`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py) trains one shared DistilBERT encoder with two heads:
+[`scripts/retail_bank/train_conversation_router.py`](../scripts/retail_bank/train_conversation_router.py)
+trains one shared DistilBERT cross-encoder with three heads:
 
 - a binary domain head for supported retail banking vs out-of-domain;
-- a 77-way Banking77 intent head.
+- an eight-way servicing-capability head for diagnostics;
+- a four-label sigmoid relation head for `context_dependent`, `agent_repair`,
+  `topic_shift`, and `clarification_answer`.
 
-The domain loss applies to every row. Intent loss ignores CLINC and conversational rows whose intent label is `-100`. Serving uses [`src/hello_slm/banking_dual_head_router.py`](../src/hello_slm/banking_dual_head_router.py), verifies the artifact manifest, loads `classifier_heads.safetensors`, and runs without `trust_remote_code`.
+The domain loss applies to every row. Capability loss applies to in-domain
+servicing rows. Relation loss is multi-label and uses capped positive-class
+weights so rare repair and clarification rows are not overwhelmed.
 
 The runtime input format is:
 
 ```text
-[CURRENT]
+[CURRENT_USER]
 {current user turn}
+[PREVIOUS_ASSISTANT]
+{most recent visible assistant response}
 [PREVIOUS_USER]
-{previous user turn, only for contextual follow-ups}
+{most recent visible user turn}
 ```
 
-[`LearnedBankingRouter.classify`](../src/hello_slm/banking_dual_head_router.py) first classifies the current user turn alone. It includes the previous user turn only if the current turn looks referential, for example with words such as `this`, `that`, `them`, `next`, or `again`.
+Up to three complete visible exchanges are included newest-first after the
+current user turn. Tool payloads and hidden tool-call messages are excluded.
 
 ## Data Preparation
 
-The preparation script is [`scripts/retail_bank/prepare_dual_head_router_data.py`](../scripts/retail_bank/prepare_dual_head_router_data.py). It downloads:
+The preparation script is
+[`scripts/retail_bank/prepare_conversation_router_data.py`](../scripts/retail_bank/prepare_conversation_router_data.py).
+It builds split-isolated rows from:
 
-| Source | Revision or checksum | Use |
-| --- | --- | --- |
-| PolyAI Banking77 train CSV | SHA-256 `b06e26ac675513959a63135f11b94ea7786ed02da65db93a5650d8838cbc664b` | domain and intent supervision |
-| PolyAI Banking77 test CSV | SHA-256 `d12d6e3bc4c3103966ae786dc435913c0c563dfa328f5a3646d0e62cfeeb474d` | untouched test supervision |
-| Banking77 release revision | `90d4e2ee5521c04fc1488f065b8b083658768c57` | provenance |
-| Banking77 source revision | `57ec275d8078af65b7731c2a98be812d844a6d6b` | raw CSV URLs |
-| CLINC150 ZIP | SHA-256 `0d8ecc3e1edd7b25cabde0177544ce536ddf773844bc80ef1a75f36e7f030ea2` | OOD and supported-conversation rows |
-| CLINC member `clinc150_uci/data_oos_plus.json` | SHA-256 `bfcca9ae515623541dc1983c94c4ed7cae9d26b42ae47d74b972e51bb6f7a21f` | extracted CLINC payload |
+- the governed synthetic SFT conversations for POC-aligned in-domain examples;
+- checksum-pinned UCI CLINC150 data for external OOD language;
+- deterministic synthetic contextual follow-ups, typo variants,
+  clarification answers, corrections, agent-repair turns, and topic shifts.
 
 Prepare and reproduce the released split digests:
 
 ```bash
-PYTHONPATH=src python scripts/retail_bank/prepare_dual_head_router_data.py \
-  --output-dir data/banking-router-v1 \
-  --expected-release-lock data/sources/banking-router-v1.lock.json \
-  --validation-fraction 0.15 \
-  --seed 7101
+PYTHONPATH=src python scripts/retail_bank/prepare_conversation_router_data.py
 ```
-
-The default command verifies the generated split SHA-256 values against [`data/sources/banking-router-v1.lock.json`](../data/sources/banking-router-v1.lock.json). Use `--skip-release-digest-check` only for an intentional experiment that must not be published over the active release.
 
 Outputs:
 
-- `data/banking-router-v1/train.jsonl`;
-- `data/banking-router-v1/validation.jsonl`;
-- `data/banking-router-v1/test.jsonl`;
-- `data/banking-router-v1/manifest.json`;
-- `data/banking-router-v1/README.md`;
-- `data/banking-router-v1/SOURCE_LOCK.json` unless `--source-lock` points elsewhere.
+- `data/banking-conversation-router-v4/train.jsonl`;
+- `data/banking-conversation-router-v4/validation.jsonl`;
+- `data/banking-conversation-router-v4/test.jsonl`;
+- `data/banking-conversation-router-v4/manifest.json`;
+- `data/banking-conversation-router-v4/preparation-report.json`.
 
-The prepared public dataset contains 44,432 train rows, 8,589 validation rows, and 16,260 test rows. Banking77 is classifier-only and never enters the Granite generative SFT lane.
-
-## Label Policy
-
-[`src/hello_slm/banking_router_data.py`](../src/hello_slm/banking_router_data.py) owns the label mapping:
-
-- Banking77 rows are in-domain and keep their 77-way intent labels.
-- CLINC labels overlapping supported banking capabilities are in-domain with intent label `-100`.
-- CLINC `greeting`, `thank_you`, `goodbye`, and `are_you_a_bot` are in-domain conversational rows with intent label `-100`.
-- Other CLINC and OOS rows are out-of-domain.
-- Same-intent follow-ups are built within each split.
-- Banking-to-OOD transitions are built within each split.
-- Cross-split normalized duplicates are removed.
-- PII-like strings are counted and must be zero.
-
-Tests for this policy live in [`tests/test_banking_router_data.py`](../tests/test_banking_router_data.py), [`tests/test_banking_router_preparation.py`](../tests/test_banking_router_preparation.py), and [`tests/test_banking_router_training.py`](../tests/test_banking_router_training.py).
+The prepared public dataset contains 61,759 train rows, 13,173 validation rows,
+and 15,466 test rows. Exact captured POC failure utterances are held out in the
+test split and are not copied into training.
 
 ## Training and Calibration
 
-The trainer has no CLI flags. It is a publish path that requires `HF_TOKEN`.
+Train locally without publishing:
 
 ```bash
-HF_TOKEN=... uv run scripts/retail_bank/train_dual_head_router.py
+PYTHONPATH=src uv run scripts/retail_bank/train_conversation_router.py
 ```
 
-Use a token with read access to `spkc83/retail-bank-router-training-data`, read access to `distilbert/distilbert-base-uncased`, and write access to `spkc83/retail-bank-domain-intent-router`. Do not commit or paste the token into scripts, docs, or shell history.
+The script pins a CUDA 12.6 PyTorch build that supports TITAN V (`sm_70`) when
+run through its inline `uv` environment. It calibrates:
 
-Training constants in [`scripts/retail_bank/train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py):
+- OOD banking boundary: `0.10`;
+- in-domain boundary: `0.50`;
+- relation rescue boundary: `0.40`;
+- per-relation activation thresholds from validation probabilities.
 
-| Setting | Value |
-| --- | --- |
-| Seed | `7101` |
-| Max length | `96` |
-| Batch size | `64` |
-| Epochs | `4` |
-| Learning rate | `3e-5` |
-| Weight decay | `0.01` |
-| Warmup ratio | `0.10` |
-| Intent loss weight | `0.7` |
-| Conversational domain loss weight | `8.0` |
-
-After each epoch, the script predicts on validation, calibrates the domain threshold, and scores the epoch. [`calibrate_threshold`](../scripts/retail_bank/train_dual_head_router.py) searches thresholds from `0.005` to `0.995` and selects the best specificity while enforcing:
-
-- in-domain recall at least `0.98`;
-- conversational in-domain recall at least `0.95`.
-
-The selected epoch is then evaluated once on the untouched test split.
+Publication requires `--publish`, an immutable `--data-revision`, and
+`HF_TOKEN`. Do not publish over an existing release without fresh frozen
+evaluation evidence.
 
 ## Release Gates
 
-[`release_gate_failures`](../scripts/retail_bank/train_dual_head_router.py) blocks publication unless the test metrics pass:
+The released router passed these held-out gates:
 
-| Metric | Gate |
-| --- | --- |
-| Intent macro F1 | `>= 0.90` |
-| In-domain false-refusal rate | `<= 0.02` |
-| OOD false-accept rate | `<= 0.05` |
-| Same-intent follow-up false-refusal rate | `<= 0.05` |
-| Conversational false-refusal rate | `<= 0.05` |
-| Banking-to-OOD transition false-accept rate | `<= 0.05` |
-
-The released artifact reports:
-
-| Metric | Value |
+| Metric | Result |
 | --- | ---: |
-| Intent macro F1 | `0.948425` |
-| In-domain false-refusal rate | `0.005099` |
-| OOD false-accept rate | `0.020109` |
-| Follow-up false-refusal rate | `0.001623` |
-| Conversational false-refusal rate | `0.050000` |
-| Banking-to-OOD false-accept rate | `0.009783` |
-| Calibrated lower boundary | `0.165000` |
-
-## Publish Outputs
-
-On success, [`publish_artifact`](../scripts/retail_bank/train_dual_head_router.py) uploads:
-
-- standard Transformers encoder files;
-- tokenizer files;
-- `classifier_heads.safetensors`;
-- `router_config.json`;
-- `metrics.json`;
-- `manifest.json`;
-- `README.md`.
-
-The artifact manifest lists file sizes and SHA-256 digests. [`verify_router_artifact`](../src/hello_slm/banking_dual_head_router.py) checks those digests before serving. PyTorch pickle files are not part of the release.
+| Test rows | `15,466` |
+| Capability macro F1 | `0.997838` |
+| Relation macro F1 | `0.998628` |
+| In-domain false-refusal rate | `0.000167` |
+| OOD false-accept rate | `0.012735` |
+| Contextual false-refusal rate | `0.000105` |
+| Repair false-refusal rate | `0.000000` |
+| External topic-shift false-accept rate | `0.000778` |
+| Captured-regression route/capability/relation errors | `0 / 0 / 0` |
 
 ## Serving Boundaries
 
-[`LearnedBankingRouter.from_hub`](../src/hello_slm/banking_dual_head_router.py) loads the pinned router revision from Hub. The POC uses two boundaries recorded in [`model_cards/retail-bank-domain-intent-router.md`](../model_cards/retail-bank-domain-intent-router.md):
+[`LearnedBankingRouter.from_hub`](../poc/retail-bank-customer-service-poc/router.py)
+loads the pinned router revision from Hub, verifies the artifact manifest, and
+serves without `trust_remote_code`.
 
-- banking probability `< 0.165`: out-of-domain;
-- banking probability `>= 0.50`: in-domain;
-- middle range: uncertain and delegated to the Granite model.
+Serving routes:
 
-The classifier's top intent predictions are diagnostics only. They do not
-enter the Granite prompt, select tools, or provide tool arguments. The deployed
-v1 POC reports an already-loaded router failure as uncertain and delegates the
-turn to the model; it does not silently substitute a keyword classifier. The
-v4 candidate intentionally changes this failure behavior as documented in
-[Conversation Router v4](09-conversation-router-v4.md).
+- banking probability `< 0.10` and no relation rescue: `out_of_domain`
+- banking probability `>= 0.50`: `in_domain`
+- middle range or relation rescue: `uncertain`
+
+The classifier's capability and relation outputs are diagnostics only. They do
+not enter the Granite prompt, select tools, or provide tool arguments. If the
+router fails during normal serving, the POC reports `classifier_error` and does
+not invoke the model for that turn.
 
 ## Stop Conditions
 
 Stop before publication if:
 
 - source digests do not match;
-- generated split digests drift from [`data/sources/banking-router-v1.lock.json`](../data/sources/banking-router-v1.lock.json);
+- generated split digests drift from
+  [`data/sources/banking-conversation-router-v4.lock.json`](../data/sources/banking-conversation-router-v4.lock.json);
 - cross-split duplicates or PII-like matches are nonzero;
 - `HF_TOKEN` is unavailable for publish training;
 - any release gate fails;
@@ -192,8 +151,8 @@ Stop before publication if:
 Run the focused tests after any router change:
 
 ```bash
-python -m pytest -q tests/test_banking_router_data.py \
-  tests/test_banking_router_preparation.py \
-  tests/test_banking_router_training.py \
-  tests/test_banking_dual_head_router.py
+python -m pytest -q tests/test_banking_conversation_router.py \
+  tests/test_banking_conversation_router_data.py \
+  tests/test_banking_conversation_router_preparation.py \
+  tests/test_banking_conversation_router_training.py
 ```

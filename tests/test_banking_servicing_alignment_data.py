@@ -76,6 +76,26 @@ def test_servicing_alignment_records_validate_and_cover_failure_modes() -> None:
         assert "address_update" in final_text
         assert "Confirm mailing address update" in final_text
 
+    created_at_records = [
+        record
+        for record in service_case_records
+        if str(record["record_id"]).startswith("svc_case_created_")
+    ]
+    assert created_at_records
+    assert all(
+        record["expected"]["grounding_facts"]
+        == ["case.created_at=2026-06-18T14:00:00Z"]
+        for record in created_at_records
+    )
+    ood_records = [
+        record
+        for records in splits.values()
+        for record in records
+        if record["expected"]["path"] == "ood"
+    ]
+    assert ood_records
+    assert all(record["expected"]["grounding_facts"] == [] for record in ood_records)
+
 
 def test_exact_screenshot_currents_are_held_out_from_training() -> None:
     splits, _report = build_servicing_alignment_splits()

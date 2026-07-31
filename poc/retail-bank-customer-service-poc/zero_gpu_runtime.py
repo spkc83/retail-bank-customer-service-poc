@@ -3,10 +3,13 @@ from __future__ import annotations
 import os
 from typing import Any
 
-MODEL_ID = os.environ.get("RETAIL_BANK_MODEL_ID", "spkc83/retail-bank-agent-9b")
+MODEL_ID = os.environ.get(
+    "RETAIL_BANK_MODEL_ID",
+    "spkc83/retail-bank-servicing-agent-9b",
+)
 MODEL_REVISION = os.environ.get(
     "RETAIL_BANK_MODEL_REVISION",
-    "085df3d089cfadd77424b548542da0390a54a23e",
+    "1d56824995aa1adecfe20f62ca42fb1c0c443817",
 )
 SKIP_MODEL_LOAD = os.environ.get("POC_SKIP_MODEL_LOAD") == "1"
 

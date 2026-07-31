@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -558,9 +559,33 @@ def _structured_fact_is_grounded(normalized_content: str, fact: str) -> bool:
             normalized_content,
             ("retail banking", "financial services"),
         )
+    if key == "case.created_at":
+        return _created_at_is_grounded(normalized_content, raw_value)
     if key == "case.case_type":
         return value in normalized_content
     return value in normalized_content
+
+
+def _created_at_is_grounded(normalized_content: str, raw_value: str) -> bool:
+    try:
+        created_at = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        return _norm(raw_value) in normalized_content
+    date_markers = (
+        created_at.strftime("%Y-%m-%d"),
+        _norm(created_at.strftime("%B %d, %Y").replace(" 0", " ")),
+    )
+    time_marker = created_at.strftime("%H:%M")
+    if not _contains_any(normalized_content, date_markers) or time_marker not in normalized_content:
+        return False
+    if raw_value.endswith("Z"):
+        return bool(
+            re.search(
+                rf"\butc\b|{re.escape(time_marker)}(?::\d{{2}})?z\b",
+                normalized_content,
+            )
+        )
+    return True
 
 
 def _contains_any(content: str, candidates: Iterable[str]) -> bool:

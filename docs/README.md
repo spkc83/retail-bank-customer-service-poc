@@ -1,33 +1,38 @@
-# Retail Bank Agent Developer Docs
+# Retail Bank Servicing Agent Developer Docs
 
-These docs explain the active Granite PEFT retail-bank agent repository for a
-junior developer. They describe the current code, cards, scripts, and release
-artifacts, plus the explicitly labeled v4 candidate under development.
+These docs explain the released Granite PEFT retail-bank servicing agent for a
+junior developer. They describe the current code, cards, scripts, released Hub
+artifacts, evaluation evidence, and ZeroGPU deployment path.
 
 ## What This Repository Builds
 
 The repository builds a synthetic retail-bank customer-service demonstration
 with two model components:
 
-- An 8.79B parameter Granite generative agent fine-tuned with PEFT/LoRA for
-  conversational tool use.
-- A CPU dual-head classifier that detects supported banking requests and emits
-  Banking77 intent diagnostics.
+- an 8.79B parameter Granite generative agent trained in two SFT stages:
+  initial IBM Granite base-tool SFT, followed by v4 servicing remediation SFT
+  for observed conversation and tool-use failures;
+- a CPU history-aware DistilBERT cross-encoder router that detects supported
+  banking requests, emits servicing-capability diagnostics, and scores
+  conversation relations such as context dependence and agent repair.
 
 The generative agent owns normal conversation, clarification, tool selection,
-public tool arguments, and final response wording. The classifier does not
-select tools and does not provide arguments to the model. See
+public tool arguments, and final response wording. The router does not select
+tools and does not provide arguments to the model. See
 [01-system-overview.md](01-system-overview.md) for the request flow.
 
 ## Public Artifacts
 
-| Artifact | Location |
-| --- | --- |
-| 8.79B agent model | `spkc83/retail-bank-agent-9b` |
-| Tool-use SFT dataset | `spkc83/retail-bank-agent-sft` |
-| Dual-head router | `spkc83/retail-bank-domain-intent-router` |
-| Router dataset | `spkc83/retail-bank-router-training-data` |
-| Public POC Space | `spkc83/retail-bank-servicing-poc` |
+| Artifact | Location | Revision |
+| --- | --- | --- |
+| 8.79B servicing agent | `spkc83/retail-bank-servicing-agent-9b` | `1d56824995aa1adecfe20f62ca42fb1c0c443817` |
+| Stage-1 Granite tool-use checkpoint | `spkc83/retail-bank-agent-9b` | `085df3d089cfadd77424b548542da0390a54a23e` |
+| Initial tool-use SFT dataset | `spkc83/retail-bank-agent-sft` | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` |
+| Servicing-remediation SFT dataset | `spkc83/retail-bank-servicing-alignment-sft` | `0ce32f9c7a3edff227005e5b89b089947b87625a` |
+| Prompt-identical training data revision | `spkc83/retail-bank-servicing-alignment-sft` | `fea8aa1cda716954eb7322325e2be25c9f570ea3` |
+| History-aware router | `spkc83/retail-bank-conversation-router` | `9e090c0fa21cebbaa03a431a7ce61e656c0739fe` |
+| Router dataset | `spkc83/retail-bank-conversation-router-data` | `e9a64a2e7f2b622d5412c15eac4618ceca2150da` |
+| Public POC Space | `spkc83/retail-bank-servicing-poc` | runtime diagnostics expose the Space commit |
 
 The same artifact IDs appear in the root [README](../README.md), the model
 cards under [../model_cards](../model_cards), and the data cards under
@@ -42,29 +47,28 @@ cards under [../model_cards](../model_cards), and the data cards under
 
 2. [Data generation](02-data-generation.md)
 
-   Learn how the governed synthetic tool-use dataset is generated, how the
-   classifier-only Banking77 and CLINC data is prepared, and which files prove
-   provenance.
+   Learn how the governed synthetic tool-use dataset, v4 servicing-remediation
+   data, and router data are generated, and which files prove provenance.
 
 3. [Model and PEFT](03-model-and-peft.md)
 
-   Learn the Granite base model identity, LoRA target modules, assistant-only
-   masking, Granite tool wire, and merged/adapted release layout.
+   Learn the Granite base model identity, two-stage LoRA training path,
+   assistant-only masking, Granite tool wire, and merged/adapted release layout.
 
 4. [Training, continuation, and recovery](04-training-and-recovery.md)
 
    Learn the guarded local and paid-job paths, checkpoint resume, continuation,
-   export recovery, merge parity, and publication gates.
+   rescore, recovery, merge parity, and publication gates.
 
-5. [Dual-head router](05-dual-head-router.md)
+5. [Conversation router](05-dual-head-router.md)
 
-   Learn the shared DistilBERT encoder, domain and intent heads, governed data,
-   calibration, release gates, and serving thresholds.
+   Learn the shared DistilBERT cross-encoder, domain/capability/relation heads,
+   governed data, calibration, release gates, and serving thresholds.
 
 6. [Frozen evaluation](06-evaluation.md)
 
-   Learn the two-phase frozen evaluation contract and the exact metrics needed
-   for release.
+   Learn the two-phase frozen evaluation contract, exact rescore correctness,
+   and metrics needed for release.
 
 7. [Inference and ZeroGPU POC](07-inference-and-poc.md)
 
@@ -73,18 +77,18 @@ cards under [../model_cards](../model_cards), and the data cards under
 
 8. [End-to-end runbook](08-end-to-end-runbook.md)
 
-   Follow the complete install, data, training, evaluation, local POC, and
-   deployment sequence.
+   Follow the complete install, data, training, rescore, router, evaluation,
+   local POC, and deployment sequence.
 
 9. [Conversation Router v4](09-conversation-router-v4.md)
 
-   Understand the candidate cross-encoder, leakage-safe data contract,
+   Understand the released cross-encoder, leakage-safe data contract,
    multi-label conversation relations, local training path, and rollout gate.
 
 10. [Granite Servicing Alignment v4](10-servicing-alignment-v4.md)
 
     Understand the composite continuation-SFT data, use-case alignment,
-    held-out regression policy, safe training plan, and release stop condition.
+    prompt-equivalent corrected dataset revision, and release stop condition.
 
 Use the [file map](reference/file-map.md) to jump from concepts to code and the
 [artifact ledger](reference/artifacts.md) for immutable revisions and hashes.
@@ -94,13 +98,14 @@ Use the [file map](reference/file-map.md) to jump from concepts to code and the
 | Path | Purpose |
 | --- | --- |
 | [../configs/banking-tool-sft-granite.toml](../configs/banking-tool-sft-granite.toml) | Granite PEFT training configuration. |
-| [../data/banking-v3-tool-sft](../data/banking-v3-tool-sft) | Generated local copy of the tool-use SFT dataset. |
-| [../data/banking-router-v1](../data/banking-router-v1) | Generated local copy of the router training data. |
+| [../data/banking-v3-tool-sft](../data/banking-v3-tool-sft) | Generated local copy of the initial tool-use SFT dataset. |
+| [../data/banking-servicing-alignment-v4](../data/banking-servicing-alignment-v4) | Generated local composite servicing-remediation SFT dataset. |
+| [../data/banking-conversation-router-v4](../data/banking-conversation-router-v4) | Generated local history-aware router data. |
 | [../data/sources](../data/sources) | Tracked source locks for governed data preparation. |
-| [../data_cards](../data_cards) | Public dataset documentation. |
-| [../model_cards](../model_cards) | Public model documentation. |
+| [../data_cards](../data_cards) | Dataset documentation. |
+| [../model_cards](../model_cards) | Model documentation. |
 | [../poc/retail-bank-customer-service-poc](../poc/retail-bank-customer-service-poc) | Gradio/ZeroGPU customer-service POC. |
-| [../scripts/retail_bank](../scripts/retail_bank) | Data, training, recovery, evaluation, and Hub job entry points. |
+| [../scripts/retail_bank](../scripts/retail_bank) | Data, training, recovery, evaluation, rescore, and Hub job entry points. |
 | [../src/hello_slm](../src/hello_slm) | Shared package code for data, tool wire, evaluator, and router. |
 | [../tests](../tests) | Repository regression tests. |
 
@@ -128,7 +133,7 @@ Run the targeted repository checks from the root directory.
 python -m pytest -q \
   tests/test_banking_tool_wire.py \
   tests/test_banking_tool_sft_worker.py \
-  tests/test_banking_router_data.py
+  tests/test_banking_conversation_router.py
 ```
 
 Run the POC checks without loading the 8.79B model or router:

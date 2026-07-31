@@ -1,10 +1,16 @@
 # Granite Servicing Alignment v4
 
-This document describes the candidate continuation-SFT data added on
-`feat/conversation-router-v4`. It aligns the existing Granite 8.79B agent with
-the same multi-turn servicing behavior that the v4 classifier is expected to
-route. It does not claim that a new Granite checkpoint has already been
-trained or released.
+This document describes the released continuation-SFT data used for the second
+Granite training stage. It aligns the 8.79B agent with the same multi-turn
+servicing behavior that the v4 router is expected to route.
+
+- Corrected dataset revision:
+  `0ce32f9c7a3edff227005e5b89b089947b87625a`
+- Prompt-identical training revision:
+  `fea8aa1cda716954eb7322325e2be25c9f570ea3`
+- Released model revision:
+  `spkc83/retail-bank-servicing-agent-9b` at
+  `1d56824995aa1adecfe20f62ca42fb1c0c443817`
 
 ## Why the Generative Data Also Changes
 
@@ -31,7 +37,7 @@ tool result, and final answer because those are its training targets.
 | [`banking_servicing_alignment_data.py`](../src/hello_slm/banking_servicing_alignment_data.py) | Builds deterministic alignment records, expands natural realizations, merges the released SFT base, and validates leakage and PII policy. |
 | [`prepare_servicing_alignment_data.py`](../scripts/retail_bank/prepare_servicing_alignment_data.py) | Writes the composite splits, verifies the tracked release lock, and optionally publishes after explicit request. |
 | [`banking-servicing-alignment-v4.lock.json`](../data/sources/banking-servicing-alignment-v4.lock.json) | Pins the base manifest, synthetic-bank snapshot, split counts, and exact composite split hashes. |
-| [`retail-bank-servicing-alignment-sft.md`](../data_cards/retail-bank-servicing-alignment-sft.md) | Candidate dataset card. |
+| [`retail-bank-servicing-alignment-sft.md`](../data_cards/retail-bank-servicing-alignment-sft.md) | Released dataset card. |
 | [`test_banking_servicing_alignment_data.py`](../tests/test_banking_servicing_alignment_data.py) | Locks schema, coverage, split counts, held-out isolation, and digest-drift behavior. |
 
 ## Composite Dataset
@@ -53,7 +59,7 @@ captured regressions. The exact captured wording never appears in training.
 
 All records retain the existing `banking-tool-sft/v1` contract. That means the
 current Granite tokenizer, assistant-only loss mask, tool-wire adapter,
-training worker, replay checks, and frozen evaluator can consume the candidate
+training worker, replay checks, and frozen evaluator can consume the composite
 without a schema migration.
 
 ## Behavior Coverage
@@ -101,25 +107,30 @@ PYTHONPATH=src python -m pytest -q \
   tests/test_banking_servicing_alignment_data.py
 ```
 
-## Next Granite Training Candidate
+## Released Granite Training Stage
 
-The next model should continue from the released, already tool-trained Granite
-weights rather than restarting from the IBM base:
+The remediation model continued from the already tool-trained Granite weights
+rather than restarting from the IBM base:
 
-| Setting | Candidate value |
+| Setting | Released value |
 | --- | --- |
-| Starting model | `spkc83/retail-bank-agent-9b` |
-| Starting revision | `085df3d089cfadd77424b548542da0390a54a23e` |
+| Starting model | stage-1 tool-trained Granite checkpoint |
+| Base family | `ibm-granite/granite-4.1-8b` |
+| IBM base revision | `1504002f650e656a0a3789d99574df12e3e94ed0` |
 | Architecture | Granite 4.1 8B decoder-only causal transformer |
 | Adaptation | LoRA on attention and MLP projections |
 | Dataset | `data/banking-servicing-alignment-v4/manifest.json` |
 | Maximum sequence | 2,048 tokens |
-| Candidate learning rate | `2e-5` |
-| Candidate maximum steps | `500` |
-| Publication target | a new candidate repository, never the released repo |
+| Training job | `spkc83/6a6ca6276b79c09949c1d6cb` |
+| Runtime | about 18 minutes 59 seconds |
+| Estimated cost | about `$0.87` |
+| Train loss | `0.0069123295` |
+| Eval loss | `0.0002181597` |
+| Token accuracy | `0.999976121` |
+| Publication target | `spkc83/retail-bank-servicing-agent-9b` |
 
 The existing worker accepts this dataset without changing model architecture.
-A safe dry-run plan is:
+A safe dry-run plan for a reproduction is:
 
 ```bash
 PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
@@ -131,13 +142,24 @@ PYTHONPATH=src python scripts/retail_bank/cloud_train_tool_sft.py \
   --output-dir artifacts/retail-bank-servicing-alignment-v4
 ```
 
-That command remains a dry run. A real 9B run still requires the existing
-explicit remote-execution guards and separate authorization for paid compute.
+That command remains a dry run unless the existing explicit remote-execution
+guards are provided. A real 9B run still requires separate authorization for
+paid compute.
+
+## Rescore Correctness
+
+The final public dataset revision is
+`0ce32f9c7a3edff227005e5b89b089947b87625a`. The training job used revision
+`fea8aa1cda716954eb7322325e2be25c9f570ea3`. The correction did not change the
+rendered prompts, target tool calls, or target final responses used for
+generation and scoring. `scripts/retail_bank/rescore_tool_eval.py` therefore
+rescored prompt-equivalent rows against the existing predictions. This is not a
+second generation run.
 
 ## Evaluation and Stop Condition
 
-A future checkpoint is not release eligible merely because training finishes.
-It must:
+The released checkpoint was not release eligible merely because training
+finished. It had to:
 
 - retain the released tool-name, argument, executable-trajectory, FAQ, OOD,
   dependent-tool, and grounding gates;
@@ -147,26 +169,21 @@ It must:
   repair, and topic-shift conversations;
 - show the exact 9B revision and CUDA inference path in POC diagnostics.
 
-Until those checks pass, the released Granite revision and public Space remain
-unchanged.
+The released model passed the exact frozen evaluation with 796/796 tool
+names/arguments, 700/700 executable trajectories, 96/96 multi-tool sequences,
+63/63 clarifications, 258/258 FAQ answers, 35/35 OOD paths, 1,141/1,141
+grounded responses, and zero hard error metrics.
 
-## Candidate Rollout in Space
+## Space Runtime Pins
 
-After a candidate run finishes and evaluation gates pass, promote by updating only
-these POC environment values for your Space deployment:
+The released Space should pin:
 
 - `RETAIL_BANK_MODEL_ID=spkc83/retail-bank-servicing-agent-9b`
-- `RETAIL_BANK_MODEL_REVISION=<candidate_checkpoint_revision>`
+- `RETAIL_BANK_MODEL_REVISION=1d56824995aa1adecfe20f62ca42fb1c0c443817`
+- `RETAIL_BANK_ROUTER_ID=spkc83/retail-bank-conversation-router`
+- `RETAIL_BANK_ROUTER_REVISION=9e090c0fa21cebbaa03a431a7ce61e656c0739fe`
 
-Keep router defaults at `RETAIL_BANK_ROUTER_REVISION=unpublished-v4` until the
-router candidate is also promoted; the route diagnostics remain visible even when
-the v4 router is not active.
-
-Verify deployment by checking the diagnostic block in `poc/retail-bank-customer-service-poc/app.py`
-for:
-
-- `model_revision` showing the candidate revision
-- `router_revision` showing the active router revision
-- `classification` payload fields for each turn
-
-Do not change `RETAIL_BANK_ROUTER_REVISION` for a partially tested candidate.
+Verify deployment by checking the diagnostic block in
+`poc/retail-bank-customer-service-poc/app.py` for the exact model revision,
+router revision, CUDA-backed model passes, generated tool calls, and
+capability/relation router payload fields for each turn.

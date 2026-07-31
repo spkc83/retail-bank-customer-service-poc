@@ -14,6 +14,8 @@ def test_zero_gpu_runtime_exposes_generic_generation_and_exact_counting_contract
     sys.modules.pop("zero_gpu_runtime", None)
     runtime = importlib.import_module("zero_gpu_runtime")
 
+    assert runtime.MODEL_ID == "spkc83/retail-bank-servicing-agent-9b"
+    assert runtime.MODEL_REVISION == "1d56824995aa1adecfe20f62ca42fb1c0c443817"
     assert not hasattr(runtime, "BANK")
     assert not hasattr(runtime.generate_text, "_zero_gpu_config")
     assert runtime.runtime_metadata() == {

@@ -252,6 +252,12 @@ def test_remote_model_load_has_no_blanket_quantized_fallback() -> None:
     assert "if configs[\"quantization\"] is not None" in remote_body
 
 
+def test_hub_upload_ignores_hidden_checkpoint_temp_files() -> None:
+    source = WORKER_PATH.read_text(encoding="utf-8")
+
+    assert 'ignore_patterns=[".*", "**/.*"]' in source
+
+
 def test_poc_serves_the_exact_sft_tool_manifest() -> None:
     serving_manifest = tuple(MODEL_TOOLS)
 

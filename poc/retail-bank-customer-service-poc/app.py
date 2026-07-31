@@ -182,6 +182,13 @@ def run_model_turn(
             {"role": "assistant", "content": MODEL_FAILURE_RESPONSE},
         ]
         enabled = gr.update(interactive=True)
+        failure_diagnostics = _render_diagnostics(
+            route,
+            error.tool_calls,
+            error.tool_results,
+            "9B second-pass failure",
+            error.model_passes,
+        )
         return (
             gr.update(value="", interactive=True),
             _visible_from_conversation(failed_conversation),
@@ -191,16 +198,8 @@ def run_model_turn(
                 "The 9B model failed after executing the tool calls shown in "
                 "diagnostics. No CPU-authored servicing answer was substituted."
             ),
-            (
-                f"{_render_diagnostics(
-                    route,
-                    error.tool_calls,
-                    error.tool_results,
-                    '9B second-pass failure',
-                    error.model_passes,
-                )}\n\n"
-                f"Failure type: `{type(error.__cause__).__name__}`"
-            ),
+            f"{failure_diagnostics}\n\n"
+            f"Failure type: `{type(error.__cause__).__name__}`",
             enabled,
             enabled,
             enabled,
@@ -316,6 +315,18 @@ def route_query(
         return router.classify(message, history)
     except (RuntimeError, TypeError, ValueError) as error:
         return _classifier_error_route(type(error).__name__)
+
+
+@spaces.GPU(size="large", duration=30)
+def run_zero_gpu_probe() -> dict[str, str | bool]:
+    """Prove that a ZeroGPU worker entered user code with the packed model."""
+    return {
+        "probe_entered": True,
+        "model_id": MODEL_ID,
+        "model_revision": MODEL_REVISION,
+        "router_revision": ROUTER_REVISION,
+        **runtime_metadata(),
+    }
 
 
 def load_profile(request: gr.Request) -> tuple[str, str, str, str]:
@@ -592,6 +603,7 @@ def _render_diagnostics(
         f"- Generation calls: `{len(model_passes)}`\n"
         f"- Model: `{MODEL_ID}`\n"
         f"- Exact model revision: `{MODEL_REVISION}`\n"
+        f"- Exact router revision: `{ROUTER_REVISION}`\n"
         f"- Space commit: `{space_commit}`\n"
         f"- Registered execution boundary: `ZeroGPU large`\n"
         f"- Visible response SHA-256: `{visible_hash}`"
@@ -667,6 +679,14 @@ with gr.Blocks(
         outputs=route_output,
         api_name="route",
         queue=False,
+    )
+    probe_output = gr.JSON(visible=False)
+    probe_button = gr.Button(visible=False)
+    probe_button.click(
+        run_zero_gpu_probe,
+        outputs=probe_output,
+        api_name="zero_gpu_probe",
+        queue=True,
     )
     model_event = gr.on(
         triggers=[message_box.submit, send_button.click],

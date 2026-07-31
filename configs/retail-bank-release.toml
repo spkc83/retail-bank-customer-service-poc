@@ -1,0 +1,31 @@
+[source]
+repository = "https://github.com/spkc83/retail-bank-servicing"
+release_commit = "475dc2b563ef87fa0c9aa597b0b0465d56d2ee0f"
+
+[granite_base]
+model_repo = "ibm-granite/granite-4.1-8b"
+model_revision = "1504002f650e656a0a3789d99574df12e3e94ed0"
+dataset_repo = "spkc83/retail-bank-agent-sft"
+dataset_revision = "183e7e1ed1aba9c3d7155e7b83b64dc854935055"
+output_repo = "spkc83/retail-bank-agent-9b"
+weights_revision = "085df3d089cfadd77424b548542da0390a54a23e"
+
+[granite_alignment]
+dataset_repo = "spkc83/retail-bank-servicing-alignment-sft"
+training_dataset_revision = "fea8aa1cda716954eb7322325e2be25c9f570ea3"
+scoring_dataset_revision = "0ce32f9c7a3edff227005e5b89b089947b87625a"
+output_repo = "spkc83/retail-bank-servicing-agent-9b"
+weights_revision = "1d56824995aa1adecfe20f62ca42fb1c0c443817"
+evaluation_revision = "214fc0d9e143e4fa7b658de1993113562b90958a"
+training_job = "spkc83/6a6ca6276b79c09949c1d6cb"
+evaluation_job = "spkc83/6a6caac1a00abefd4b289b14"
+
+[router]
+dataset_repo = "spkc83/retail-bank-conversation-router-data"
+dataset_revision = "e9a64a2e7f2b622d5412c15eac4618ceca2150da"
+model_repo = "spkc83/retail-bank-conversation-router"
+model_revision = "9e090c0fa21cebbaa03a431a7ce61e656c0739fe"
+
+[space]
+repo = "spkc83/retail-bank-servicing-poc"
+rollback_revision = "ccb9a61dc17993cb5e8036df26a645ee08974c60"

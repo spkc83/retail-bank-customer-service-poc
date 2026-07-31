@@ -2,14 +2,9 @@
 
 This page explains the active authenticated Gradio POC in
 [`poc/retail-bank-customer-service-poc/`](../poc/retail-bank-customer-service-poc/).
-It documents the current Granite 9B model path, the CPU dual-head router, the
-model-owned tool loop, session state, diagnostics, local tests, and the Space
-deployment surface.
-
-This chapter describes the public v1 Space. Candidate branch behavior and its
-non-loadable pre-release router sentinel are documented in
-[Conversation Router v4](09-conversation-router-v4.md); the public Space is
-unchanged until that candidate is published and verified.
+It documents the current Granite 9B model path, the CPU history-aware router,
+the model-owned tool loop, session state, diagnostics, local tests, and the
+Space deployment surface.
 
 Everything in the POC is synthetic. It has no connection to a real bank, cannot
 access real accounts, and must not receive credentials, full account numbers,
@@ -22,11 +17,12 @@ as `main` where these revisions are required.
 
 | Role | Repository | Immutable revision | Evidence |
 | --- | --- | --- | --- |
-| Generative agent | `spkc83/retail-bank-agent-9b` | `085df3d089cfadd77424b548542da0390a54a23e` | [`zero_gpu_runtime.py`](../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py), [`model card`](../model_cards/retail-bank-agent-9b.md) |
+| Generative agent | `spkc83/retail-bank-servicing-agent-9b` | `1d56824995aa1adecfe20f62ca42fb1c0c443817` | [`zero_gpu_runtime.py`](../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py), [`model card`](../model_cards/retail-bank-agent-9b.md) |
 | Agent base | `ibm-granite/granite-4.1-8b` | `1504002f650e656a0a3789d99574df12e3e94ed0` | [`configs/banking-tool-sft-granite.toml`](../configs/banking-tool-sft-granite.toml), [`model card`](../model_cards/retail-bank-agent-9b.md) |
 | Tool-use SFT dataset | `spkc83/retail-bank-agent-sft` | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` | [`data card`](../data_cards/retail-bank-agent-sft.md), [`model card`](../model_cards/retail-bank-agent-9b.md) |
-| Dual-head router | `spkc83/retail-bank-domain-intent-router` | `136ee159d19cda7f585dd122907bbeb1ef4ec4db` | [`router.py`](../poc/retail-bank-customer-service-poc/router.py), [`router card`](../model_cards/retail-bank-domain-intent-router.md) |
-| Router dataset | `spkc83/retail-bank-router-training-data` | `54ff186a03501d76dc643dbed3d82729267ce811` | [`train_dual_head_router.py`](../scripts/retail_bank/train_dual_head_router.py), [`router card`](../model_cards/retail-bank-domain-intent-router.md) |
+| Servicing-remediation SFT dataset | `spkc83/retail-bank-servicing-alignment-sft` | `0ce32f9c7a3edff227005e5b89b089947b87625a` | [`data card`](../data_cards/retail-bank-servicing-alignment-sft.md), [`model card`](../model_cards/retail-bank-agent-9b.md) |
+| History-aware router | `spkc83/retail-bank-conversation-router` | `9e090c0fa21cebbaa03a431a7ce61e656c0739fe` | [`router.py`](../poc/retail-bank-customer-service-poc/router.py), [`router card`](../model_cards/retail-bank-domain-intent-router.md) |
+| Router dataset | `spkc83/retail-bank-conversation-router-data` | `e9a64a2e7f2b622d5412c15eac4618ceca2150da` | [`train_conversation_router.py`](../scripts/retail_bank/train_conversation_router.py), [`router card`](../model_cards/retail-bank-domain-intent-router.md) |
 
 For the complete artifact ledger, see
 [`docs/reference/artifacts.md`](reference/artifacts.md).
@@ -38,7 +34,7 @@ At a high level, one authenticated chat turn follows this path:
 
 ```text
 Gradio authenticated user
-  -> CPU dual-head router
+  -> CPU history-aware router
   -> high-confidence OOD returns the governed stock response
   -> in-domain or uncertain turn enters one ZeroGPU event
   -> Granite 9B either answers directly or emits tagged-JSON tool calls
@@ -75,33 +71,20 @@ Gradio session hash. It is not a bank identity provider.
 
 ## Router Loading and Thresholds
 
-### Deployed public v1
-
-The deployed public Space loads `spkc83/retail-bank-domain-intent-router` at
-revision `136ee159d19cda7f585dd122907bbeb1ef4ec4db`. Its implementation contract
-is retained in
-[`banking_dual_head_router.py`](../src/hello_slm/banking_dual_head_router.py)
-and its immutable configuration is recorded in the
-[released model card](../model_cards/retail-bank-domain-intent-router.md).
+The Space loads `spkc83/retail-bank-conversation-router` at revision
+`9e090c0fa21cebbaa03a431a7ce61e656c0739fe`.
+[`router.py`](../poc/retail-bank-customer-service-poc/router.py) verifies the
+artifact manifest, loads the shared DistilBERT encoder plus domain,
+servicing-capability, and conversation-relation heads, and uses the artifact's
+calibrated policy.
 
 The released artifact uses these boundaries:
 
-- banking probability `< 0.165`: `out_of_domain`
+- banking probability `< 0.10` plus no relation rescue: `out_of_domain`
 - banking probability `>= 0.50`: `in_domain`
-- banking probability from `0.165` through `< 0.50`: `uncertain`
-
-Uncertain turns continue to the Granite 9B model. The top three Banking77
-intents are diagnostics only.
-
-### Current v4 branch
-
-The current branch's
-[`router.py`](../poc/retail-bank-customer-service-poc/router.py) instead expects
-the unpublished history-aware artifact described in
-[Conversation Router v4](09-conversation-router-v4.md). It verifies an
-immutable revision, loads the shared encoder plus domain, servicing-capability,
-and conversation-relation heads, and uses the artifact's calibrated policy.
-The default `unpublished-v4` revision is intentionally non-loadable.
+- banking probability from `0.10` through `< 0.50`, or relation rescue:
+  `uncertain`
+- relation rescue boundary: `0.40`
 
 Capability and relation outputs are diagnostics only. An unavailable router in
 explicit local test mode produces an `uncertain` test route; a classifier
@@ -114,8 +97,8 @@ ZeroGPU model loading is isolated in
 [`zero_gpu_runtime.py`](../poc/retail-bank-customer-service-poc/zero_gpu_runtime.py).
 By default it loads:
 
-- model ID: `spkc83/retail-bank-agent-9b`
-- model revision: `085df3d089cfadd77424b548542da0390a54a23e`
+- model ID: `spkc83/retail-bank-servicing-agent-9b`
+- model revision: `1d56824995aa1adecfe20f62ca42fb1c0c443817`
 - dtype: `torch.float16`
 - device: CUDA
 - generation: deterministic, `do_sample=False`
@@ -123,8 +106,8 @@ By default it loads:
 The model ID and revision can be overridden with:
 
 ```bash
-export RETAIL_BANK_MODEL_ID=spkc83/retail-bank-agent-9b
-export RETAIL_BANK_MODEL_REVISION=085df3d089cfadd77424b548542da0390a54a23e
+export RETAIL_BANK_MODEL_ID=spkc83/retail-bank-servicing-agent-9b
+export RETAIL_BANK_MODEL_REVISION=1d56824995aa1adecfe20f62ca42fb1c0c443817
 ```
 
 For local tests that should not load the 9B model, set:
@@ -272,13 +255,10 @@ The current v4 branch panel shows:
 - `SPACE_COMMIT_SHA`, when provided by the Space runtime
 - visible response SHA-256
 
-The deployed v1 Space shows Banking77 intent candidates in the corresponding
-diagnostic slot until it is intentionally upgraded to the v4 artifact.
-
 A successful live model turn should show:
 
-- `Model: spkc83/retail-bank-agent-9b`
-- `Exact model revision: 085df3d089cfadd77424b548542da0390a54a23e`
+- `Model: spkc83/retail-bank-servicing-agent-9b`
+- `Exact model revision: 1d56824995aa1adecfe20f62ca42fb1c0c443817`
 - `Registered execution boundary: ZeroGPU large`
 - a CUDA runtime device for model passes
 
@@ -341,7 +321,21 @@ The Space app files are in
 Deploying to the public Space is an external production action. Do not run a
 deployment command without explicit authorization for that deployment. Before a
 deployment, verify the local POC tests and set the Space secret `DEMO_AUTH_JSON`
-to the exact two demo users.
+to the exact two demo users. The canonical deploy stage uploads only allowlisted
+application files, persists the exact model and router revisions as Space
+variables, records the returned Space commit in `SPACE_COMMIT_SHA`, restarts the
+Space, and waits for the runtime:
+
+```bash
+PYTHONPATH=src python scripts/retail_bank/run_release_pipeline.py \
+  --stage deploy \
+  --execute \
+  --allow-publish
+```
+
+The deploy helper does not request deletion of existing Hub files. Any cleanup
+of an accidental remote cache is a separate destructive operation and requires
+separate authorization.
 
 The active public Space is:
 
@@ -349,6 +343,8 @@ The active public Space is:
 https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc
 ```
 
-After deployment, run live read, write, multi-tool, clarification, FAQ, OOD, and
+After deployment, call the authenticated `/zero_gpu_probe` endpoint first. It
+must enter application code and report the exact model/router revisions plus a
+CUDA device. Then run live read, write, multi-tool, clarification, FAQ, OOD, and
 multi-turn cases. The diagnostics panel must show the active model revision and
 CUDA-backed generation for model-handled turns.

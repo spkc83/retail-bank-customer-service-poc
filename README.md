@@ -1,53 +1,45 @@
-# Retail Bank Agent
+# Retail Bank Servicing Agent
 
-This repository contains one end-to-end experiment:
+This repository contains one canonical synthetic retail-bank conversational
+pipeline:
 
-- a PEFT-finetuned IBM Granite conversational agent with 8,791,592,960
-  parameters;
-- a DistilBERT dual-head classifier for banking-domain/OOD detection and
-  Banking77 intent diagnostics;
-- governed data generation, training, continuation, recovery, merge, and
-  frozen-evaluation code;
-- a public Gradio application that runs the Granite model on Hugging Face
-  ZeroGPU and executes model-generated calls against a synthetic bank.
+- IBM Granite 4.1 8B base-tool SFT from
+  `ibm-granite/granite-4.1-8b` revision
+  `1504002f650e656a0a3789d99574df12e3e94ed0`;
+- a second Granite servicing-remediation SFT stage added after observed
+  multi-turn conversation and tool-use failures in the POC;
+- a history-aware DistilBERT cross-encoder router with domain, servicing
+  capability, and conversation-relation heads;
+- exact frozen tool/final-response evaluation;
+- an authenticated Gradio/ZeroGPU POC backed by a synthetic SQLite bank.
 
 There are no real customers or banking connections. Every account, card,
 transaction, transfer, and service case is fictional.
 
-## Released system
+## Released Artifacts
 
 | Component | Public artifact | Immutable revision |
 |---|---|---|
-| Granite agent | [spkc83/retail-bank-agent-9b](https://huggingface.co/spkc83/retail-bank-agent-9b) | `085df3d089cfadd77424b548542da0390a54a23e` |
-| Tool-use SFT data | [spkc83/retail-bank-agent-sft](https://huggingface.co/datasets/spkc83/retail-bank-agent-sft) | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` |
-| Dual-head classifier | [spkc83/retail-bank-domain-intent-router](https://huggingface.co/spkc83/retail-bank-domain-intent-router) | `136ee159d19cda7f585dd122907bbeb1ef4ec4db` |
-| Classifier data | [spkc83/retail-bank-router-training-data](https://huggingface.co/datasets/spkc83/retail-bank-router-training-data) | `54ff186a03501d76dc643dbed3d82729267ce811` |
+| Granite servicing agent | [spkc83/retail-bank-servicing-agent-9b](https://huggingface.co/spkc83/retail-bank-servicing-agent-9b) | `1d56824995aa1adecfe20f62ca42fb1c0c443817` |
+| Stage-1 Granite tool-use checkpoint | [spkc83/retail-bank-agent-9b](https://huggingface.co/spkc83/retail-bank-agent-9b) | `085df3d089cfadd77424b548542da0390a54a23e` |
+| Initial tool-use SFT data | [spkc83/retail-bank-agent-sft](https://huggingface.co/datasets/spkc83/retail-bank-agent-sft) | `183e7e1ed1aba9c3d7155e7b83b64dc854935055` |
+| Servicing-remediation SFT data | [spkc83/retail-bank-servicing-alignment-sft](https://huggingface.co/datasets/spkc83/retail-bank-servicing-alignment-sft) | `0ce32f9c7a3edff227005e5b89b089947b87625a` |
+| Prompt-identical training data revision | [spkc83/retail-bank-servicing-alignment-sft](https://huggingface.co/datasets/spkc83/retail-bank-servicing-alignment-sft) | `fea8aa1cda716954eb7322325e2be25c9f570ea3` |
+| History-aware router | [spkc83/retail-bank-conversation-router](https://huggingface.co/spkc83/retail-bank-conversation-router) | `9e090c0fa21cebbaa03a431a7ce61e656c0739fe` |
+| Router data | [spkc83/retail-bank-conversation-router-data](https://huggingface.co/datasets/spkc83/retail-bank-conversation-router-data) | `e9a64a2e7f2b622d5412c15eac4618ceca2150da` |
 | ZeroGPU application | [retail-bank-servicing-poc](https://huggingface.co/spaces/spkc83/retail-bank-servicing-poc) | See the Space diagnostics panel |
 
-The standalone application source is also published at
+The released training and evaluation jobs used source revision
+`475dc2b563ef87fa0c9aa597b0b0465d56d2ee0f`; the canonical pipeline pins its
+current executable source in `configs/retail-bank-release.toml`. The standalone
+application source is published at
 [spkc83/retail-bank-servicing-poc](https://github.com/spkc83/retail-bank-servicing-poc).
 
-## V4 candidate
-
-Branch `feat/conversation-router-v4` replaces the current-only/heuristic
-classifier path with a history-aware cross-encoder candidate. It uses a domain
-head, coarse POC capability diagnostics, and independent conversation-relation
-labels. Its governed data and locally trained TITAN V artifact pass the
-held-out release gates. It will not replace the released router or Space
-revision until the artifact is explicitly published at an immutable revision
-and that revision is verified in the POC.
-
-The candidate also adds targeted Granite continuation-SFT data for natural
-multi-turn servicing, corrections, clarification answers, topic shifts, and
-grounded service-case details. See
-[Conversation Router v4](docs/09-conversation-router-v4.md) and
-[Granite Servicing Alignment v4](docs/10-servicing-alignment-v4.md).
-
-## Request flow
+## Request Flow
 
 ```text
 authenticated synthetic customer
-  -> CPU dual-head classifier
+  -> CPU history-aware router
      -> high-confidence OOD: fixed scope response
      -> in-domain or uncertain: Granite 8.79B on ZeroGPU
         -> direct conversational response, or
@@ -57,12 +49,14 @@ authenticated synthetic customer
            -> Granite-authored grounded response
 ```
 
-The intent head is diagnostic. Its predictions do not enter the generation
-prompt, select tools, or provide arguments. The model receives complete,
-token-budgeted interaction groups and owns conversation, clarification, tool
-selection, public arguments, and final wording.
+The router's domain decision and conversation-relation probabilities control
+whether a turn reaches Granite; capability predictions are diagnostics only.
+None of the classifier outputs enter the Granite prompt, select tools,
+authorize actions, or provide arguments. The model receives token-budgeted
+interaction groups and owns conversation, clarification, tool selection,
+public arguments, and final wording.
 
-## Start here
+## Start Here
 
 The documentation is ordered so a junior developer can reproduce the system
 without reading the implementation first:
@@ -71,16 +65,16 @@ without reading the implementation first:
 2. [Data generation](docs/02-data-generation.md)
 3. [Granite architecture and PEFT](docs/03-model-and-peft.md)
 4. [Training, continuation, and recovery](docs/04-training-and-recovery.md)
-5. [Dual-head router](docs/05-dual-head-router.md)
+5. [Conversation router](docs/05-dual-head-router.md)
 6. [Frozen evaluation](docs/06-evaluation.md)
 7. [Inference and ZeroGPU POC](docs/07-inference-and-poc.md)
 8. [End-to-end runbook](docs/08-end-to-end-runbook.md)
-9. [Conversation Router v4 candidate](docs/09-conversation-router-v4.md)
+9. [Conversation Router v4 release](docs/09-conversation-router-v4.md)
 10. [Granite Servicing Alignment v4](docs/10-servicing-alignment-v4.md)
 11. [Code/file map](docs/reference/file-map.md) and
    [artifact ledger](docs/reference/artifacts.md)
 
-## Local quick start
+## Local Quick Start
 
 Install the root development and training dependencies:
 
@@ -96,41 +90,38 @@ PYTHONPATH=src uv run python scripts/retail_bank/prepare_tool_sft_data.py \
   --pilot-count 120
 ```
 
-Regenerate the released dual-head classifier splits from checksum-pinned
-Banking77 and CLINC sources. The command fails if any released split digest
-changes:
-
-```bash
-PYTHONPATH=src uv run python scripts/retail_bank/prepare_dual_head_router_data.py
-```
-
-Generate the v4 history-aware classifier candidate data:
+Regenerate the released history-aware router splits:
 
 ```bash
 PYTHONPATH=src uv run python \
   scripts/retail_bank/prepare_conversation_router_data.py
 ```
 
-Generate the composite Granite servicing-alignment candidate:
+Regenerate the composite Granite servicing-remediation corpus:
 
 ```bash
 PYTHONPATH=src uv run python \
   scripts/retail_bank/prepare_servicing_alignment_data.py
 ```
 
-Train the v4 classifier locally without publishing:
+Train the router locally without publishing:
 
 ```bash
 PYTHONPATH=src uv run scripts/retail_bank/train_conversation_router.py
 ```
 
-Inspect the Granite training plan without allocating a GPU or submitting a
-job:
+Inspect the complete release plan without allocating a GPU, publishing, or
+submitting a job:
 
 ```bash
-PYTHONPATH=src uv run python scripts/retail_bank/cloud_train_tool_sft.py \
-  --manifest data/banking-v3-tool-sft/manifest.json
+PYTHONPATH=src uv run python scripts/retail_bank/run_release_pipeline.py \
+  --stage all
 ```
+
+The canonical entry point contains data preparation, the two sequential Granite
+SFT stages, router training, frozen evaluation, and deployment. Execution is
+deliberately one stage at a time so each newly published immutable revision can
+be captured before it is passed downstream.
 
 Run the local quality gates:
 
@@ -144,39 +135,43 @@ uv lock --check
 The paid Hugging Face Jobs commands, checkpoint retention policy, and recovery
 paths are documented in
 [training and recovery](docs/04-training-and-recovery.md). They are
-intentionally separate from the safe local quick start.
+intentionally separate from safe local preparation.
 
-Published Hub repositories are the release source of truth. The private
-`jobs-artifacts` bucket is a bounded training workspace, not a second model
-registry: only the selected recovery checkpoint is retained after a release.
+## Release Facts
 
-## Release facts
+The final servicing-remediation training job was
+`spkc83/6a6ca6276b79c09949c1d6cb`. It ran for about 18 minutes 59 seconds on the
+authorized paid GPU path at an estimated cost of about `$0.87`. The reported
+training loss was `0.0069123295`, evaluation loss was `0.0002181597`, and token
+accuracy was `0.999976121`.
 
-The generative corpus contains 9,000 self-authored synthetic conversations:
-6,304 train, 1,349 validation, and 1,347 frozen test. It covers all nine public
-mock-bank tools, success and error results, clarification, FAQ, OOD,
-hard-negative private-field requests, multi-turn context, and dependent
-multi-tool sequences.
+The exact frozen evaluation job was `spkc83/6a6caac1a00abefd4b289b14`. It
+evaluated 1,374 records and passed:
 
-The released model is a merged FP16 adaptation of
-`ibm-granite/granite-4.1-8b` at base revision
-`1504002f650e656a0a3789d99574df12e3e94ed0`. Training uses BF16 LoRA with rank
-32, alpha 64, dropout 0.05, a 2,048-token maximum sequence, and attention plus
-MLP projection targets. The retained adapter is published separately under the
-model repository's `adapter/` directory.
+- tool names and arguments: `796/796`;
+- executable tool trajectories: `700/700`;
+- dependent multi-tool sequences: `96/96`;
+- clarifications: `63/63`;
+- banking FAQ answers: `258/258`;
+- OOD paths: `35/35`;
+- grounded factual responses: `1,141/1,141`;
+- malformed calls, unsupported/private arguments, credential requests,
+  in-domain false refusals, and OOD false accepts: `0`.
 
-The frozen 1,347-record evaluation passed 774/774 tool names and arguments,
-678/678 executable trajectories, 96/96 dependent multi-tool sequences, 63/63
-clarifications, 258/258 FAQs, 30/30 OOD paths, and 1,119/1,119 grounded facts.
+The corrected dataset revision `0ce32f9c7a3edff227005e5b89b089947b87625a` is the
+published data identity. The training run used
+`fea8aa1cda716954eb7322325e2be25c9f570ea3`; the rescore is valid because the
+corrected rows are prompt-identical for generation and scoring. It is a rescore
+of equivalent prompts, not a second generation run.
 
-## Repository map
+## Repository Map
 
 ```text
 configs/        Granite PEFT configuration
-data/sources/   pinned classifier source and release-digest lock
-data_cards/     published dataset-card sources
+data/sources/   pinned source and release-digest locks
+data_cards/     dataset-card sources
 docs/           canonical implementation and reproduction guide
-model_cards/    published model-card sources
+model_cards/    model-card sources
 poc/            standalone authenticated Gradio/ZeroGPU application
 scripts/        data, training, recovery, evaluation, and Hub job entry points
 src/hello_slm/  reusable corpus, tool-wire, evaluator, and router modules
