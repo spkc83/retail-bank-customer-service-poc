@@ -23,6 +23,7 @@ names such as `main` are rejected by the job entry points.
 | Corrected servicing dataset | `spkc83/retail-bank-servicing-alignment-sft` at `0ce32f9c7a3edff227005e5b89b089947b87625a` | [`data card`](../data_cards/retail-bank-servicing-alignment-sft.md) |
 | Prompt-identical training dataset | `spkc83/retail-bank-servicing-alignment-sft` at `fea8aa1cda716954eb7322325e2be25c9f570ea3` | [`data card`](../data_cards/retail-bank-servicing-alignment-sft.md) |
 | Source revision used for release | `475dc2b563ef87fa0c9aa597b0b0465d56d2ee0f` | [`artifact ledger`](reference/artifacts.md) |
+| Canonical pipeline bootstrap source | `1da0bdc1cdcc5a0e1c5ce137c32384d927c1948b` | [`release config`](../configs/retail-bank-release.toml) |
 | Servicing-remediation training job | `spkc83/6a6ca6276b79c09949c1d6cb` | [`model card`](../model_cards/retail-bank-agent-9b.md) |
 | Exact evaluation job | `spkc83/6a6caac1a00abefd4b289b14` | [`model card`](../model_cards/retail-bank-agent-9b.md) |
 

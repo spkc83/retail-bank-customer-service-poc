@@ -1,6 +1,6 @@
 [source]
 repository = "https://github.com/spkc83/retail-bank-servicing"
-release_commit = "475dc2b563ef87fa0c9aa597b0b0465d56d2ee0f"
+release_commit = "1da0bdc1cdcc5a0e1c5ce137c32384d927c1948b"
 
 [granite_base]
 model_repo = "ibm-granite/granite-4.1-8b"
